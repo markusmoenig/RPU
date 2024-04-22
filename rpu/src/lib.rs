@@ -1,11 +1,13 @@
 pub mod ast;
 pub mod parser;
+pub mod print;
 pub mod rpu;
 pub mod scanner;
 
 pub mod prelude {
     pub use crate::ast::*;
     pub use crate::parser::*;
+    pub use crate::print::*;
     pub use crate::rpu::RPU;
     pub use crate::scanner::*;
 }
