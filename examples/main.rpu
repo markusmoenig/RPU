@@ -1,1 +1,6 @@
-2 + 3;
+int first = 2 * (2 + 1);
+first = first * 2;
+{
+    int second = 5;
+}
+first;

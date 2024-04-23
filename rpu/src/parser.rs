@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use wasmer::{imports, Instance, Module, Store, Value};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -27,7 +28,7 @@ impl Parser {
         let mut statements = vec![];
 
         while !self.is_at_end() {
-            match self.statement() {
+            match self.declaration() {
                 Ok(stmt) => {
                     statements.push(Box::new(stmt));
                 }
@@ -38,15 +39,67 @@ impl Parser {
             }
         }
 
+        let mut visitor = InterpretVisitor::new();
+        let mut ctx = Context::default();
+
         for statement in statements {
-            let mut visitor = PrintVisitor;
-            statement.accept(&mut visitor);
+            let _rc = statement.accept(&mut visitor, &mut ctx);
+
+            // let wat = ctx.gen_wat();
+            // let mut store = Store::default();
+            // let module_rc = Module::new(&store, &wat);
+            // match module_rc {
+            //     Ok(module) => {
+            //         let import_object = imports! {};
+            //         if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
+            //             if let Ok(main) = instance.exports.get_function("main") {
+            //                 let rc = main.call(&mut store, &[Value::I64(42)]);
+            //                 println!("rc {:?}", rc);
+            //                 //println!("Result: {:?}", result);
+            //                 //}
+            //             }
+            //         }
+            //     }
+            //     Err(err) => {
+            //         println!("Error: {:?}", err.to_string());
+            //     }
+            // }
+            //println!("{:?}", rc);
         }
+    }
+
+    fn declaration(&mut self) -> Result<Stmt, String> {
+        if self.match_token(vec![TokenType::Int]) {
+            self.var_declaration()
+        } else {
+            self.statement()
+        }
+    }
+
+    fn var_declaration(&mut self) -> Result<Stmt, String> {
+        let name = self.consume(TokenType::Identifier, "Expect variable name.")?;
+
+        let mut initializer = None;
+        if self.match_token(vec![TokenType::Equal]) {
+            initializer = Some(self.expression()?);
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration.",
+        )?;
+
+        Ok(Stmt::VarDeclaration(
+            name.lexeme,
+            Box::new(initializer.unwrap()),
+        ))
     }
 
     fn statement(&mut self) -> Result<Stmt, String> {
         if self.match_token(vec![TokenType::Print]) {
             self.print_statement()
+        } else if self.match_token(vec![TokenType::LeftBrace]) {
+            self.block()
         } else {
             self.expression_statement()
         }
@@ -64,8 +117,48 @@ impl Parser {
         Ok(Stmt::Expression(Box::new(value)))
     }
 
+    fn block(&mut self) -> Result<Stmt, String> {
+        let mut statements = vec![];
+
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            match self.declaration() {
+                Ok(stmt) => {
+                    statements.push(Box::new(stmt));
+                }
+                Err(error) => {
+                    println!("{}", error);
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block.")?;
+
+        Ok(Stmt::Block(statements))
+    }
+
     fn expression(&mut self) -> Result<Expr, String> {
-        self.equality()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Result<Expr, String> {
+        let expr = self.equality()?;
+
+        if self.match_token(vec![TokenType::Equal]) {
+            let equals = self.previous().unwrap();
+            let value = self.assignment()?;
+
+            if let Expr::Variable(name) = expr {
+                return Ok(Expr::VariableAssignment(name, Box::new(value)));
+            }
+
+            return Err(format!(
+                "Invalid assignment target: {:?} at line {}.",
+                equals, equals.line
+            ));
+        }
+
+        Ok(expr)
     }
 
     fn equality(&mut self) -> Result<Expr, String> {
@@ -155,16 +248,16 @@ impl Parser {
         match token.kind {
             TokenType::False => {
                 self.advance();
-                Ok(Expr::Value(Value::Boolean(false)))
+                Ok(Expr::Value(ASTValue::Boolean(false)))
             }
             TokenType::True => {
                 self.advance();
-                Ok(Expr::Value(Value::Boolean(true)))
+                Ok(Expr::Value(ASTValue::Boolean(true)))
             }
             TokenType::Number => {
                 self.advance();
                 if let Ok(number) = token.lexeme.parse::<i64>() {
-                    Ok(Expr::Value(Value::I64(number)))
+                    Ok(Expr::Value(ASTValue::Int(number)))
                 } else {
                     Err("Invalid Number".to_string())
                 }
@@ -178,7 +271,14 @@ impl Parser {
                     Err("Expected ')' after expression".to_string())
                 }
             }
-            _ => Err(format!("Unknown Primary {:?}", token.kind)),
+            TokenType::Identifier => {
+                self.advance();
+                Ok(Expr::Variable(token.lexeme))
+            }
+            _ => Err(format!(
+                "Unknown identifier {:?} at line {}.",
+                token.lexeme, token.line
+            )),
         }
     }
 

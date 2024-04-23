@@ -53,7 +53,7 @@ pub enum TokenType {
     Super,
     This,
     True,
-    Let,
+    Int,
     While,
     CodeBlock,
 
@@ -106,7 +106,7 @@ impl Scanner {
         keywords.insert("super", TokenType::Super);
         keywords.insert("this", TokenType::This);
         keywords.insert("true", TokenType::True);
-        keywords.insert("let", TokenType::Let);
+        keywords.insert("int", TokenType::Int);
         keywords.insert("while", TokenType::While);
 
         Scanner {

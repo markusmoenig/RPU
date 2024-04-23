@@ -5,5 +5,5 @@ fn main() {
     path_to_main.push("examples/main.rpu");
 
     let mut rpu = RPU::new();
-    let rc = rpu.compile_from_path(path_to_main);
+    let _rc = rpu.compile_from_path(path_to_main);
 }

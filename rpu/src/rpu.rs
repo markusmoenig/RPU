@@ -17,7 +17,7 @@ impl RPU {
     pub fn compile_from_path(&mut self, path: PathBuf) -> Result<(), String> {
         if let Ok(main) = std::fs::read_to_string(path) {
             //println!("{}", main);
-            let mut scanner = Scanner::new(main);
+            let scanner = Scanner::new(main);
             let mut parser = Parser::new();
             parser.parse(scanner);
         }
