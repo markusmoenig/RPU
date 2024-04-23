@@ -1,9 +1,10 @@
 use crate::prelude::*;
-use wasmer::{imports, Instance, Module, Store, Value};
+//use wasmer::{imports, Instance, Module, Store, Value};
 
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    current_line: usize,
 }
 
 impl Default for Parser {
@@ -17,6 +18,7 @@ impl Parser {
         Self {
             tokens: Vec::new(),
             current: 0,
+            current_line: 0,
         }
     }
 
@@ -78,6 +80,7 @@ impl Parser {
 
     fn var_declaration(&mut self) -> Result<Stmt, String> {
         let name = self.consume(TokenType::Identifier, "Expect variable name.")?;
+        let line = self.current_line;
 
         let mut initializer = None;
         if self.match_token(vec![TokenType::Equal]) {
@@ -92,6 +95,7 @@ impl Parser {
         Ok(Stmt::VarDeclaration(
             name.lexeme,
             Box::new(initializer.unwrap()),
+            self.create_loc(line),
         ))
     }
 
@@ -107,14 +111,16 @@ impl Parser {
 
     fn print_statement(&mut self) -> Result<Stmt, String> {
         let value = self.expression()?;
+        let line = self.current_line;
         self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
-        Ok(Stmt::Print(Box::new(value)))
+        Ok(Stmt::Print(Box::new(value), self.create_loc(line)))
     }
 
     fn expression_statement(&mut self) -> Result<Stmt, String> {
         let value = self.expression()?;
+        let line = self.current_line;
         self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
-        Ok(Stmt::Expression(Box::new(value)))
+        Ok(Stmt::Expression(Box::new(value), self.create_loc(line)))
     }
 
     fn block(&mut self) -> Result<Stmt, String> {
@@ -132,9 +138,10 @@ impl Parser {
             }
         }
 
+        let line = self.current_line;
         self.consume(TokenType::RightBrace, "Expect '}' after block.")?;
 
-        Ok(Stmt::Block(statements))
+        Ok(Stmt::Block(statements, self.create_loc(line)))
     }
 
     fn expression(&mut self) -> Result<Expr, String> {
@@ -148,8 +155,12 @@ impl Parser {
             let equals = self.previous().unwrap();
             let value = self.assignment()?;
 
-            if let Expr::Variable(name) = expr {
-                return Ok(Expr::VariableAssignment(name, Box::new(value)));
+            if let Expr::Variable(name, _loc) = expr {
+                return Ok(Expr::VariableAssignment(
+                    name,
+                    Box::new(value),
+                    self.create_loc(equals.line),
+                ));
             }
 
             return Err(format!(
@@ -171,6 +182,7 @@ impl Parser {
                 Box::new(expr),
                 Self::operator_to_equality(operator.kind),
                 Box::new(right),
+                self.create_loc(operator.line),
             );
         }
 
@@ -192,6 +204,7 @@ impl Parser {
                 Box::new(expr),
                 Self::operator_to_comparison(operator.kind),
                 Box::new(right),
+                self.create_loc(operator.line),
             );
         }
 
@@ -208,6 +221,7 @@ impl Parser {
                 Box::new(expr),
                 Self::operator_to_binary(operator.kind),
                 Box::new(right),
+                self.create_loc(operator.line),
             );
         }
 
@@ -224,6 +238,7 @@ impl Parser {
                 Box::new(expr),
                 Self::operator_to_binary(operator.kind),
                 Box::new(right),
+                self.create_loc(operator.line),
             );
         }
 
@@ -237,6 +252,7 @@ impl Parser {
             return Ok(Expr::Unary(
                 Self::operator_to_unary(operator.kind),
                 Box::new(right),
+                self.create_loc(operator.line),
             ));
         }
 
@@ -248,16 +264,25 @@ impl Parser {
         match token.kind {
             TokenType::False => {
                 self.advance();
-                Ok(Expr::Value(ASTValue::Boolean(false)))
+                Ok(Expr::Value(
+                    ASTValue::Boolean(false),
+                    self.create_loc(token.line),
+                ))
             }
             TokenType::True => {
                 self.advance();
-                Ok(Expr::Value(ASTValue::Boolean(true)))
+                Ok(Expr::Value(
+                    ASTValue::Boolean(true),
+                    self.create_loc(token.line),
+                ))
             }
             TokenType::Number => {
                 self.advance();
                 if let Ok(number) = token.lexeme.parse::<i64>() {
-                    Ok(Expr::Value(ASTValue::Int(number)))
+                    Ok(Expr::Value(
+                        ASTValue::Int(number),
+                        self.create_loc(token.line),
+                    ))
                 } else {
                     Err("Invalid Number".to_string())
                 }
@@ -266,14 +291,14 @@ impl Parser {
                 self.advance();
                 let expr = self.expression()?;
                 if self.match_token(vec![TokenType::RightParen]) {
-                    Ok(Expr::Grouping(Box::new(expr)))
+                    Ok(Expr::Grouping(Box::new(expr), self.create_loc(token.line)))
                 } else {
                     Err("Expected ')' after expression".to_string())
                 }
             }
             TokenType::Identifier => {
                 self.advance();
-                Ok(Expr::Variable(token.lexeme))
+                Ok(Expr::Variable(token.lexeme, self.create_loc(token.line)))
             }
             _ => Err(format!(
                 "Unknown identifier {:?} at line {}.",
@@ -320,6 +345,7 @@ impl Parser {
 
     fn advance(&mut self) -> Option<Token> {
         if !self.is_at_end() {
+            self.current_line = self.tokens[self.current].line;
             self.current += 1;
         }
         self.previous()
@@ -382,6 +408,14 @@ impl Parser {
             TokenType::BangEqual => EqualityOperator::NotEqual,
             TokenType::EqualEqual => EqualityOperator::Equal,
             _ => unreachable!(),
+        }
+    }
+
+    /// Create a location for the given line number.
+    fn create_loc(&self, line: usize) -> Location {
+        Location {
+            file: "main".to_string(),
+            line,
         }
     }
 }
