@@ -6,8 +6,6 @@ pub struct Context {
     pub verbose: bool,
     ///
     pub wat: String,
-    ///
-    pub error: Option<String>,
 }
 
 impl Default for Context {
@@ -21,7 +19,6 @@ impl Context {
         Self {
             verbose: true,
             wat: String::new(),
-            error: None,
         }
     }
 

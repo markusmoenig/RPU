@@ -11,12 +11,17 @@ impl Visitor for CompileVisitor {
         Self {}
     }
 
-    fn visit_print(&mut self, expression: &Expr, _loc: &Location, ctx: &mut Context) -> ASTValue {
+    fn visit_print(
+        &mut self,
+        expression: &Expr,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
         print!("-- Print ");
         expression.accept(self, ctx);
         println!(" --");
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_block(
@@ -24,8 +29,8 @@ impl Visitor for CompileVisitor {
         _list: &[Box<Stmt>],
         _loc: &Location,
         _ctx: &mut Context,
-    ) -> ASTValue {
-        ASTValue::None
+    ) -> Result<ASTValue, String> {
+        Ok(ASTValue::None)
     }
 
     fn visit_expression(
@@ -33,7 +38,7 @@ impl Visitor for CompileVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         let e = expression.accept(self, ctx);
         if ctx.verbose {
             //println!("E {:?}", e);
@@ -47,11 +52,16 @@ impl Visitor for CompileVisitor {
         _expression: &Expr,
         _loc: &Location,
         _ctx: &mut Context,
-    ) -> ASTValue {
-        ASTValue::None
+    ) -> Result<ASTValue, String> {
+        Ok(ASTValue::None)
     }
 
-    fn visit_value(&mut self, value: ASTValue, _loc: &Location, ctx: &mut Context) -> ASTValue {
+    fn visit_value(
+        &mut self,
+        value: ASTValue,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
         let instr = match value {
             ASTValue::Int(i) => format!("(i64.const {})", i),
             ASTValue::Boolean(f) => format!("(f64.const {})", f),
@@ -63,7 +73,7 @@ impl Visitor for CompileVisitor {
         }
 
         ctx.wat.push_str(&format!("{}\n", instr));
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_unary(
@@ -72,7 +82,7 @@ impl Visitor for CompileVisitor {
         expr: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         print!("-- Unary ");
         expr.accept(self, ctx);
         match op {
@@ -81,7 +91,7 @@ impl Visitor for CompileVisitor {
         }
         println!(" --");
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_equality(
@@ -91,17 +101,17 @@ impl Visitor for CompileVisitor {
         right: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         print!("-- Equality ");
         left.accept(self, ctx);
         match op {
             EqualityOperator::NotEqual => print!(" != "),
             EqualityOperator::Equal => print!(" == "),
         }
-        right.accept(self, ctx);
+        right.accept(self, ctx)?;
         println!(" --");
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_comparison(
@@ -111,19 +121,19 @@ impl Visitor for CompileVisitor {
         right: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         print!("-- Comparison ");
-        left.accept(self, ctx);
+        left.accept(self, ctx)?;
         match op {
             ComparisonOperator::Greater => print!(" > "),
             ComparisonOperator::GreaterEqual => print!(" >= "),
             ComparisonOperator::Less => print!(" < "),
             ComparisonOperator::LessEqual => print!(" <= "),
         }
-        right.accept(self, ctx);
+        right.accept(self, ctx)?;
         println!(" --");
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_binary(
@@ -133,9 +143,9 @@ impl Visitor for CompileVisitor {
         right: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
-        _ = left.accept(self, ctx);
-        _ = right.accept(self, ctx);
+    ) -> Result<ASTValue, String> {
+        _ = left.accept(self, ctx)?;
+        _ = right.accept(self, ctx)?;
 
         let instr = match op {
             BinaryOperator::Add => "i64.add",
@@ -150,7 +160,7 @@ impl Visitor for CompileVisitor {
 
         ctx.wat.push_str(&format!("{}\n", instr));
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_grouping(
@@ -158,12 +168,17 @@ impl Visitor for CompileVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         expression.accept(self, ctx)
     }
 
-    fn visit_variable(&mut self, _name: String, _loc: &Location, _ctx: &mut Context) -> ASTValue {
-        ASTValue::None
+    fn visit_variable(
+        &mut self,
+        _name: String,
+        _loc: &Location,
+        _ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        Ok(ASTValue::None)
     }
 
     fn visit_variable_assignment(
@@ -172,7 +187,7 @@ impl Visitor for CompileVisitor {
         _expression: &Expr,
         _loc: &Location,
         _ctx: &mut Context,
-    ) -> ASTValue {
-        ASTValue::None
+    ) -> Result<ASTValue, String> {
+        Ok(ASTValue::None)
     }
 }

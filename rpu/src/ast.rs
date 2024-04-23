@@ -89,16 +89,26 @@ pub trait Visitor {
     where
         Self: Sized;
 
-    fn visit_print(&mut self, expression: &Expr, loc: &Location, ctx: &mut Context) -> ASTValue;
+    fn visit_print(
+        &mut self,
+        expression: &Expr,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
 
-    fn visit_block(&mut self, list: &[Box<Stmt>], loc: &Location, ctx: &mut Context) -> ASTValue;
+    fn visit_block(
+        &mut self,
+        list: &[Box<Stmt>],
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
 
     fn visit_expression(
         &mut self,
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue;
+    ) -> Result<ASTValue, String>;
 
     fn visit_var_declaration(
         &mut self,
@@ -106,9 +116,14 @@ pub trait Visitor {
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue;
+    ) -> Result<ASTValue, String>;
 
-    fn visit_value(&mut self, value: ASTValue, loc: &Location, ctx: &mut Context) -> ASTValue;
+    fn visit_value(
+        &mut self,
+        value: ASTValue,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
 
     fn visit_unary(
         &mut self,
@@ -116,7 +131,7 @@ pub trait Visitor {
         expr: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue;
+    ) -> Result<ASTValue, String>;
 
     fn visit_equality(
         &mut self,
@@ -125,7 +140,7 @@ pub trait Visitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue;
+    ) -> Result<ASTValue, String>;
 
     fn visit_comparison(
         &mut self,
@@ -134,7 +149,7 @@ pub trait Visitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue;
+    ) -> Result<ASTValue, String>;
 
     fn visit_binary(
         &mut self,
@@ -143,11 +158,21 @@ pub trait Visitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue;
+    ) -> Result<ASTValue, String>;
 
-    fn visit_grouping(&mut self, expression: &Expr, loc: &Location, ctx: &mut Context) -> ASTValue;
+    fn visit_grouping(
+        &mut self,
+        expression: &Expr,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
 
-    fn visit_variable(&mut self, name: String, loc: &Location, ctx: &mut Context) -> ASTValue;
+    fn visit_variable(
+        &mut self,
+        name: String,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
 
     fn visit_variable_assignment(
         &mut self,
@@ -155,11 +180,11 @@ pub trait Visitor {
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue;
+    ) -> Result<ASTValue, String>;
 }
 
 impl Stmt {
-    pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> ASTValue {
+    pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
         match self {
             Stmt::Print(expression, loc) => visitor.visit_print(expression, loc, ctx),
             Stmt::Block(list, loc) => visitor.visit_block(list, loc, ctx),
@@ -172,7 +197,7 @@ impl Stmt {
 }
 
 impl Expr {
-    pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> ASTValue {
+    pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
         match self {
             Expr::Value(value, loc) => visitor.visit_value(*value, loc, ctx),
             Expr::Unary(op, expr, loc) => visitor.visit_unary(op, expr, loc, ctx),

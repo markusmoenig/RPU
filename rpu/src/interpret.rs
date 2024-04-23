@@ -15,21 +15,31 @@ impl Visitor for InterpretVisitor {
         }
     }
 
-    fn visit_print(&mut self, expression: &Expr, _loc: &Location, ctx: &mut Context) -> ASTValue {
+    fn visit_print(
+        &mut self,
+        expression: &Expr,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
         print!("-- Print ");
         expression.accept(self, ctx);
         println!(" --");
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
-    fn visit_block(&mut self, list: &[Box<Stmt>], _loc: &Location, ctx: &mut Context) -> ASTValue {
+    fn visit_block(
+        &mut self,
+        list: &[Box<Stmt>],
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
         self.environment.begin_scope();
         for stmt in list {
-            stmt.accept(self, ctx);
+            stmt.accept(self, ctx)?;
         }
         self.environment.end_scope();
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_expression(
@@ -37,7 +47,7 @@ impl Visitor for InterpretVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         let e = expression.accept(self, ctx);
         if ctx.verbose {
             println!("E {:?}", e);
@@ -51,8 +61,8 @@ impl Visitor for InterpretVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
-        let v = expression.accept(self, ctx);
+    ) -> Result<ASTValue, String> {
+        let v = expression.accept(self, ctx)?;
 
         if ctx.verbose {
             println!("{} {} = {:?}", v.to_type(), name, v);
@@ -60,11 +70,16 @@ impl Visitor for InterpretVisitor {
 
         self.environment.define(name.to_string(), v);
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
-    fn visit_value(&mut self, value: ASTValue, _loc: &Location, _ctx: &mut Context) -> ASTValue {
-        value
+    fn visit_value(
+        &mut self,
+        value: ASTValue,
+        _loc: &Location,
+        _ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        Ok(value)
     }
 
     fn visit_unary(
@@ -73,7 +88,7 @@ impl Visitor for InterpretVisitor {
         expr: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         print!("-- Unary ");
         expr.accept(self, ctx);
         match op {
@@ -82,7 +97,7 @@ impl Visitor for InterpretVisitor {
         }
         println!(" --");
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_equality(
@@ -92,17 +107,17 @@ impl Visitor for InterpretVisitor {
         right: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         print!("-- Equality ");
-        left.accept(self, ctx);
+        left.accept(self, ctx)?;
         match op {
             EqualityOperator::NotEqual => print!(" != "),
             EqualityOperator::Equal => print!(" == "),
         }
-        right.accept(self, ctx);
+        right.accept(self, ctx)?;
         println!(" --");
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_comparison(
@@ -112,19 +127,19 @@ impl Visitor for InterpretVisitor {
         right: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         print!("-- Comparison ");
-        left.accept(self, ctx);
+        left.accept(self, ctx)?;
         match op {
             ComparisonOperator::Greater => print!(" > "),
             ComparisonOperator::GreaterEqual => print!(" >= "),
             ComparisonOperator::Less => print!(" < "),
             ComparisonOperator::LessEqual => print!(" <= "),
         }
-        right.accept(self, ctx);
+        right.accept(self, ctx)?;
         println!(" --");
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 
     fn visit_binary(
@@ -132,11 +147,11 @@ impl Visitor for InterpretVisitor {
         left: &Expr,
         op: &BinaryOperator,
         right: &Expr,
-        _loc: &Location,
+        loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
-        let lv = left.accept(self, ctx);
-        let rv = right.accept(self, ctx);
+    ) -> Result<ASTValue, String> {
+        let lv = left.accept(self, ctx)?;
+        let rv = right.accept(self, ctx)?;
 
         if ctx.verbose {
             println!("B {:?} {} {:?}", lv, op.describe(), rv);
@@ -144,20 +159,20 @@ impl Visitor for InterpretVisitor {
 
         match op {
             BinaryOperator::Add => match (lv, rv) {
-                (ASTValue::Int(l), ASTValue::Int(r)) => ASTValue::Int(l + r),
-                _ => ASTValue::None,
+                (ASTValue::Int(l), ASTValue::Int(r)) => Ok(ASTValue::Int(l + r)),
+                _ => Err(format!("Invalid operands for '+' {}", loc.describe())),
             },
             BinaryOperator::Subtract => match (lv, rv) {
-                (ASTValue::Int(l), ASTValue::Int(r)) => ASTValue::Int(l - r),
-                _ => ASTValue::None,
+                (ASTValue::Int(l), ASTValue::Int(r)) => Ok(ASTValue::Int(l - r)),
+                _ => Err(format!("Invalid operands for '-' {}", loc.describe())),
             },
             BinaryOperator::Multiply => match (lv, rv) {
-                (ASTValue::Int(l), ASTValue::Int(r)) => ASTValue::Int(l * r),
-                _ => ASTValue::None,
+                (ASTValue::Int(l), ASTValue::Int(r)) => Ok(ASTValue::Int(l * r)),
+                _ => Err(format!("Invalid operands for '*' {}", loc.describe())),
             },
             BinaryOperator::Divide => match (lv, rv) {
-                (ASTValue::Int(l), ASTValue::Int(r)) => ASTValue::Int(l / r),
-                _ => ASTValue::None,
+                (ASTValue::Int(l), ASTValue::Int(r)) => Ok(ASTValue::Int(l / r)),
+                _ => Err(format!("Invalid operands for '+' {}", loc.describe())),
             },
         }
     }
@@ -167,19 +182,23 @@ impl Visitor for InterpretVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
+    ) -> Result<ASTValue, String> {
         expression.accept(self, ctx)
     }
 
-    fn visit_variable(&mut self, name: String, loc: &Location, ctx: &mut Context) -> ASTValue {
+    fn visit_variable(
+        &mut self,
+        name: String,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
         if let Some(v) = self.environment.get(&name) {
             if ctx.verbose {
                 println!("V {} ({:?})", name, v);
             }
-            v
+            Ok(v)
         } else {
-            println!("Unknown variable '{}' {}", name, loc.describe());
-            ASTValue::None
+            Err(format!("Unknown variable '{}' {}", name, loc.describe()))
         }
     }
 
@@ -189,13 +208,13 @@ impl Visitor for InterpretVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> ASTValue {
-        let v = expression.accept(self, ctx);
+    ) -> Result<ASTValue, String> {
+        let v = expression.accept(self, ctx)?;
         if ctx.verbose {
             println!("A {} ({:?})", name, v);
         }
         self.environment.assign(&name, v);
 
-        ASTValue::None
+        Ok(ASTValue::None)
     }
 }
