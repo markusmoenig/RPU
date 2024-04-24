@@ -150,10 +150,10 @@ impl Visitor for CompileVisitor {
         _ = right.accept(self, ctx)?;
 
         let instr = match op {
-            BinaryOperator::Add => "i64.add",
-            BinaryOperator::Subtract => "i64.sub",
-            BinaryOperator::Multiply => "i64.mul",
-            BinaryOperator::Divide => "i64.div",
+            BinaryOperator::Add => format!("(i{}.add)", ctx.precision.describe()),
+            BinaryOperator::Subtract => format!("(i{}.sub)", ctx.precision.describe()),
+            BinaryOperator::Multiply => format!("(i{}.mul)", ctx.precision.describe()),
+            BinaryOperator::Divide => format!("(i{}.div)", ctx.precision.describe()),
         };
 
         if ctx.verbose {
