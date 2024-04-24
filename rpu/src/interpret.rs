@@ -98,7 +98,7 @@ impl Visitor for InterpretVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         print!("-- Unary ");
-        expr.accept(self, ctx);
+        expr.accept(self, ctx)?;
         match op {
             UnaryOperator::Negate => print!(" ! "),
             UnaryOperator::Minus => print!(" - "),
@@ -235,8 +235,8 @@ impl Visitor for InterpretVisitor {
     fn function_call(
         &mut self,
         callee: &Expr,
-        args: &Vec<Box<Expr>>,
-        loc: &Location,
+        args: &[Box<Expr>],
+        _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let callee = callee.accept(self, ctx)?;
@@ -255,15 +255,15 @@ impl Visitor for InterpretVisitor {
 
     fn function_declaration(
         &mut self,
-        name: &String,
-        args: &Vec<String>,
+        name: &str,
+        args: &[Parameter],
         body: &[Box<Stmt>],
-        loc: &Location,
-        ctx: &mut Context,
+        _loc: &Location,
+        _ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         self.functions.insert(
-            name.clone(),
-            ASTValue::Function(name.clone(), args.clone(), body.to_vec()),
+            name.to_string(),
+            ASTValue::Function(name.to_string(), args.to_vec(), body.to_vec()),
         );
         Ok(ASTValue::None)
     }

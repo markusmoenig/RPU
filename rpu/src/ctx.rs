@@ -1,7 +1,30 @@
 //use crate::prelude::*;
 
 #[derive(Clone, Debug)]
+pub enum Precision {
+    P32,
+    P64,
+}
+
+impl Precision {
+    pub fn size(&self) -> usize {
+        match self {
+            Precision::P32 => 4,
+            Precision::P64 => 8,
+        }
+    }
+    pub fn describe(&self) -> String {
+        match self {
+            Precision::P32 => "32".to_string(),
+            Precision::P64 => "64".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Context {
+    /// Precision of the compilation
+    pub precision: Precision,
     /// Verbose / debug mode for the interpreter
     pub verbose: bool,
     ///
@@ -17,27 +40,22 @@ impl Default for Context {
 impl Context {
     pub fn new() -> Self {
         Self {
+            precision: Precision::P64,
             verbose: true,
             wat: String::new(),
         }
     }
 
     pub fn gen_wat(&mut self) -> String {
-        let header = r#"
-            (module
-            (type $t0 (func (param i64) (result i64)))
-            (func $add_one (export "main") (type $t0) (param $p0 i64) (result i64)
-            "#;
-        //     get_local $p0
-        //     i64.const 1
-        //     i64.add))
-        // "#;
+        let header = "(module\n(memory 1)\n";
 
         let mut wat = header.to_string();
         wat.push_str(&self.wat);
 
-        //wat.push_str("\ni64.const 1\n");
-        wat.push_str("))\n");
+        wat.push_str(")\n");
+
+        //println!("--");
+        //println!("{}", wat);
 
         wat
     }

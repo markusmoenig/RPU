@@ -18,7 +18,7 @@ impl Visitor for CompileVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         print!("-- Print ");
-        expression.accept(self, ctx);
+        expression.accept(self, ctx)?;
         println!(" --");
 
         Ok(ASTValue::None)
@@ -63,8 +63,8 @@ impl Visitor for CompileVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let instr = match value {
-            ASTValue::Int(i) => format!("(i64.const {})", i),
-            ASTValue::Boolean(f) => format!("(f64.const {})", f),
+            ASTValue::Int(i) => format!("(i{}.const {})", ctx.precision.describe(), i),
+            ASTValue::Boolean(f) => format!("(f{}.const {})", ctx.precision.describe(), f),
             ASTValue::None => "".to_string(),
             ASTValue::String(_) => "".to_string(),
             ASTValue::Function(_, _, _) => "".to_string(),
@@ -86,7 +86,7 @@ impl Visitor for CompileVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         print!("-- Unary ");
-        expr.accept(self, ctx);
+        expr.accept(self, ctx)?;
         match op {
             UnaryOperator::Negate => print!(" ! "),
             UnaryOperator::Minus => print!(" - "),
@@ -105,7 +105,7 @@ impl Visitor for CompileVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         print!("-- Equality ");
-        left.accept(self, ctx);
+        left.accept(self, ctx)?;
         match op {
             EqualityOperator::NotEqual => print!(" != "),
             EqualityOperator::Equal => print!(" == "),
@@ -176,10 +176,18 @@ impl Visitor for CompileVisitor {
 
     fn variable(
         &mut self,
-        _name: String,
+        name: String,
         _loc: &Location,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Result<ASTValue, String> {
+        let instr = format!("(local.get ${})", name);
+
+        if ctx.verbose {
+            println!("V {}", instr);
+        }
+
+        ctx.wat.push_str(&format!("{}\n", instr));
+
         Ok(ASTValue::None)
     }
 
@@ -195,22 +203,51 @@ impl Visitor for CompileVisitor {
 
     fn function_call(
         &mut self,
-        callee: &Expr,
-        args: &Vec<Box<Expr>>,
-        loc: &Location,
-        ctx: &mut Context,
+        _callee: &Expr,
+        _args: &[Box<Expr>],
+        _loc: &Location,
+        _ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         Ok(ASTValue::None)
     }
 
     fn function_declaration(
         &mut self,
-        name: &String,
-        args: &Vec<String>,
+        name: &str,
+        args: &[Parameter],
         body: &[Box<Stmt>],
-        loc: &Location,
+        _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
+        let mut params = String::new();
+
+        for param in args {
+            match param {
+                Parameter::Int(name) => {
+                    params += &format!("{} (param ${} i{})", params, name, ctx.precision.describe())
+                }
+            }
+        }
+
+        let instr = format!(
+            "(func ${} (export \"{}\") {} (result i64)",
+            name, name, params
+        );
+        if ctx.verbose {
+            println!("{}", instr);
+        }
+        ctx.wat.push_str(&format!("{}\n", instr));
+
+        for stmt in body {
+            stmt.accept(self, ctx)?;
+        }
+
+        ctx.wat.push_str(")\n");
+
+        if ctx.verbose {
+            println!(")");
+        }
+
         Ok(ASTValue::None)
     }
 }

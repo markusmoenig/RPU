@@ -1,5 +1,5 @@
 use crate::prelude::*;
-//use wasmer::{imports, Instance, Module, Store, Value};
+use wasmer::{imports, Instance, Module, Store, Value};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -41,31 +41,31 @@ impl Parser {
             }
         }
 
-        let mut visitor = InterpretVisitor::new();
+        let mut visitor = CompileVisitor::new();
         let mut ctx = Context::default();
 
         for statement in statements {
             let _rc = statement.accept(&mut visitor, &mut ctx);
 
-            // let wat = ctx.gen_wat();
-            // let mut store = Store::default();
-            // let module_rc = Module::new(&store, &wat);
-            // match module_rc {
-            //     Ok(module) => {
-            //         let import_object = imports! {};
-            //         if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
-            //             if let Ok(main) = instance.exports.get_function("main") {
-            //                 let rc = main.call(&mut store, &[Value::I64(42)]);
-            //                 println!("rc {:?}", rc);
-            //                 //println!("Result: {:?}", result);
-            //                 //}
-            //             }
-            //         }
-            //     }
-            //     Err(err) => {
-            //         println!("Error: {:?}", err.to_string());
-            //     }
-            // }
+            let wat = ctx.gen_wat();
+            let mut store = Store::default();
+            let module_rc = Module::new(&store, &wat);
+            match module_rc {
+                Ok(module) => {
+                    let import_object = imports! {};
+                    if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
+                        if let Ok(main) = instance.exports.get_function("main") {
+                            let rc = main.call(&mut store, &[Value::I64(42)]);
+                            println!("rc {:?}", rc);
+                            //println!("Result: {:?}", result);
+                            //}
+                        }
+                    }
+                }
+                Err(err) => {
+                    println!("Error: {:?}", err.to_string());
+                }
+            }
             //println!("{:?}", rc);
         }
     }
@@ -140,10 +140,21 @@ impl Parser {
                     ));
                 }
 
-                parameters.push(
-                    self.consume(TokenType::Identifier, "Expect parameter name.")?
-                        .lexeme,
-                );
+                if self.check(TokenType::Int) {
+                    self.advance();
+                    let param_name = self
+                        .consume(
+                            TokenType::Identifier,
+                            &format!("Expect parameter name at line {}.", line),
+                        )?
+                        .lexeme;
+                    parameters.push(Parameter::Int(param_name));
+                } else {
+                    return Err(format!(
+                        "Invalid parameter type '{}' at line {}.",
+                        self.tokens[self.current].lexeme, line
+                    ));
+                }
 
                 if !self.match_token(vec![TokenType::Comma]) {
                     break;

@@ -7,7 +7,7 @@ pub enum ASTValue {
     Boolean(bool),
     Int(i64),
     String(String),
-    Function(String, Vec<String>, Vec<Box<Stmt>>),
+    Function(String, Vec<Parameter>, Vec<Box<Stmt>>),
 }
 
 impl ASTValue {
@@ -22,6 +22,11 @@ impl ASTValue {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Parameter {
+    Int(String),
+}
+
 /// Statements in the AST
 #[derive(Clone, Debug)]
 pub enum Stmt {
@@ -29,7 +34,7 @@ pub enum Stmt {
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
     VarDeclaration(String, Box<Expr>, Location),
-    FunctionDeclaration(String, Vec<String>, Vec<Box<Stmt>>, Location),
+    FunctionDeclaration(String, Vec<Parameter>, Vec<Box<Stmt>>, Location),
 }
 
 /// Expressions in the AST
@@ -191,15 +196,15 @@ pub trait Visitor {
     fn function_call(
         &mut self,
         callee: &Expr,
-        args: &Vec<Box<Expr>>,
+        args: &[Box<Expr>],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
     fn function_declaration(
         &mut self,
-        name: &String,
-        args: &Vec<String>,
+        name: &str,
+        args: &[Parameter],
         body: &[Box<Stmt>],
         loc: &Location,
         ctx: &mut Context,
