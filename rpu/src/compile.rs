@@ -11,7 +11,7 @@ impl Visitor for CompileVisitor {
         Self {}
     }
 
-    fn visit_print(
+    fn print(
         &mut self,
         expression: &Expr,
         _loc: &Location,
@@ -24,7 +24,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_block(
+    fn block(
         &mut self,
         _list: &[Box<Stmt>],
         _loc: &Location,
@@ -33,7 +33,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_expression(
+    fn expression(
         &mut self,
         expression: &Expr,
         _loc: &Location,
@@ -46,7 +46,7 @@ impl Visitor for CompileVisitor {
         e
     }
 
-    fn visit_var_declaration(
+    fn var_declaration(
         &mut self,
         _name: &str,
         _expression: &Expr,
@@ -56,7 +56,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_value(
+    fn value(
         &mut self,
         value: ASTValue,
         _loc: &Location,
@@ -66,6 +66,8 @@ impl Visitor for CompileVisitor {
             ASTValue::Int(i) => format!("(i64.const {})", i),
             ASTValue::Boolean(f) => format!("(f64.const {})", f),
             ASTValue::None => "".to_string(),
+            ASTValue::String(_) => "".to_string(),
+            ASTValue::Function(_, _, _) => "".to_string(),
         };
 
         if ctx.verbose {
@@ -76,7 +78,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_unary(
+    fn unary(
         &mut self,
         op: &UnaryOperator,
         expr: &Expr,
@@ -94,7 +96,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_equality(
+    fn equality(
         &mut self,
         left: &Expr,
         op: &EqualityOperator,
@@ -114,7 +116,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_comparison(
+    fn comparison(
         &mut self,
         left: &Expr,
         op: &ComparisonOperator,
@@ -136,7 +138,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_binary(
+    fn binary(
         &mut self,
         left: &Expr,
         op: &BinaryOperator,
@@ -163,7 +165,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_grouping(
+    fn grouping(
         &mut self,
         expression: &Expr,
         _loc: &Location,
@@ -172,7 +174,7 @@ impl Visitor for CompileVisitor {
         expression.accept(self, ctx)
     }
 
-    fn visit_variable(
+    fn variable(
         &mut self,
         _name: String,
         _loc: &Location,
@@ -181,12 +183,33 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_variable_assignment(
+    fn variable_assignment(
         &mut self,
         _name: String,
         _expression: &Expr,
         _loc: &Location,
         _ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        Ok(ASTValue::None)
+    }
+
+    fn function_call(
+        &mut self,
+        callee: &Expr,
+        args: &Vec<Box<Expr>>,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        Ok(ASTValue::None)
+    }
+
+    fn function_declaration(
+        &mut self,
+        name: &String,
+        args: &Vec<String>,
+        body: &[Box<Stmt>],
+        loc: &Location,
+        ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         Ok(ASTValue::None)
     }

@@ -71,7 +71,9 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Result<Stmt, String> {
-        if self.match_token(vec![TokenType::Int]) {
+        if self.match_token(vec![TokenType::Fn]) {
+            self.function()
+        } else if self.match_token(vec![TokenType::Int]) {
             self.var_declaration()
         } else {
             self.statement()
@@ -121,6 +123,47 @@ impl Parser {
         let line = self.current_line;
         self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
         Ok(Stmt::Expression(Box::new(value), self.create_loc(line)))
+    }
+
+    fn function(&mut self) -> Result<Stmt, String> {
+        let name = self.consume(TokenType::Identifier, "Expect function name.")?;
+        let line = self.current_line;
+        self.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
+        let mut parameters = vec![];
+
+        if !self.check(TokenType::RightParen) {
+            loop {
+                if parameters.len() >= 255 {
+                    return Err(format!(
+                        "Cannot have more than 255 parameters at line {}.",
+                        line
+                    ));
+                }
+
+                parameters.push(
+                    self.consume(TokenType::Identifier, "Expect parameter name.")?
+                        .lexeme,
+                );
+
+                if !self.match_token(vec![TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.")?;
+        self.consume(TokenType::LeftBrace, "Expect '{' before function body.")?;
+        if let Stmt::Block(body, _) = self.block()? {
+            Ok(Stmt::FunctionDeclaration(
+                name.lexeme,
+                parameters,
+                body,
+                self.create_loc(line),
+            ))
+        } else {
+            // Not reachable
+            Err("Expect block statement.".to_string())
+        }
     }
 
     fn block(&mut self) -> Result<Stmt, String> {
@@ -256,7 +299,46 @@ impl Parser {
             ));
         }
 
-        self.primary()
+        self.call()
+    }
+
+    fn call(&mut self) -> Result<Expr, String> {
+        let mut expr = self.primary()?;
+
+        loop {
+            if self.match_token(vec![TokenType::LeftParen]) {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr, String> {
+        let mut arguments = vec![];
+
+        if !self.check(TokenType::RightParen) {
+            loop {
+                if arguments.len() >= 255 {
+                    return Err("Cannot have more than 255 arguments.".to_string());
+                }
+
+                arguments.push(Box::new(self.expression()?));
+
+                if !self.match_token(vec![TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        let paren = self.consume(TokenType::RightParen, "Expect ')' after arguments.")?;
+        Ok(Expr::FunctionCall(
+            Box::new(callee),
+            arguments,
+            self.create_loc(paren.line),
+        ))
     }
 
     fn primary(&mut self) -> Result<Expr, String> {

@@ -40,7 +40,7 @@ impl Environment {
     pub fn get(&self, name: &str) -> Option<ASTValue> {
         for scope in self.scopes.iter().rev() {
             if let Some(value) = scope.get(name) {
-                return Some(*value);
+                return Some(value.clone());
             }
         }
         None

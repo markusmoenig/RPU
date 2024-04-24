@@ -1,11 +1,13 @@
 use crate::prelude::*;
 
 /// Values in the AST
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum ASTValue {
     None,
     Boolean(bool),
     Int(i64),
+    String(String),
+    Function(String, Vec<String>, Vec<Box<Stmt>>),
 }
 
 impl ASTValue {
@@ -14,6 +16,8 @@ impl ASTValue {
             ASTValue::None => "nil".to_string(),
             ASTValue::Boolean(_) => "bool".to_string(),
             ASTValue::Int(_) => "int".to_string(),
+            ASTValue::String(_) => "string".to_string(),
+            ASTValue::Function(_, _, _) => "fn".to_string(),
         }
     }
 }
@@ -25,6 +29,7 @@ pub enum Stmt {
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
     VarDeclaration(String, Box<Expr>, Location),
+    FunctionDeclaration(String, Vec<String>, Vec<Box<Stmt>>, Location),
 }
 
 /// Expressions in the AST
@@ -38,6 +43,7 @@ pub enum Expr {
     Grouping(Box<Expr>, Location),
     Variable(String, Location),
     VariableAssignment(String, Box<Expr>, Location),
+    FunctionCall(Box<Expr>, Vec<Box<Expr>>, Location),
 }
 
 /// Unary operators in the AST
@@ -89,28 +95,28 @@ pub trait Visitor {
     where
         Self: Sized;
 
-    fn visit_print(
+    fn print(
         &mut self,
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_block(
+    fn block(
         &mut self,
         list: &[Box<Stmt>],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_expression(
+    fn expression(
         &mut self,
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_var_declaration(
+    fn var_declaration(
         &mut self,
         name: &str,
         expression: &Expr,
@@ -118,14 +124,14 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_value(
+    fn value(
         &mut self,
         value: ASTValue,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_unary(
+    fn unary(
         &mut self,
         op: &UnaryOperator,
         expr: &Expr,
@@ -133,7 +139,7 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_equality(
+    fn equality(
         &mut self,
         left: &Expr,
         op: &EqualityOperator,
@@ -142,7 +148,7 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_comparison(
+    fn comparison(
         &mut self,
         left: &Expr,
         op: &ComparisonOperator,
@@ -151,7 +157,7 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_binary(
+    fn binary(
         &mut self,
         left: &Expr,
         op: &BinaryOperator,
@@ -160,24 +166,41 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_grouping(
+    fn grouping(
         &mut self,
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_variable(
+    fn variable(
         &mut self,
         name: String,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn visit_variable_assignment(
+    fn variable_assignment(
         &mut self,
         name: String,
         expression: &Expr,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
+
+    fn function_call(
+        &mut self,
+        callee: &Expr,
+        args: &Vec<Box<Expr>>,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
+
+    fn function_declaration(
+        &mut self,
+        name: &String,
+        args: &Vec<String>,
+        body: &[Box<Stmt>],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -186,11 +209,14 @@ pub trait Visitor {
 impl Stmt {
     pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
         match self {
-            Stmt::Print(expression, loc) => visitor.visit_print(expression, loc, ctx),
-            Stmt::Block(list, loc) => visitor.visit_block(list, loc, ctx),
-            Stmt::Expression(expression, loc) => visitor.visit_expression(expression, loc, ctx),
+            Stmt::Print(expression, loc) => visitor.print(expression, loc, ctx),
+            Stmt::Block(list, loc) => visitor.block(list, loc, ctx),
+            Stmt::Expression(expression, loc) => visitor.expression(expression, loc, ctx),
             Stmt::VarDeclaration(name, initializer, loc) => {
-                visitor.visit_var_declaration(name, initializer, loc, ctx)
+                visitor.var_declaration(name, initializer, loc, ctx)
+            }
+            Stmt::FunctionDeclaration(name, args, body, loc) => {
+                visitor.function_declaration(name, args, body, loc, ctx)
             }
         }
     }
@@ -199,20 +225,17 @@ impl Stmt {
 impl Expr {
     pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
         match self {
-            Expr::Value(value, loc) => visitor.visit_value(*value, loc, ctx),
-            Expr::Unary(op, expr, loc) => visitor.visit_unary(op, expr, loc, ctx),
-            Expr::Equality(left, op, right, loc) => {
-                visitor.visit_equality(left, op, right, loc, ctx)
-            }
-            Expr::Comparison(left, op, right, loc) => {
-                visitor.visit_comparison(left, op, right, loc, ctx)
-            }
-            Expr::Binary(left, op, right, loc) => visitor.visit_binary(left, op, right, loc, ctx),
-            Expr::Grouping(expr, loc) => visitor.visit_grouping(expr, loc, ctx),
-            Expr::Variable(name, loc) => visitor.visit_variable(name.clone(), loc, ctx),
+            Expr::Value(value, loc) => visitor.value(value.clone(), loc, ctx),
+            Expr::Unary(op, expr, loc) => visitor.unary(op, expr, loc, ctx),
+            Expr::Equality(left, op, right, loc) => visitor.equality(left, op, right, loc, ctx),
+            Expr::Comparison(left, op, right, loc) => visitor.comparison(left, op, right, loc, ctx),
+            Expr::Binary(left, op, right, loc) => visitor.binary(left, op, right, loc, ctx),
+            Expr::Grouping(expr, loc) => visitor.grouping(expr, loc, ctx),
+            Expr::Variable(name, loc) => visitor.variable(name.clone(), loc, ctx),
             Expr::VariableAssignment(name, expr, loc) => {
-                visitor.visit_variable_assignment(name.clone(), expr, loc, ctx)
+                visitor.variable_assignment(name.clone(), expr, loc, ctx)
             }
+            Expr::FunctionCall(callee, args, loc) => visitor.function_call(callee, args, loc, ctx),
         }
     }
 }

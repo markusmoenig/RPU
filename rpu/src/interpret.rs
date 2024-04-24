@@ -1,8 +1,15 @@
 use crate::prelude::*;
 
+pub struct Function {
+    pub name: String,
+    pub args: Vec<String>,
+    pub body: Vec<Box<Stmt>>,
+}
+
 /// InterpretVisitor
 pub struct InterpretVisitor {
     environment: Environment,
+    functions: FxHashMap<String, ASTValue>,
 }
 
 impl Visitor for InterpretVisitor {
@@ -12,23 +19,24 @@ impl Visitor for InterpretVisitor {
     {
         Self {
             environment: Environment::default(),
+            functions: FxHashMap::default(),
         }
     }
 
-    fn visit_print(
+    fn print(
         &mut self,
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         print!("-- Print ");
-        expression.accept(self, ctx);
+        expression.accept(self, ctx)?;
         println!(" --");
 
         Ok(ASTValue::None)
     }
 
-    fn visit_block(
+    fn block(
         &mut self,
         list: &[Box<Stmt>],
         _loc: &Location,
@@ -42,7 +50,7 @@ impl Visitor for InterpretVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_expression(
+    fn expression(
         &mut self,
         expression: &Expr,
         _loc: &Location,
@@ -55,7 +63,7 @@ impl Visitor for InterpretVisitor {
         e
     }
 
-    fn visit_var_declaration(
+    fn var_declaration(
         &mut self,
         name: &str,
         expression: &Expr,
@@ -73,7 +81,7 @@ impl Visitor for InterpretVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_value(
+    fn value(
         &mut self,
         value: ASTValue,
         _loc: &Location,
@@ -82,7 +90,7 @@ impl Visitor for InterpretVisitor {
         Ok(value)
     }
 
-    fn visit_unary(
+    fn unary(
         &mut self,
         op: &UnaryOperator,
         expr: &Expr,
@@ -100,7 +108,7 @@ impl Visitor for InterpretVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_equality(
+    fn equality(
         &mut self,
         left: &Expr,
         op: &EqualityOperator,
@@ -120,7 +128,7 @@ impl Visitor for InterpretVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_comparison(
+    fn comparison(
         &mut self,
         left: &Expr,
         op: &ComparisonOperator,
@@ -142,7 +150,7 @@ impl Visitor for InterpretVisitor {
         Ok(ASTValue::None)
     }
 
-    fn visit_binary(
+    fn binary(
         &mut self,
         left: &Expr,
         op: &BinaryOperator,
@@ -177,7 +185,7 @@ impl Visitor for InterpretVisitor {
         }
     }
 
-    fn visit_grouping(
+    fn grouping(
         &mut self,
         expression: &Expr,
         _loc: &Location,
@@ -186,7 +194,7 @@ impl Visitor for InterpretVisitor {
         expression.accept(self, ctx)
     }
 
-    fn visit_variable(
+    fn variable(
         &mut self,
         name: String,
         loc: &Location,
@@ -197,12 +205,18 @@ impl Visitor for InterpretVisitor {
                 println!("V {} ({:?})", name, v);
             }
             Ok(v)
+        } else if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
+            if ctx.verbose {
+                println!("F {}", name);
+            }
+
+            Ok(ASTValue::Function(name.clone(), args.clone(), body.clone()))
         } else {
-            Err(format!("Unknown variable '{}' {}", name, loc.describe()))
+            Err(format!("Unknown identifier '{}' {}", name, loc.describe()))
         }
     }
 
-    fn visit_variable_assignment(
+    fn variable_assignment(
         &mut self,
         name: String,
         expression: &Expr,
@@ -215,6 +229,42 @@ impl Visitor for InterpretVisitor {
         }
         self.environment.assign(&name, v);
 
+        Ok(ASTValue::None)
+    }
+
+    fn function_call(
+        &mut self,
+        callee: &Expr,
+        args: &Vec<Box<Expr>>,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        let callee = callee.accept(self, ctx)?;
+
+        println!("callee {:?}", callee);
+
+        let mut arguments = vec![];
+        for a in args {
+            let expr = a.accept(self, ctx)?;
+            arguments.push(expr);
+        }
+
+        // TODO: Call callee
+        Ok(ASTValue::None)
+    }
+
+    fn function_declaration(
+        &mut self,
+        name: &String,
+        args: &Vec<String>,
+        body: &[Box<Stmt>],
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        self.functions.insert(
+            name.clone(),
+            ASTValue::Function(name.clone(), args.clone(), body.to_vec()),
+        );
         Ok(ASTValue::None)
     }
 }
