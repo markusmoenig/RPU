@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 rustc-hash = "1.1.0"
 wasmer = "4.2.8"
+maths-rs = "0.2.6"

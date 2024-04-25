@@ -53,9 +53,13 @@ pub enum TokenType {
     Super,
     This,
     True,
-    Int,
     While,
     CodeBlock,
+
+    Int,
+    Int2,
+    Int3,
+    Int4,
 
     Error,
     Eof,
@@ -106,8 +110,12 @@ impl Scanner {
         keywords.insert("super", TokenType::Super);
         keywords.insert("this", TokenType::This);
         keywords.insert("true", TokenType::True);
-        keywords.insert("int", TokenType::Int);
         keywords.insert("while", TokenType::While);
+
+        keywords.insert("int", TokenType::Int);
+        keywords.insert("ivec2", TokenType::Int2);
+        keywords.insert("ivec3", TokenType::Int3);
+        keywords.insert("ivec4", TokenType::Int4);
 
         Scanner {
             keywords,

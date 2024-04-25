@@ -1,3 +1,4 @@
+use crate::empty_expr;
 use crate::prelude::*;
 
 /// CompileVisitor
@@ -62,12 +63,27 @@ impl Visitor for CompileVisitor {
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        let instr = match value {
-            ASTValue::Int(i) => format!("(i{}.const {})", ctx.precision.describe(), i),
-            ASTValue::Boolean(f) => format!("(f{}.const {})", ctx.precision.describe(), f),
-            ASTValue::None => "".to_string(),
-            ASTValue::String(_) => "".to_string(),
-            ASTValue::Function(_, _, _) => "".to_string(),
+        let mut rc = ASTValue::None;
+        let instr;
+
+        match value {
+            ASTValue::Boolean(_, f) => {
+                instr = format!("(f{}.const {})", ctx.pr, f);
+                rc = ASTValue::Boolean(None, f);
+            }
+            ASTValue::Int(_, i) => {
+                instr = format!("(i{}.const {})", ctx.pr, i);
+                rc = ASTValue::Int(None, i);
+            }
+            ASTValue::Int2(_, x, y) => {
+                _ = x.accept(self, ctx)?;
+                _ = y.accept(self, ctx)?;
+                instr = "".to_string();
+                rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+            }
+            _ => {
+                instr = "".to_string();
+            }
         };
 
         if ctx.verbose {
@@ -75,7 +91,7 @@ impl Visitor for CompileVisitor {
         }
 
         ctx.wat.push_str(&format!("{}\n", instr));
-        Ok(ASTValue::None)
+        Ok(rc)
     }
 
     fn unary(
@@ -143,17 +159,78 @@ impl Visitor for CompileVisitor {
         left: &Expr,
         op: &BinaryOperator,
         right: &Expr,
-        _loc: &Location,
+        loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        _ = left.accept(self, ctx)?;
-        _ = right.accept(self, ctx)?;
+        let left_type = left.accept(self, ctx)?;
+        let right_type = right.accept(self, ctx)?;
+        let mut rc = ASTValue::None;
 
-        let instr = match op {
-            BinaryOperator::Add => format!("(i{}.add)", ctx.precision.describe()),
-            BinaryOperator::Subtract => format!("(i{}.sub)", ctx.precision.describe()),
-            BinaryOperator::Multiply => format!("(i{}.mul)", ctx.precision.describe()),
-            BinaryOperator::Divide => format!("(i{}.div)", ctx.precision.describe()),
+        //println!("{:?} {:?}", left_type, right_type);
+
+        let instr = match (&left_type, &right_type) {
+            (ASTValue::Int(_, _), ASTValue::Int(_, _)) => {
+                rc = ASTValue::Int(None, 0);
+                match op {
+                    BinaryOperator::Add => format!("(i{}.add)", ctx.precision.describe()),
+                    BinaryOperator::Subtract => format!("(i{}.sub)", ctx.precision.describe()),
+                    BinaryOperator::Multiply => format!("(i{}.mul)", ctx.precision.describe()),
+                    BinaryOperator::Divide => format!("(i{}.div)", ctx.precision.describe()),
+                }
+            }
+            (ASTValue::Int(_, _), ASTValue::Int2(_, _, _)) => {
+                rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+                match op {
+                    // Scalar and ivec2
+                    BinaryOperator::Add => {
+                        ctx.gen_scalar_vec2(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_scalar_add_vec2_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_scalar_vec2(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_scalar_sub_vec2_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_scalar_vec2(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_scalar_mul_vec2_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_scalar_vec2(&format!("i{}", ctx.pr), "div_s");
+                        format!("(call $_rpu_scalar_div_s_vec2_i{})", ctx.pr)
+                    }
+                }
+            }
+            (ASTValue::Int2(_, _, _), ASTValue::Int(_, _)) => {
+                rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+                match op {
+                    // Scalar and ivec2
+                    BinaryOperator::Add => {
+                        ctx.gen_vec2_scalar(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec2_add_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec2_scalar(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec2_sub_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec2_scalar(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec2_mul_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec2_scalar(&format!("i{}", ctx.pr), "div_s");
+                        format!("(call $_rpu_vec2_div_s_scalar_i{})", ctx.pr)
+                    }
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "Invalid types {:?} {:?} for operator '{}' {}",
+                    left_type.to_type(),
+                    right_type.to_type(),
+                    op.describe(),
+                    loc.describe()
+                ))
+            }
         };
 
         if ctx.verbose {
@@ -162,7 +239,7 @@ impl Visitor for CompileVisitor {
 
         ctx.wat.push_str(&format!("{}\n", instr));
 
-        Ok(ASTValue::None)
+        Ok(rc)
     }
 
     fn grouping(
@@ -214,8 +291,9 @@ impl Visitor for CompileVisitor {
     fn function_declaration(
         &mut self,
         name: &str,
-        args: &[Parameter],
+        args: &[ASTValue],
         body: &[Box<Stmt>],
+        returns: &ASTValue,
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
@@ -223,15 +301,27 @@ impl Visitor for CompileVisitor {
 
         for param in args {
             match param {
-                Parameter::Int(name) => {
-                    params += &format!("{} (param ${} i{})", params, name, ctx.precision.describe())
+                ASTValue::Int(name, _) => {
+                    params += &format!(
+                        "{} (param ${} i{})",
+                        params,
+                        name.clone().unwrap(),
+                        ctx.precision.describe()
+                    )
                 }
+                _ => {}
             }
         }
 
+        let mut return_type = String::new();
+
+        if let Some(r) = returns.to_wat_type(&ctx.pr) {
+            return_type = format!("(result {})", r);
+        }
+
         let instr = format!(
-            "(func ${} (export \"{}\") {} (result i64)",
-            name, name, params
+            "(func ${} (export \"{}\") {} {}",
+            name, name, params, return_type
         );
         if ctx.verbose {
             println!("{}", instr);

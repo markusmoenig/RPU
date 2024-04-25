@@ -1,30 +1,66 @@
 use crate::prelude::*;
 
+#[macro_export]
+macro_rules! empty_expr {
+    () => {
+        Box::new(Expr::Value(ASTValue::None, Location::default()))
+    };
+}
+
 /// Values in the AST
 #[derive(Clone, Debug)]
 pub enum ASTValue {
     None,
-    Boolean(bool),
-    Int(i64),
-    String(String),
-    Function(String, Vec<Parameter>, Vec<Box<Stmt>>),
+    Boolean(Option<String>, bool),
+    Int(Option<String>, i32),
+    Int2(Option<String>, Box<Expr>, Box<Expr>),
+    Int3(Option<String>, Vec3i),
+    Int4(Option<String>, Vec4i),
+    String(Option<String>, String),
+    Function(String, Vec<ASTValue>, Vec<Box<Stmt>>),
 }
 
 impl ASTValue {
+    /// Returns the RPU type of the given value.
     pub fn to_type(&self) -> String {
         match self {
             ASTValue::None => "nil".to_string(),
-            ASTValue::Boolean(_) => "bool".to_string(),
-            ASTValue::Int(_) => "int".to_string(),
-            ASTValue::String(_) => "string".to_string(),
+            ASTValue::Boolean(_, _) => "bool".to_string(),
+            ASTValue::Int(_, _) => "int".to_string(),
+            ASTValue::Int2(_, _, _) => "ivec2".to_string(),
+            ASTValue::Int3(_, _) => "ivec4".to_string(),
+            ASTValue::Int4(_, _) => "ivec4".to_string(),
+            ASTValue::String(_, _) => "string".to_string(),
             ASTValue::Function(_, _, _) => "fn".to_string(),
         }
     }
-}
 
-#[derive(Clone, Debug)]
-pub enum Parameter {
-    Int(String),
+    /// Returns the WAT type of the given value.
+    pub fn to_wat_type(&self, pr: &str) -> Option<String> {
+        match self {
+            ASTValue::Boolean(_, _) => Some(format!("(i{}", pr)),
+            ASTValue::Int(_, _) => Some(format!("i{}", pr)),
+            ASTValue::Int2(_, _, _) => Some(format!("i{} i{}", pr, pr)),
+            ASTValue::Int3(_, _) => Some(format!("i{} i{} i{}", pr, pr, pr)),
+            ASTValue::Int4(_, _) => Some(format!("i{} i{} i{} i{}", pr, pr, pr, pr)),
+            _ => None,
+        }
+    }
+
+    /// Creates an ASTValue from a TokenType.
+    pub fn from_token_type(token_type: &TokenType) -> ASTValue {
+        match token_type {
+            TokenType::Nil => ASTValue::None,
+            TokenType::True => ASTValue::Boolean(None, true),
+            TokenType::False => ASTValue::Boolean(None, false),
+            TokenType::Int => ASTValue::Int(None, 0),
+            TokenType::Int2 => ASTValue::Int2(None, empty_expr!(), empty_expr!()),
+            TokenType::Int3 => ASTValue::Int3(None, Vec3i::new(0, 0, 0)),
+            TokenType::Int4 => ASTValue::Int4(None, Vec4i::new(0, 0, 0, 0)),
+            TokenType::String => ASTValue::String(None, "".to_string()),
+            _ => ASTValue::None,
+        }
+    }
 }
 
 /// Statements in the AST
@@ -34,7 +70,7 @@ pub enum Stmt {
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
     VarDeclaration(String, Box<Expr>, Location),
-    FunctionDeclaration(String, Vec<Parameter>, Vec<Box<Stmt>>, Location),
+    FunctionDeclaration(String, Vec<ASTValue>, Vec<Box<Stmt>>, ASTValue, Location),
 }
 
 /// Expressions in the AST
@@ -204,8 +240,9 @@ pub trait Visitor {
     fn function_declaration(
         &mut self,
         name: &str,
-        args: &[Parameter],
+        args: &[ASTValue],
         body: &[Box<Stmt>],
+        returns: &ASTValue,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -220,8 +257,8 @@ impl Stmt {
             Stmt::VarDeclaration(name, initializer, loc) => {
                 visitor.var_declaration(name, initializer, loc, ctx)
             }
-            Stmt::FunctionDeclaration(name, args, body, loc) => {
-                visitor.function_declaration(name, args, body, loc, ctx)
+            Stmt::FunctionDeclaration(name, args, body, returns, loc) => {
+                visitor.function_declaration(name, args, body, returns, loc, ctx)
             }
         }
     }
@@ -250,6 +287,15 @@ impl Expr {
 pub struct Location {
     pub file: String,
     pub line: usize,
+}
+
+impl Default for Location {
+    fn default() -> Self {
+        Location {
+            file: String::new(),
+            line: 0,
+        }
+    }
 }
 
 impl Location {

@@ -167,19 +167,19 @@ impl Visitor for InterpretVisitor {
 
         match op {
             BinaryOperator::Add => match (lv, rv) {
-                (ASTValue::Int(l), ASTValue::Int(r)) => Ok(ASTValue::Int(l + r)),
+                (ASTValue::Int(_, l), ASTValue::Int(_, r)) => Ok(ASTValue::Int(None, l + r)),
                 _ => Err(format!("Invalid operands for '+' {}", loc.describe())),
             },
             BinaryOperator::Subtract => match (lv, rv) {
-                (ASTValue::Int(l), ASTValue::Int(r)) => Ok(ASTValue::Int(l - r)),
+                (ASTValue::Int(_, l), ASTValue::Int(_, r)) => Ok(ASTValue::Int(None, l - r)),
                 _ => Err(format!("Invalid operands for '-' {}", loc.describe())),
             },
             BinaryOperator::Multiply => match (lv, rv) {
-                (ASTValue::Int(l), ASTValue::Int(r)) => Ok(ASTValue::Int(l * r)),
+                (ASTValue::Int(_, l), ASTValue::Int(_, r)) => Ok(ASTValue::Int(None, l * r)),
                 _ => Err(format!("Invalid operands for '*' {}", loc.describe())),
             },
             BinaryOperator::Divide => match (lv, rv) {
-                (ASTValue::Int(l), ASTValue::Int(r)) => Ok(ASTValue::Int(l / r)),
+                (ASTValue::Int(_, l), ASTValue::Int(_, r)) => Ok(ASTValue::Int(None, l / r)),
                 _ => Err(format!("Invalid operands for '+' {}", loc.describe())),
             },
         }
@@ -256,8 +256,9 @@ impl Visitor for InterpretVisitor {
     fn function_declaration(
         &mut self,
         name: &str,
-        args: &[Parameter],
+        args: &[ASTValue],
         body: &[Box<Stmt>],
+        _returns: &ASTValue,
         _loc: &Location,
         _ctx: &mut Context,
     ) -> Result<ASTValue, String> {

@@ -45,36 +45,67 @@ impl Parser {
         let mut ctx = Context::default();
 
         for statement in statements {
-            let _rc = statement.accept(&mut visitor, &mut ctx);
+            let rc = statement.accept(&mut visitor, &mut ctx);
 
-            let wat = ctx.gen_wat();
-            let mut store = Store::default();
-            let module_rc = Module::new(&store, &wat);
-            match module_rc {
-                Ok(module) => {
-                    let import_object = imports! {};
-                    if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
-                        if let Ok(main) = instance.exports.get_function("main") {
-                            let rc = main.call(&mut store, &[Value::I64(42)]);
-                            println!("rc {:?}", rc);
-                            //println!("Result: {:?}", result);
-                            //}
+            match rc {
+                Ok(_) => {
+                    let wat = ctx.gen_wat();
+                    let mut store = Store::default();
+                    let module_rc = Module::new(&store, &wat);
+                    match module_rc {
+                        Ok(module) => {
+                            let import_object = imports! {};
+                            if let Ok(instance) = Instance::new(&mut store, &module, &import_object)
+                            {
+                                if let Ok(main) = instance.exports.get_function("main") {
+                                    let rc = main.call(&mut store, &[Value::I64(42)]);
+                                    println!("rc {:?}", rc);
+                                    //println!("Result: {:?}", result);
+                                    //}
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            println!("Error: {:?}", err.to_string());
                         }
                     }
                 }
-                Err(err) => {
-                    println!("Error: {:?}", err.to_string());
+                Err(error) => {
+                    println!("{}", error);
                 }
             }
+
             //println!("{:?}", rc);
         }
     }
 
     fn declaration(&mut self) -> Result<Stmt, String> {
-        if self.match_token(vec![TokenType::Fn]) {
-            self.function()
-        } else if self.match_token(vec![TokenType::Int]) {
-            self.var_declaration()
+        // if self.match_token(vec![TokenType::Fn]) {
+        //     self.function()
+        // } else if self.match_token(vec![TokenType::Int]) {
+        //     self.var_declaration()
+        // }
+
+        if let Some(token_type) = self.match_token_and_return(vec![
+            TokenType::Int,
+            TokenType::Int2,
+            TokenType::Int3,
+            TokenType::Int4,
+        ]) {
+            // Decide between function or var declaration
+
+            if !self.is_at_end() && self.tokens[self.current].kind == TokenType::LeftParen {
+                self.current -= 1;
+                self.statement()
+            } else if self.current + 1 < self.tokens.len() {
+                if self.tokens[self.current + 1].kind == TokenType::LeftParen {
+                    self.function(ASTValue::from_token_type(&token_type))
+                } else {
+                    self.var_declaration()
+                }
+            } else {
+                self.var_declaration()
+            }
         } else {
             self.statement()
         }
@@ -125,7 +156,7 @@ impl Parser {
         Ok(Stmt::Expression(Box::new(value), self.create_loc(line)))
     }
 
-    fn function(&mut self) -> Result<Stmt, String> {
+    fn function(&mut self, returns: ASTValue) -> Result<Stmt, String> {
         let name = self.consume(TokenType::Identifier, "Expect function name.")?;
         let line = self.current_line;
         self.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
@@ -148,7 +179,7 @@ impl Parser {
                             &format!("Expect parameter name at line {}.", line),
                         )?
                         .lexeme;
-                    parameters.push(Parameter::Int(param_name));
+                    parameters.push(ASTValue::Int(Some(param_name), 0));
                 } else {
                     return Err(format!(
                         "Invalid parameter type '{}' at line {}.",
@@ -169,6 +200,7 @@ impl Parser {
                 name.lexeme,
                 parameters,
                 body,
+                returns,
                 self.create_loc(line),
             ))
         } else {
@@ -358,26 +390,47 @@ impl Parser {
             TokenType::False => {
                 self.advance();
                 Ok(Expr::Value(
-                    ASTValue::Boolean(false),
+                    ASTValue::Boolean(None, false),
                     self.create_loc(token.line),
                 ))
             }
             TokenType::True => {
                 self.advance();
                 Ok(Expr::Value(
-                    ASTValue::Boolean(true),
+                    ASTValue::Boolean(None, true),
                     self.create_loc(token.line),
                 ))
             }
             TokenType::Number => {
                 self.advance();
-                if let Ok(number) = token.lexeme.parse::<i64>() {
+                if let Ok(number) = token.lexeme.parse::<i32>() {
                     Ok(Expr::Value(
-                        ASTValue::Int(number),
+                        ASTValue::Int(None, number),
                         self.create_loc(token.line),
                     ))
                 } else {
                     Err("Invalid Number".to_string())
+                }
+            }
+            TokenType::Int2 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let x = self.expression()?;
+                    if self.match_token(vec![TokenType::Comma]) {
+                        let y = self.expression()?;
+                        if self.match_token(vec![TokenType::RightParen]) {
+                            Ok(Expr::Value(
+                                ASTValue::Int2(None, Box::new(x), Box::new(y)),
+                                self.create_loc(token.line),
+                            ))
+                        } else {
+                            Err("Expected ')' after ivec2".to_string())
+                        }
+                    } else {
+                        Err("Expected ',' after ivec2".to_string())
+                    }
+                } else {
+                    Err("Expected '(' after ivec2".to_string())
                 }
             }
             TokenType::LeftParen => {
@@ -430,6 +483,16 @@ impl Parser {
         } else {
             false
         }
+    }
+
+    fn match_token_and_return(&mut self, expected: Vec<TokenType>) -> Option<TokenType> {
+        for &kind in &expected {
+            if self.check(kind) {
+                self.advance();
+                return Some(kind);
+            }
+        }
+        None
     }
 
     fn check(&self, kind: TokenType) -> bool {

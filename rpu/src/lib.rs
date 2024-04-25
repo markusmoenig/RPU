@@ -16,6 +16,7 @@ pub mod prelude {
     pub use crate::parser::*;
     pub use crate::rpu::RPU;
     pub use crate::scanner::*;
+    pub use maths_rs::prelude::*;
     pub use rustc_hash::FxHashMap;
 }
 
