@@ -1,3 +1,7 @@
 ivec2 main(int x) {
-    2 * ivec2(x, (1 + 2) * 3) - ivec2(50, 50);
+    ivec2 result = 2 * ivec2(5, 2);
+
+    result = ivec2(0, 1);
+
+    result;
 }

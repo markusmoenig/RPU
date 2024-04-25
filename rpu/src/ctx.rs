@@ -32,10 +32,13 @@ pub struct Context {
     math_funcs_included: rustc_hash::FxHashSet<String>,
     math_funcs: String,
 
-    /// Verbose / debug mode for the interpreter
-    pub verbose: bool,
+    /// The current indentation level
+    indention: usize,
 
-    ///
+    /// The generated WAT code for function locals.
+    pub wat_locals: String,
+
+    /// The generated WAT code
     pub wat: String,
 }
 
@@ -54,25 +57,46 @@ impl Context {
             math_funcs_included: rustc_hash::FxHashSet::default(),
             math_funcs: String::new(),
 
-            verbose: true,
+            indention: 1,
+
+            wat_locals: String::new(),
             wat: String::new(),
         }
     }
 
+    /// Adds indention
+    pub fn add_indention(&mut self) {
+        self.indention += 1;
+    }
+
+    /// Removes indention
+    pub fn remove_indention(&mut self) {
+        if self.indention > 0 {
+            self.indention -= 1;
+        }
+    }
+
+    pub fn add_line(&mut self) {
+        self.wat.push('\n');
+    }
+
+    /// Adds wat code
+    pub fn add_wat(&mut self, wat: &str) {
+        let spaces = " ".repeat(self.indention * 4);
+        self.wat.push_str(&format!("{}{}\n", spaces, wat));
+    }
+
     pub fn gen_wat(&mut self) -> String {
-        let mut header = "(module\n(memory 1)\n".to_string();
+        let mut header = "(module\n    (memory 1)\n".to_string();
 
         header += &self.math_funcs;
-
-        println!("header: {}", header);
 
         let mut wat = header.to_string();
         wat.push_str(&self.wat);
 
         wat.push_str(")\n");
 
-        //println!("--");
-        //println!("{}", wat);
+        println!("{}", wat);
 
         wat
     }
@@ -86,25 +110,26 @@ impl Context {
 
         let str = format!(
             r#"
-            (func ${func_name}
-                (param $scalar {data_type})    ;; Scalar
-                (param $vec2_x {data_type})    ;; x component of vec2
-                (param $vec2_y {data_type})    ;; y component of vec2
-                (result {data_type} {data_type})       ;; Return two {data_type} results, the new x and y components
+    ;; scalar {op} vec2 ({data_type})
+    (func ${func_name}
+        (param $scalar {data_type})  ;; Scalar
+        (param $vec2_x {data_type})  ;; x component of vec2
+        (param $vec2_y {data_type})  ;; y component of vec2
+        (result {data_type} {data_type})  ;; Return two {data_type} results, the new x and y components
 
-                ;; Calculate the new x component and return it
-                ({data_type}.{op}
-                  (local.get $scalar)  ;; Get the scalar
-                  (local.get $vec2_x)  ;; Get the x component
-                )
+        ;; Calculate the new x component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec2_x)  ;; Get the x component
+        )
 
-                ;; Calculate the new y component and return it
-                ({data_type}.{op}
-                  (local.get $scalar)  ;; Get the scalar
-                  (local.get $vec2_y)  ;; Get the y component
-                )
-            )
-        "#,
+        ;; Calculate the new y component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec2_y)  ;; Get the y component
+        )
+    )
+"#,
             func_name = func_name,
             data_type = data_type,
             op = op
@@ -123,25 +148,26 @@ impl Context {
 
         let str = format!(
             r#"
-            (func ${func_name}
-                (param $vec2_x {data_type})    ;; x component of vec2
-                (param $vec2_y {data_type})    ;; y component of vec2
-                (param $scalar {data_type})    ;; Scalar
-                (result {data_type} {data_type})       ;; Return two {data_type} results, the new x and y components
+    ;; vec2 {op} scalar ({data_type})
+    (func ${func_name}
+        (param $vec2_x {data_type})    ;; x component of vec2
+        (param $vec2_y {data_type})    ;; y component of vec2
+        (param $scalar {data_type})    ;; Scalar
+        (result {data_type} {data_type})       ;; Return two {data_type} results, the new x and y components
 
-                ;; Calculate the new x component and return it
-                ({data_type}.{op}
-                  (local.get $vec2_x)  ;; Get the x component
-                  (local.get $scalar)  ;; Get the scalar
-                )
+        ;; Calculate the new x component and return it
+        ({data_type}.{op}
+            (local.get $vec2_x)  ;; Get the x component
+            (local.get $scalar)  ;; Get the scalar
+        )
 
-                ;; Calculate the new y component and return it
-                ({data_type}.{op}
-                  (local.get $vec2_y)  ;; Get the y component
-                  (local.get $scalar)  ;; Get the scalar
-                )
-            )
-        "#,
+        ;; Calculate the new y component and return it
+        ({data_type}.{op}
+            (local.get $vec2_y)  ;; Get the y component
+            (local.get $scalar)  ;; Get the scalar
+        )
+    )
+"#,
             func_name = func_name,
             data_type = data_type,
             op = op

@@ -56,11 +56,7 @@ impl Visitor for InterpretVisitor {
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        let e = expression.accept(self, ctx);
-        if ctx.verbose {
-            println!("E {:?}", e);
-        }
-        e
+        expression.accept(self, ctx)
     }
 
     fn var_declaration(
@@ -71,10 +67,6 @@ impl Visitor for InterpretVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let v = expression.accept(self, ctx)?;
-
-        if ctx.verbose {
-            println!("{} {} = {:?}", v.to_type(), name, v);
-        }
 
         self.environment.define(name.to_string(), v);
 
@@ -161,10 +153,6 @@ impl Visitor for InterpretVisitor {
         let lv = left.accept(self, ctx)?;
         let rv = right.accept(self, ctx)?;
 
-        if ctx.verbose {
-            println!("B {:?} {} {:?}", lv, op.describe(), rv);
-        }
-
         match op {
             BinaryOperator::Add => match (lv, rv) {
                 (ASTValue::Int(_, l), ASTValue::Int(_, r)) => Ok(ASTValue::Int(None, l + r)),
@@ -198,18 +186,11 @@ impl Visitor for InterpretVisitor {
         &mut self,
         name: String,
         loc: &Location,
-        ctx: &mut Context,
+        _ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         if let Some(v) = self.environment.get(&name) {
-            if ctx.verbose {
-                println!("V {} ({:?})", name, v);
-            }
             Ok(v)
         } else if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
-            if ctx.verbose {
-                println!("F {}", name);
-            }
-
             Ok(ASTValue::Function(name.clone(), args.clone(), body.clone()))
         } else {
             Err(format!("Unknown identifier '{}' {}", name, loc.describe()))
@@ -224,9 +205,6 @@ impl Visitor for InterpretVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let v = expression.accept(self, ctx)?;
-        if ctx.verbose {
-            println!("A {} ({:?})", name, v);
-        }
         self.environment.assign(&name, v);
 
         Ok(ASTValue::None)

@@ -291,10 +291,7 @@ pub struct Location {
 
 impl Default for Location {
     fn default() -> Self {
-        Location {
-            file: String::new(),
-            line: 0,
-        }
+        Self::new("".to_string(), 0)
     }
 }
 

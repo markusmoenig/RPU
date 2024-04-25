@@ -2,14 +2,18 @@ use crate::empty_expr;
 use crate::prelude::*;
 
 /// CompileVisitor
-pub struct CompileVisitor;
+pub struct CompileVisitor {
+    environment: Environment,
+}
 
 impl Visitor for CompileVisitor {
     fn new() -> Self
     where
         Self: Sized,
     {
-        Self {}
+        Self {
+            environment: Environment::default(),
+        }
     }
 
     fn print(
@@ -27,10 +31,15 @@ impl Visitor for CompileVisitor {
 
     fn block(
         &mut self,
-        _list: &[Box<Stmt>],
+        list: &[Box<Stmt>],
         _loc: &Location,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Result<ASTValue, String> {
+        self.environment.begin_scope();
+        for stmt in list {
+            stmt.accept(self, ctx)?;
+        }
+        self.environment.end_scope();
         Ok(ASTValue::None)
     }
 
@@ -40,20 +49,99 @@ impl Visitor for CompileVisitor {
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        let e = expression.accept(self, ctx);
-        if ctx.verbose {
-            //println!("E {:?}", e);
-        }
-        e
+        expression.accept(self, ctx)
     }
 
     fn var_declaration(
         &mut self,
-        _name: &str,
-        _expression: &Expr,
+        name: &str,
+        expression: &Expr,
         _loc: &Location,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Result<ASTValue, String> {
+        let v = expression.accept(self, ctx)?;
+
+        match &v {
+            ASTValue::Int(_, _) => {
+                let instr = format!("(local ${} i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+
+                let instr = format!("local.set ${}", name);
+                ctx.add_wat(&instr);
+            }
+            ASTValue::Int2(_, _, _) => {
+                let instr = format!("(local ${}_x i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_y i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+
+                let instr = format!("local.set ${}_y", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_x", name);
+                ctx.add_wat(&instr);
+            }
+            _ => {}
+        }
+
+        self.environment.define(name.to_string(), v);
+
+        Ok(ASTValue::None)
+    }
+
+    fn variable_assignment(
+        &mut self,
+        name: String,
+        expression: &Expr,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        let v = expression.accept(self, ctx)?;
+
+        match &v {
+            ASTValue::Int(_, _) => {
+                let instr = format!("local.set ${}", name);
+                ctx.add_wat(&instr);
+            }
+            ASTValue::Int2(_, _, _) => {
+                let instr = format!("local.set ${}_y", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_x", name);
+                ctx.add_wat(&instr);
+            }
+            _ => {}
+        }
+
+        self.environment.assign(&name, v);
+
+        Ok(ASTValue::None)
+    }
+
+    fn variable(
+        &mut self,
+        name: String,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        let instr = String::new();
+
+        if let Some(v) = self.environment.get(&name) {
+            match &v {
+                ASTValue::Int(_, _) => {
+                    let instr = format!("local.get ${}", name);
+                    ctx.add_wat(&instr);
+                }
+                ASTValue::Int2(_, _, _) => {
+                    let instr = format!("local.get ${}_x", name);
+                    ctx.add_wat(&instr);
+                    let instr = format!("local.get ${}_y", name);
+                    ctx.add_wat(&instr);
+                }
+                _ => {}
+            }
+        }
+
+        ctx.add_wat(&instr);
+
         Ok(ASTValue::None)
     }
 
@@ -86,11 +174,7 @@ impl Visitor for CompileVisitor {
             }
         };
 
-        if ctx.verbose {
-            println!("V {}", instr);
-        }
-
-        ctx.wat.push_str(&format!("{}\n", instr));
+        ctx.add_wat(&instr);
         Ok(rc)
     }
 
@@ -164,7 +248,7 @@ impl Visitor for CompileVisitor {
     ) -> Result<ASTValue, String> {
         let left_type = left.accept(self, ctx)?;
         let right_type = right.accept(self, ctx)?;
-        let mut rc = ASTValue::None;
+        let rc;
 
         //println!("{:?} {:?}", left_type, right_type);
 
@@ -233,11 +317,7 @@ impl Visitor for CompileVisitor {
             }
         };
 
-        if ctx.verbose {
-            println!("B {}", instr);
-        }
-
-        ctx.wat.push_str(&format!("{}\n", instr));
+        ctx.add_wat(&instr);
 
         Ok(rc)
     }
@@ -249,33 +329,6 @@ impl Visitor for CompileVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         expression.accept(self, ctx)
-    }
-
-    fn variable(
-        &mut self,
-        name: String,
-        _loc: &Location,
-        ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
-        let instr = format!("(local.get ${})", name);
-
-        if ctx.verbose {
-            println!("V {}", instr);
-        }
-
-        ctx.wat.push_str(&format!("{}\n", instr));
-
-        Ok(ASTValue::None)
-    }
-
-    fn variable_assignment(
-        &mut self,
-        _name: String,
-        _expression: &Expr,
-        _loc: &Location,
-        _ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
-        Ok(ASTValue::None)
     }
 
     fn function_call(
@@ -303,8 +356,16 @@ impl Visitor for CompileVisitor {
             match param {
                 ASTValue::Int(name, _) => {
                     params += &format!(
-                        "{} (param ${} i{})",
-                        params,
+                        "(param ${} i{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe()
+                    )
+                }
+                ASTValue::Int2(name, _, _) => {
+                    params += &format!(
+                        "(param ${}_x i{}) (param ${}_y i{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
                         name.clone().unwrap(),
                         ctx.precision.describe()
                     )
@@ -323,20 +384,24 @@ impl Visitor for CompileVisitor {
             "(func ${} (export \"{}\") {} {}",
             name, name, params, return_type
         );
-        if ctx.verbose {
-            println!("{}", instr);
-        }
-        ctx.wat.push_str(&format!("{}\n", instr));
+
+        ctx.add_line();
+        ctx.add_wat(&format!(";; function '{}'", name));
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        ctx.wat_locals = String::new();
+
+        ctx.wat.push_str("__LOCALS__\n");
 
         for stmt in body {
             stmt.accept(self, ctx)?;
         }
 
-        ctx.wat.push_str(")\n");
+        ctx.wat = ctx.wat.replace("__LOCALS__", &ctx.wat_locals);
 
-        if ctx.verbose {
-            println!(")");
-        }
+        ctx.remove_indention();
+        ctx.add_wat(")");
 
         Ok(ASTValue::None)
     }
