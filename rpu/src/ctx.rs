@@ -1,4 +1,5 @@
-//use crate::prelude::*;
+use crate::empty_expr;
+use crate::prelude::*;
 
 #[derive(Clone, Debug)]
 pub enum Precision {
@@ -86,6 +87,34 @@ impl Context {
         self.wat.push_str(&format!("{}{}\n", spaces, wat));
     }
 
+    /// Deswizzle a swizzle component.
+    pub fn deswizzle(&self, s: u8) -> String {
+        match s {
+            0 => "x".to_string(),
+            1 => "y".to_string(),
+            2 => "z".to_string(),
+            3 => "w".to_string(),
+            _ => panic!("Invalid swizzle component"),
+        }
+    }
+
+    pub fn create_value_from_swizzle(&self, components: usize) -> ASTValue {
+        match components {
+            1 => ASTValue::Int(None, 0),
+            2 => ASTValue::Int2(None, empty_expr!(), empty_expr!()),
+            3 => ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!()),
+            3 => ASTValue::Int4(
+                None,
+                empty_expr!(),
+                empty_expr!(),
+                empty_expr!(),
+                empty_expr!(),
+            ),
+            _ => panic!("Invalid swizzle components"),
+        }
+    }
+
+    /// Generate the final wat code
     pub fn gen_wat(&mut self) -> String {
         let mut header = "(module\n    (memory 1)\n".to_string();
 

@@ -241,9 +241,10 @@ impl Parser {
             let equals = self.previous().unwrap();
             let value = self.assignment()?;
 
-            if let Expr::Variable(name, _loc) = expr {
+            if let Expr::Variable(name, swizzle, _loc) = expr {
                 return Ok(Expr::VariableAssignment(
                     name,
+                    swizzle.clone(),
                     Box::new(value),
                     self.create_loc(equals.line),
                 ));
@@ -444,13 +445,71 @@ impl Parser {
             }
             TokenType::Identifier => {
                 self.advance();
-                Ok(Expr::Variable(token.lexeme, self.create_loc(token.line)))
+                //let (name, swizzle) = Self::extract_swizzle(&token.lexeme);
+                //println!("Name: {:?}, Swizzle: {:?}", &token.lexeme, swizzle);
+
+                let mut swizzle: Vec<u8> = vec![];
+
+                if self.current + 1 < self.tokens.len()
+                    && self.tokens[self.current].kind == TokenType::Dot
+                    && self.tokens[self.current + 1].kind == TokenType::Identifier
+                {
+                    let swizzle_token = self.tokens[self.current + 1].lexeme.clone();
+                    if swizzle_token
+                        .chars()
+                        .all(|c| matches!(c, 'x' | 'y' | 'z' | 'w'))
+                    {
+                        swizzle = swizzle_token
+                            .chars()
+                            .map(|c| match c {
+                                'x' => 0,
+                                'y' => 1,
+                                'z' => 2,
+                                'w' => 3,
+                                _ => unreachable!(),
+                            })
+                            .collect();
+                        self.current += 2;
+                    }
+                }
+
+                Ok(Expr::Variable(
+                    token.lexeme,
+                    swizzle,
+                    self.create_loc(token.line),
+                ))
             }
             _ => Err(format!(
                 "Unknown identifier {:?} at line {}.",
                 token.lexeme, token.line
             )),
         }
+    }
+
+    /// Extract a potential swizzle from the variable name.
+    fn _extract_swizzle(input: &str) -> (&str, Vec<u8>) {
+        if let Some(pos) = input.rfind('.') {
+            let (base, swizzle) = input.split_at(pos);
+            let swizzle = &swizzle[1..]; // Skip the dot
+
+            // Check if all characters in the swizzle are 'x', 'y', 'z', or 'w'
+            if swizzle.chars().all(|c| matches!(c, 'x' | 'y' | 'z' | 'w')) {
+                // Map 'x', 'y', 'z', 'w' to 0, 1, 2, 3 respectively
+                let swizzle_bytes = swizzle
+                    .chars()
+                    .map(|c| match c {
+                        'x' => 0,
+                        'y' => 1,
+                        'z' => 2,
+                        'w' => 3,
+                        _ => unreachable!(),
+                    })
+                    .collect::<Vec<u8>>();
+
+                return (base, swizzle_bytes);
+            }
+        }
+        (input, Vec::new())
     }
 
     /// Extract all tokens from the scanner.

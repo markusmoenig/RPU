@@ -91,11 +91,39 @@ impl Visitor for CompileVisitor {
     fn variable_assignment(
         &mut self,
         name: String,
+        swizzle: &Vec<u8>,
         expression: &Expr,
-        _loc: &Location,
+        loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        let v = expression.accept(self, ctx)?;
+        let mut v = expression.accept(self, ctx)?;
+
+        let incoming_components = v.components();
+
+        // Use the type of the variable
+        if let Some(vv) = self.environment.get(&name) {
+            v = vv;
+        }
+
+        if swizzle.is_empty() {
+            if incoming_components != v.components() {
+                return Err(format!(
+                    "Variable '{}' has {} components, but expression has {} {}",
+                    name,
+                    v.components(),
+                    incoming_components,
+                    loc.describe()
+                ));
+            }
+        } else if incoming_components != swizzle.len() {
+            return Err(format!(
+                "Variable '{}' has {} swizzle, but expression has {} components {}",
+                name,
+                swizzle.len(),
+                incoming_components,
+                loc.describe()
+            ));
+        }
 
         match &v {
             ASTValue::Int(_, _) => {
@@ -103,10 +131,33 @@ impl Visitor for CompileVisitor {
                 ctx.add_wat(&instr);
             }
             ASTValue::Int2(_, _, _) => {
-                let instr = format!("local.set ${}_y", name);
-                ctx.add_wat(&instr);
-                let instr = format!("local.set ${}_x", name);
-                ctx.add_wat(&instr);
+                if swizzle.is_empty() {
+                    let instr = format!("local.set ${}_y", name);
+                    ctx.add_wat(&instr);
+                    let instr = format!("local.set ${}_x", name);
+                    ctx.add_wat(&instr);
+                } else {
+                    for s in swizzle.iter().rev() {
+                        match s {
+                            0 => {
+                                let instr = format!("local.set ${}_x", name);
+                                ctx.add_wat(&instr);
+                            }
+                            1 => {
+                                let instr = format!("local.set ${}_y", name);
+                                ctx.add_wat(&instr);
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "Swizzle '{}' out of range for '{}' {}",
+                                    ctx.deswizzle(*s),
+                                    name,
+                                    loc.describe()
+                                ))
+                            }
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -119,22 +170,55 @@ impl Visitor for CompileVisitor {
     fn variable(
         &mut self,
         name: String,
-        _loc: &Location,
+        swizzle: &Vec<u8>,
+        loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let instr = String::new();
+        let mut rc = ASTValue::None;
+
+        if swizzle.len() > 4 {
+            return Err(format!(
+                "Maximal swizzle length is 4, got {} for '{}' {}",
+                swizzle.len(),
+                name,
+                loc.describe()
+            ));
+        }
+
+        if !swizzle.is_empty() {
+            rc = ctx.create_value_from_swizzle(swizzle.len());
+        }
 
         if let Some(v) = self.environment.get(&name) {
             match &v {
                 ASTValue::Int(_, _) => {
                     let instr = format!("local.get ${}", name);
                     ctx.add_wat(&instr);
+                    rc = ASTValue::Int(None, 0);
                 }
                 ASTValue::Int2(_, _, _) => {
-                    let instr = format!("local.get ${}_x", name);
-                    ctx.add_wat(&instr);
-                    let instr = format!("local.get ${}_y", name);
-                    ctx.add_wat(&instr);
+                    if swizzle.is_empty() {
+                        let instr = format!("local.get ${}_x", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_y", name);
+                        ctx.add_wat(&instr);
+                        rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+                    } else {
+                        for s in swizzle {
+                            match s {
+                                0 => {
+                                    let instr = format!("local.get ${}_x", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                1 => {
+                                    let instr = format!("local.get ${}_y", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -142,7 +226,7 @@ impl Visitor for CompileVisitor {
 
         ctx.add_wat(&instr);
 
-        Ok(ASTValue::None)
+        Ok(rc)
     }
 
     fn value(

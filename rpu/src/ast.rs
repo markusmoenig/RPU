@@ -14,13 +14,24 @@ pub enum ASTValue {
     Boolean(Option<String>, bool),
     Int(Option<String>, i32),
     Int2(Option<String>, Box<Expr>, Box<Expr>),
-    Int3(Option<String>, Vec3i),
-    Int4(Option<String>, Vec4i),
+    Int3(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>),
+    Int4(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>, Box<Expr>),
     String(Option<String>, String),
     Function(String, Vec<ASTValue>, Vec<Box<Stmt>>),
 }
 
 impl ASTValue {
+    // The components of the value.
+    pub fn components(&self) -> usize {
+        match self {
+            ASTValue::Int(_, _) => 1,
+            ASTValue::Int2(_, _, _) => 2,
+            ASTValue::Int3(_, _, _, _) => 3,
+            ASTValue::Int4(_, _, _, _, _) => 4,
+            _ => 0,
+        }
+    }
+
     /// Returns the RPU type of the given value.
     pub fn to_type(&self) -> String {
         match self {
@@ -28,8 +39,8 @@ impl ASTValue {
             ASTValue::Boolean(_, _) => "bool".to_string(),
             ASTValue::Int(_, _) => "int".to_string(),
             ASTValue::Int2(_, _, _) => "ivec2".to_string(),
-            ASTValue::Int3(_, _) => "ivec4".to_string(),
-            ASTValue::Int4(_, _) => "ivec4".to_string(),
+            ASTValue::Int3(_, _, _, _) => "ivec4".to_string(),
+            ASTValue::Int4(_, _, _, _, _) => "ivec4".to_string(),
             ASTValue::String(_, _) => "string".to_string(),
             ASTValue::Function(_, _, _) => "fn".to_string(),
         }
@@ -41,8 +52,8 @@ impl ASTValue {
             ASTValue::Boolean(_, _) => Some(format!("(i{}", pr)),
             ASTValue::Int(_, _) => Some(format!("i{}", pr)),
             ASTValue::Int2(_, _, _) => Some(format!("i{} i{}", pr, pr)),
-            ASTValue::Int3(_, _) => Some(format!("i{} i{} i{}", pr, pr, pr)),
-            ASTValue::Int4(_, _) => Some(format!("i{} i{} i{} i{}", pr, pr, pr, pr)),
+            ASTValue::Int3(_, _, _, _) => Some(format!("i{} i{} i{}", pr, pr, pr)),
+            ASTValue::Int4(_, _, _, _, _) => Some(format!("i{} i{} i{} i{}", pr, pr, pr, pr)),
             _ => None,
         }
     }
@@ -55,8 +66,14 @@ impl ASTValue {
             TokenType::False => ASTValue::Boolean(None, false),
             TokenType::Int => ASTValue::Int(None, 0),
             TokenType::Int2 => ASTValue::Int2(None, empty_expr!(), empty_expr!()),
-            TokenType::Int3 => ASTValue::Int3(None, Vec3i::new(0, 0, 0)),
-            TokenType::Int4 => ASTValue::Int4(None, Vec4i::new(0, 0, 0, 0)),
+            TokenType::Int3 => ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!()),
+            TokenType::Int4 => ASTValue::Int4(
+                None,
+                empty_expr!(),
+                empty_expr!(),
+                empty_expr!(),
+                empty_expr!(),
+            ),
             TokenType::String => ASTValue::String(None, "".to_string()),
             _ => ASTValue::None,
         }
@@ -82,8 +99,8 @@ pub enum Expr {
     Comparison(Box<Expr>, ComparisonOperator, Box<Expr>, Location),
     Binary(Box<Expr>, BinaryOperator, Box<Expr>, Location),
     Grouping(Box<Expr>, Location),
-    Variable(String, Location),
-    VariableAssignment(String, Box<Expr>, Location),
+    Variable(String, Vec<u8>, Location),
+    VariableAssignment(String, Vec<u8>, Box<Expr>, Location),
     FunctionCall(Box<Expr>, Vec<Box<Expr>>, Location),
 }
 
@@ -217,6 +234,7 @@ pub trait Visitor {
     fn variable(
         &mut self,
         name: String,
+        swizzle: &Vec<u8>,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -224,6 +242,7 @@ pub trait Visitor {
     fn variable_assignment(
         &mut self,
         name: String,
+        swizzle: &Vec<u8>,
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
@@ -273,9 +292,9 @@ impl Expr {
             Expr::Comparison(left, op, right, loc) => visitor.comparison(left, op, right, loc, ctx),
             Expr::Binary(left, op, right, loc) => visitor.binary(left, op, right, loc, ctx),
             Expr::Grouping(expr, loc) => visitor.grouping(expr, loc, ctx),
-            Expr::Variable(name, loc) => visitor.variable(name.clone(), loc, ctx),
-            Expr::VariableAssignment(name, expr, loc) => {
-                visitor.variable_assignment(name.clone(), expr, loc, ctx)
+            Expr::Variable(name, swizzle, loc) => visitor.variable(name.clone(), swizzle, loc, ctx),
+            Expr::VariableAssignment(name, swizzle, expr, loc) => {
+                visitor.variable_assignment(name.clone(), swizzle, expr, loc, ctx)
             }
             Expr::FunctionCall(callee, args, loc) => visitor.function_call(callee, args, loc, ctx),
         }
