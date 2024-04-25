@@ -91,7 +91,7 @@ impl Visitor for CompileVisitor {
     fn variable_assignment(
         &mut self,
         name: String,
-        swizzle: &Vec<u8>,
+        swizzle: &[u8],
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
@@ -170,7 +170,7 @@ impl Visitor for CompileVisitor {
     fn variable(
         &mut self,
         name: String,
-        swizzle: &Vec<u8>,
+        swizzle: &[u8],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {

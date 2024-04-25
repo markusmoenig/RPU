@@ -103,7 +103,7 @@ impl Context {
             1 => ASTValue::Int(None, 0),
             2 => ASTValue::Int2(None, empty_expr!(), empty_expr!()),
             3 => ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!()),
-            3 => ASTValue::Int4(
+            4 => ASTValue::Int4(
                 None,
                 empty_expr!(),
                 empty_expr!(),

@@ -420,6 +420,7 @@ impl Parser {
                     if self.match_token(vec![TokenType::Comma]) {
                         let y = self.expression()?;
                         if self.match_token(vec![TokenType::RightParen]) {
+                            // TODO: Swizzling for constants.
                             Ok(Expr::Value(
                                 ASTValue::Int2(None, Box::new(x), Box::new(y)),
                                 self.create_loc(token.line),
@@ -445,33 +446,8 @@ impl Parser {
             }
             TokenType::Identifier => {
                 self.advance();
-                //let (name, swizzle) = Self::extract_swizzle(&token.lexeme);
-                //println!("Name: {:?}, Swizzle: {:?}", &token.lexeme, swizzle);
 
-                let mut swizzle: Vec<u8> = vec![];
-
-                if self.current + 1 < self.tokens.len()
-                    && self.tokens[self.current].kind == TokenType::Dot
-                    && self.tokens[self.current + 1].kind == TokenType::Identifier
-                {
-                    let swizzle_token = self.tokens[self.current + 1].lexeme.clone();
-                    if swizzle_token
-                        .chars()
-                        .all(|c| matches!(c, 'x' | 'y' | 'z' | 'w'))
-                    {
-                        swizzle = swizzle_token
-                            .chars()
-                            .map(|c| match c {
-                                'x' => 0,
-                                'y' => 1,
-                                'z' => 2,
-                                'w' => 3,
-                                _ => unreachable!(),
-                            })
-                            .collect();
-                        self.current += 2;
-                    }
-                }
+                let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                 Ok(Expr::Variable(
                     token.lexeme,
@@ -484,6 +460,36 @@ impl Parser {
                 token.lexeme, token.line
             )),
         }
+    }
+
+    /// Returns the swizzle at the current token if any.
+    pub fn get_swizzle_at_current(&mut self) -> Vec<u8> {
+        let mut swizzle: Vec<u8> = vec![];
+
+        if self.current + 1 < self.tokens.len()
+            && self.tokens[self.current].kind == TokenType::Dot
+            && self.tokens[self.current + 1].kind == TokenType::Identifier
+        {
+            let swizzle_token = self.tokens[self.current + 1].lexeme.clone();
+            if swizzle_token
+                .chars()
+                .all(|c| matches!(c, 'x' | 'y' | 'z' | 'w'))
+            {
+                swizzle = swizzle_token
+                    .chars()
+                    .map(|c| match c {
+                        'x' => 0,
+                        'y' => 1,
+                        'z' => 2,
+                        'w' => 3,
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                self.current += 2;
+            }
+        }
+
+        swizzle
     }
 
     /// Extract a potential swizzle from the variable name.
