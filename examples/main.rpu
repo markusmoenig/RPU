@@ -1,7 +1,7 @@
-ivec2 main(int x) {
+int main(int x) {
     ivec2 result = 2 * ivec2(5, 2);
 
-    result.y = result.x + 1;
+    return void;
 
-    result.xy;
+    //return result.xy;
 }

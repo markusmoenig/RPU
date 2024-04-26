@@ -35,7 +35,7 @@ impl Visitor for CompileVisitor {
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        self.environment.begin_scope();
+        self.environment.begin_scope(ASTValue::None);
         for stmt in list {
             stmt.accept(self, ctx)?;
         }
@@ -431,7 +431,7 @@ impl Visitor for CompileVisitor {
         args: &[ASTValue],
         body: &[Box<Stmt>],
         returns: &ASTValue,
-        _loc: &Location,
+        loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let mut params = String::new();
@@ -478,9 +478,24 @@ impl Visitor for CompileVisitor {
 
         ctx.wat.push_str("__LOCALS__\n");
 
+        self.environment.begin_scope(returns.clone());
+
+        let mut last_value = ASTValue::None;
         for stmt in body {
-            stmt.accept(self, ctx)?;
+            last_value = stmt.accept(self, ctx)?;
         }
+
+        if let Some(ret) = self.environment.get_return() {
+            if ret.to_type() != "void" && last_value.to_type() != ret.to_type() {
+                return Err(format!(
+                    "Function '{}' does not end with a 'return' statement {}",
+                    name,
+                    loc.describe()
+                ));
+            }
+        }
+
+        self.environment.end_scope();
 
         ctx.wat = ctx.wat.replace("__LOCALS__", &ctx.wat_locals);
 
@@ -488,5 +503,29 @@ impl Visitor for CompileVisitor {
         ctx.add_wat(")");
 
         Ok(ASTValue::None)
+    }
+
+    fn _return(
+        &mut self,
+        expr: &Expr,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        let rc = expr.accept(self, ctx)?;
+
+        if let Some(ret) = self.environment.get_return() {
+            if rc.to_type() != ret.to_type() {
+                return Err(format!(
+                    "Invalid return type '{}', should be '{}' {}",
+                    rc.to_type(),
+                    ret.to_type(),
+                    loc.describe()
+                ));
+            }
+        }
+
+        ctx.add_wat("(return)");
+
+        Ok(rc)
     }
 }

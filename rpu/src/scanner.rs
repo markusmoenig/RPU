@@ -46,7 +46,7 @@ pub enum TokenType {
     For,
     Fn,
     If,
-    Nil,
+    Void,
     Or,
     Print,
     Return,
@@ -103,7 +103,7 @@ impl Scanner {
         keywords.insert("for", TokenType::For);
         keywords.insert("fn", TokenType::Fn);
         keywords.insert("if", TokenType::If);
-        keywords.insert("nil", TokenType::Nil);
+        keywords.insert("void", TokenType::Void);
         keywords.insert("or", TokenType::Or);
         keywords.insert("print", TokenType::Print);
         keywords.insert("return", TokenType::Return);

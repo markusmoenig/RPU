@@ -35,7 +35,7 @@ impl ASTValue {
     /// Returns the RPU type of the given value.
     pub fn to_type(&self) -> String {
         match self {
-            ASTValue::None => "nil".to_string(),
+            ASTValue::None => "void".to_string(),
             ASTValue::Boolean(_, _) => "bool".to_string(),
             ASTValue::Int(_, _) => "int".to_string(),
             ASTValue::Int2(_, _, _) => "ivec2".to_string(),
@@ -61,7 +61,7 @@ impl ASTValue {
     /// Creates an ASTValue from a TokenType.
     pub fn from_token_type(token_type: &TokenType) -> ASTValue {
         match token_type {
-            TokenType::Nil => ASTValue::None,
+            TokenType::Void => ASTValue::None,
             TokenType::True => ASTValue::Boolean(None, true),
             TokenType::False => ASTValue::Boolean(None, false),
             TokenType::Int => ASTValue::Int(None, 0),
@@ -88,6 +88,7 @@ pub enum Stmt {
     Expression(Box<Expr>, Location),
     VarDeclaration(String, Box<Expr>, Location),
     FunctionDeclaration(String, Vec<ASTValue>, Vec<Box<Stmt>>, ASTValue, Location),
+    Return(Box<Expr>, Location),
 }
 
 /// Expressions in the AST
@@ -265,6 +266,13 @@ pub trait Visitor {
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
+
+    fn _return(
+        &mut self,
+        expr: &Expr,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
 }
 
 impl Stmt {
@@ -279,6 +287,7 @@ impl Stmt {
             Stmt::FunctionDeclaration(name, args, body, returns, loc) => {
                 visitor.function_declaration(name, args, body, returns, loc, ctx)
             }
+            Stmt::Return(expr, loc) => visitor._return(expr, loc, ctx),
         }
     }
 }

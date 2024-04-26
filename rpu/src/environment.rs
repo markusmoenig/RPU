@@ -3,6 +3,7 @@ use crate::prelude::*;
 // Define a struct to represent the environment
 pub struct Environment {
     scopes: Vec<FxHashMap<String, ASTValue>>,
+    scoped_returns: Vec<ASTValue>,
 }
 
 impl Default for Environment {
@@ -15,6 +16,7 @@ impl Environment {
     pub fn new() -> Self {
         Environment {
             scopes: vec![FxHashMap::default()],
+            scoped_returns: vec![],
         }
     }
 
@@ -47,12 +49,19 @@ impl Environment {
     }
 
     /// Begin a new scope.
-    pub fn begin_scope(&mut self) {
+    pub fn begin_scope(&mut self, returns: ASTValue) {
         self.scopes.push(FxHashMap::default());
+        self.scoped_returns.push(returns);
     }
 
     /// End the current scope.
     pub fn end_scope(&mut self) {
         self.scopes.pop();
+        self.scoped_returns.pop();
+    }
+
+    /// Returns the return value of the current scope.
+    pub fn get_return(&self) -> Option<ASTValue> {
+        self.scoped_returns.last().cloned()
     }
 }

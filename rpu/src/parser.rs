@@ -87,6 +87,7 @@ impl Parser {
         // }
 
         if let Some(token_type) = self.match_token_and_return(vec![
+            TokenType::Void,
             TokenType::Int,
             TokenType::Int2,
             TokenType::Int3,
@@ -135,6 +136,8 @@ impl Parser {
     fn statement(&mut self) -> Result<Stmt, String> {
         if self.match_token(vec![TokenType::Print]) {
             self.print_statement()
+        } else if self.match_token(vec![TokenType::Return]) {
+            self.return_statement()
         } else if self.match_token(vec![TokenType::LeftBrace]) {
             self.block()
         } else {
@@ -145,8 +148,21 @@ impl Parser {
     fn print_statement(&mut self) -> Result<Stmt, String> {
         let value = self.expression()?;
         let line = self.current_line;
-        self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
+        self.consume(
+            TokenType::Semicolon,
+            &format!("Expect ';' after print statement at line {}.", line),
+        )?;
         Ok(Stmt::Print(Box::new(value), self.create_loc(line)))
+    }
+
+    fn return_statement(&mut self) -> Result<Stmt, String> {
+        let value = self.expression()?;
+        let line = self.current_line;
+        self.consume(
+            TokenType::Semicolon,
+            &format!("Expect ';' after return value at line {}.", line),
+        )?;
+        Ok(Stmt::Return(Box::new(value), self.create_loc(line)))
     }
 
     fn expression_statement(&mut self) -> Result<Stmt, String> {
@@ -402,6 +418,7 @@ impl Parser {
                     self.create_loc(token.line),
                 ))
             }
+            TokenType::Void => Ok(Expr::Value(ASTValue::None, self.create_loc(token.line))),
             TokenType::Number => {
                 self.advance();
                 if let Ok(number) = token.lexeme.parse::<i32>() {
