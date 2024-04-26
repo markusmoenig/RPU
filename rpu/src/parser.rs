@@ -1,5 +1,4 @@
 use crate::prelude::*;
-use wasmer::{imports, Instance, Module, Store, Value};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -22,61 +21,24 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self, scanner: Scanner) {
+    pub fn parse(&mut self, scanner: Scanner) -> Result<String, String> {
         self.extract_tokens(scanner);
-
-        //println!("{:?}", self.tokens);
 
         let mut statements = vec![];
 
         while !self.is_at_end() {
-            match self.declaration() {
-                Ok(stmt) => {
-                    statements.push(Box::new(stmt));
-                }
-                Err(error) => {
-                    println!("{}", error);
-                    break;
-                }
-            }
+            let stmt = self.declaration()?;
+            statements.push(Box::new(stmt));
         }
 
         let mut visitor = CompileVisitor::new();
         let mut ctx = Context::default();
 
         for statement in statements {
-            let rc = statement.accept(&mut visitor, &mut ctx);
-
-            match rc {
-                Ok(_) => {
-                    let wat = ctx.gen_wat();
-                    let mut store = Store::default();
-                    let module_rc = Module::new(&store, &wat);
-                    match module_rc {
-                        Ok(module) => {
-                            let import_object = imports! {};
-                            if let Ok(instance) = Instance::new(&mut store, &module, &import_object)
-                            {
-                                if let Ok(main) = instance.exports.get_function("main") {
-                                    let rc = main.call(&mut store, &[Value::I64(42)]);
-                                    println!("rc {:?}", rc);
-                                    //println!("Result: {:?}", result);
-                                    //}
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            println!("Error: {:?}", err.to_string());
-                        }
-                    }
-                }
-                Err(error) => {
-                    println!("{}", error);
-                }
-            }
-
-            //println!("{:?}", rc);
+            _ = statement.accept(&mut visitor, &mut ctx)?;
         }
+
+        Ok(ctx.gen_wat())
     }
 
     fn declaration(&mut self) -> Result<Stmt, String> {
@@ -241,7 +203,11 @@ impl Parser {
         }
 
         let line = self.current_line;
-        self.consume(TokenType::RightBrace, "Expect '}' after block.")?;
+
+        self.consume(
+            TokenType::RightBrace,
+            &format!("Expect '}}' after block at line {}.", line),
+        )?;
 
         Ok(Stmt::Block(statements, self.create_loc(line)))
     }
@@ -378,6 +344,7 @@ impl Parser {
 
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, String> {
         let mut arguments = vec![];
+        let line = self.current_line;
 
         if !self.check(TokenType::RightParen) {
             loop {
@@ -393,7 +360,10 @@ impl Parser {
             }
         }
 
-        let paren = self.consume(TokenType::RightParen, "Expect ')' after arguments.")?;
+        let paren = self.consume(
+            TokenType::RightParen,
+            &format!("Expect ')' after function arguments at line {}.", line),
+        )?;
         Ok(Expr::FunctionCall(
             Box::new(callee),
             arguments,
@@ -418,7 +388,11 @@ impl Parser {
                     self.create_loc(token.line),
                 ))
             }
-            TokenType::Void => Ok(Expr::Value(ASTValue::None, self.create_loc(token.line))),
+            TokenType::Void => {
+                self.advance();
+                Ok(Expr::Value(ASTValue::None, self.create_loc(token.line)))
+            }
+            TokenType::Semicolon => Ok(Expr::Value(ASTValue::None, self.create_loc(token.line))),
             TokenType::Number => {
                 self.advance();
                 if let Ok(number) = token.lexeme.parse::<i32>() {
@@ -465,7 +439,6 @@ impl Parser {
                 self.advance();
 
                 let swizzle: Vec<u8> = self.get_swizzle_at_current();
-
                 Ok(Expr::Variable(
                     token.lexeme,
                     swizzle,

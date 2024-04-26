@@ -4,6 +4,7 @@ use crate::prelude::*;
 /// CompileVisitor
 pub struct CompileVisitor {
     environment: Environment,
+    functions: FxHashMap<String, ASTValue>,
 }
 
 impl Visitor for CompileVisitor {
@@ -13,6 +14,7 @@ impl Visitor for CompileVisitor {
     {
         Self {
             environment: Environment::default(),
+            functions: FxHashMap::default(),
         }
     }
 
@@ -222,6 +224,11 @@ impl Visitor for CompileVisitor {
                 }
                 _ => {}
             }
+        } else {
+            // Check for function call
+            if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
+                rc = ASTValue::Function(name.clone(), args.clone(), body.clone());
+            }
         }
 
         ctx.add_wat(&instr);
@@ -417,12 +424,45 @@ impl Visitor for CompileVisitor {
 
     fn function_call(
         &mut self,
-        _callee: &Expr,
-        _args: &[Box<Expr>],
-        _loc: &Location,
-        _ctx: &mut Context,
+        callee: &Expr,
+        args: &[Box<Expr>],
+        loc: &Location,
+        ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        Ok(ASTValue::None)
+        let callee = callee.accept(self, ctx)?;
+        let mut rc = ASTValue::None;
+
+        if let ASTValue::Function(name, func_args, returns) = callee {
+            if func_args.len() != args.len() {
+                return Err(format!(
+                    "Function '{}' expects {} arguments, but {} were provided {}",
+                    name,
+                    func_args.len(),
+                    args.len(),
+                    loc.describe()
+                ));
+            }
+
+            for index in 0..args.len() {
+                let rc = args[index].accept(self, ctx)?;
+                if rc.to_type() != func_args[index].to_type() {
+                    return Err(format!(
+                        "Function '{}' expects argument {} to be of type '{}', but '{}' was provided {}",
+                        name,
+                        index,
+                        func_args[index].to_type(),
+                        rc.to_type(),
+                        loc.describe()
+                    ));
+                }
+            }
+
+            let instr = format!("(call ${})", name);
+            ctx.add_wat(&instr);
+            rc = *returns;
+        }
+
+        Ok(rc)
     }
 
     fn function_declaration(
@@ -434,7 +474,15 @@ impl Visitor for CompileVisitor {
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
+        self.functions.insert(
+            name.to_string(),
+            ASTValue::Function(name.to_string(), args.to_vec(), Box::new(returns.clone())),
+        );
+
         let mut params = String::new();
+
+        ctx.wat_locals = String::new();
+        self.environment.begin_scope(returns.clone());
 
         for param in args {
             match param {
@@ -443,7 +491,9 @@ impl Visitor for CompileVisitor {
                         "(param ${} i{})",
                         name.clone().unwrap(),
                         ctx.precision.describe()
-                    )
+                    );
+                    self.environment
+                        .define(name.clone().unwrap(), ASTValue::Int(None, 0));
                 }
                 ASTValue::Int2(name, _, _) => {
                     params += &format!(
@@ -452,7 +502,7 @@ impl Visitor for CompileVisitor {
                         ctx.precision.describe(),
                         name.clone().unwrap(),
                         ctx.precision.describe()
-                    )
+                    );
                 }
                 _ => {}
             }
@@ -474,11 +524,7 @@ impl Visitor for CompileVisitor {
         ctx.add_wat(&instr);
         ctx.add_indention();
 
-        ctx.wat_locals = String::new();
-
         ctx.wat.push_str("__LOCALS__\n");
-
-        self.environment.begin_scope(returns.clone());
 
         let mut last_value = ASTValue::None;
         for stmt in body {
@@ -498,6 +544,7 @@ impl Visitor for CompileVisitor {
         self.environment.end_scope();
 
         ctx.wat = ctx.wat.replace("__LOCALS__", &ctx.wat_locals);
+        ctx.wat_locals = String::new();
 
         ctx.remove_indention();
         ctx.add_wat(")");

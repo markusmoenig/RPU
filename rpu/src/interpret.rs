@@ -218,9 +218,6 @@ impl Visitor for InterpretVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let callee = callee.accept(self, ctx)?;
-
-        println!("callee {:?}", callee);
-
         let mut arguments = vec![];
         for a in args {
             let expr = a.accept(self, ctx)?;

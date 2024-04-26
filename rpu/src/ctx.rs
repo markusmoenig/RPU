@@ -116,18 +116,12 @@ impl Context {
 
     /// Generate the final wat code
     pub fn gen_wat(&mut self) -> String {
-        let mut header = "(module\n    (memory 1)\n".to_string();
+        let mut output = "(module\n    (memory 1)\n".to_string();
+        output += &self.math_funcs;
+        output += &self.wat;
+        output += &")\n";
 
-        header += &self.math_funcs;
-
-        let mut wat = header.to_string();
-        wat.push_str(&self.wat);
-
-        wat.push_str(")\n");
-
-        println!("{}", wat);
-
-        wat
+        output
     }
 
     pub fn gen_scalar_vec2(&mut self, data_type: &str, op: &str) {

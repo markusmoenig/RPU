@@ -17,7 +17,7 @@ pub enum ASTValue {
     Int3(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>),
     Int4(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>, Box<Expr>),
     String(Option<String>, String),
-    Function(String, Vec<ASTValue>, Vec<Box<Stmt>>),
+    Function(String, Vec<ASTValue>, Box<ASTValue>),
 }
 
 impl ASTValue {
