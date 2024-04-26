@@ -7,7 +7,7 @@ int doubler(int y) {
     return y * 2;
 }
 
-int main(int x) {
+export int main(int x) {
     ivec2 result = 2 * ivec2(5, 2);
 
     return doubler(result.x);

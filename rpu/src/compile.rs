@@ -471,6 +471,7 @@ impl Visitor for CompileVisitor {
         args: &[ASTValue],
         body: &[Box<Stmt>],
         returns: &ASTValue,
+        export: &bool,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
@@ -514,10 +515,13 @@ impl Visitor for CompileVisitor {
             return_type = format!("(result {})", r);
         }
 
-        let instr = format!(
-            "(func ${} (export \"{}\") {} {}",
-            name, name, params, return_type
-        );
+        let export_str = if *export {
+            format!(" (export \"{}\")", name)
+        } else {
+            "".to_string()
+        };
+
+        let instr = format!("(func ${}{} {} {}", name, export_str, params, return_type);
 
         ctx.add_line();
         ctx.add_wat(&format!(";; function '{}'", name));

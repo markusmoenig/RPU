@@ -48,6 +48,12 @@ impl Parser {
         //     self.var_declaration()
         // }
 
+        let mut export = false;
+
+        if self.match_token(vec![TokenType::Export]) {
+            export = true;
+        }
+
         if let Some(token_type) = self.match_token_and_return(vec![
             TokenType::Void,
             TokenType::Int,
@@ -62,7 +68,7 @@ impl Parser {
                 self.statement()
             } else if self.current + 1 < self.tokens.len() {
                 if self.tokens[self.current + 1].kind == TokenType::LeftParen {
-                    self.function(ASTValue::from_token_type(&token_type))
+                    self.function(export, ASTValue::from_token_type(&token_type))
                 } else {
                     self.var_declaration()
                 }
@@ -134,7 +140,7 @@ impl Parser {
         Ok(Stmt::Expression(Box::new(value), self.create_loc(line)))
     }
 
-    fn function(&mut self, returns: ASTValue) -> Result<Stmt, String> {
+    fn function(&mut self, export: bool, returns: ASTValue) -> Result<Stmt, String> {
         let name = self.consume(TokenType::Identifier, "Expect function name.")?;
         let line = self.current_line;
         self.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
@@ -179,6 +185,7 @@ impl Parser {
                 parameters,
                 body,
                 returns,
+                export,
                 self.create_loc(line),
             ))
         } else {

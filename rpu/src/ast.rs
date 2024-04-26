@@ -87,7 +87,14 @@ pub enum Stmt {
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
     VarDeclaration(String, Box<Expr>, Location),
-    FunctionDeclaration(String, Vec<ASTValue>, Vec<Box<Stmt>>, ASTValue, Location),
+    FunctionDeclaration(
+        String,
+        Vec<ASTValue>,
+        Vec<Box<Stmt>>,
+        ASTValue,
+        bool,
+        Location,
+    ),
     Return(Box<Expr>, Location),
 }
 
@@ -263,6 +270,7 @@ pub trait Visitor {
         args: &[ASTValue],
         body: &[Box<Stmt>],
         returns: &ASTValue,
+        export: &bool,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -284,8 +292,8 @@ impl Stmt {
             Stmt::VarDeclaration(name, initializer, loc) => {
                 visitor.var_declaration(name, initializer, loc, ctx)
             }
-            Stmt::FunctionDeclaration(name, args, body, returns, loc) => {
-                visitor.function_declaration(name, args, body, returns, loc, ctx)
+            Stmt::FunctionDeclaration(name, args, body, returns, export, loc) => {
+                visitor.function_declaration(name, args, body, returns, export, loc, ctx)
             }
             Stmt::Return(expr, loc) => visitor._return(expr, loc, ctx),
         }

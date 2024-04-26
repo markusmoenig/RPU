@@ -54,7 +54,7 @@ pub enum TokenType {
     This,
     True,
     While,
-    CodeBlock,
+    Export,
 
     Int,
     Int2,
@@ -117,6 +117,8 @@ impl Scanner {
         keywords.insert("ivec3", TokenType::Int3);
         keywords.insert("ivec4", TokenType::Int4);
 
+        keywords.insert("export", TokenType::Export);
+
         Scanner {
             keywords,
             code,
@@ -136,7 +138,6 @@ impl Scanner {
         match self.advance() {
             //b' ' => self.make_token(TokenType::Space),
             //b'\n' => self.make_token(TokenType::LineFeed),
-            b'-' if self.matches(b'-') => self.make_token(TokenType::CodeBlock),
             b'(' => self.make_token(TokenType::LeftParen),
             b')' => self.make_token(TokenType::RightParen),
             b'{' => self.make_token(TokenType::LeftBrace),

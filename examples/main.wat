@@ -22,7 +22,7 @@
     )
 
     ;; function 'doubler'
-    (func $doubler (export "doubler") (param $y i64) (result i64)
+    (func $doubler (param $y i64) (result i64)
 
         local.get $y
         
