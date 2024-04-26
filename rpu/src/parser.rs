@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{empty_expr, prelude::*};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -94,15 +94,25 @@ impl Parser {
             "Expect ';' after variable declaration.",
         )?;
 
+        let init = if let Some(i) = initializer {
+            Box::new(i)
+        } else {
+            // TODO If variable is empty, provide the default value for each type (0)
+            // The empty expr is just to prevent crashing the compiler
+            empty_expr!()
+        };
+
         Ok(Stmt::VarDeclaration(
             name.lexeme,
-            Box::new(initializer.unwrap()),
+            init,
             self.create_loc(line),
         ))
     }
 
     fn statement(&mut self) -> Result<Stmt, String> {
-        if self.match_token(vec![TokenType::Print]) {
+        if self.match_token(vec![TokenType::If]) {
+            self.if_statement()
+        } else if self.match_token(vec![TokenType::Print]) {
             self.print_statement()
         } else if self.match_token(vec![TokenType::Return]) {
             self.return_statement()
@@ -111,6 +121,33 @@ impl Parser {
         } else {
             self.expression_statement()
         }
+    }
+
+    fn if_statement(&mut self) -> Result<Stmt, String> {
+        let line = self.current_line;
+        self.consume(
+            TokenType::LeftParen,
+            &format!("Expect '(' after 'if' at line {}.", line),
+        )?;
+        let condition = self.expression()?;
+        self.consume(
+            TokenType::RightParen,
+            &format!("Expect ')' after if condition at line {}.", line),
+        )?;
+
+        let then_branch = self.statement()?;
+        let else_branch = if self.match_token(vec![TokenType::Else]) {
+            Some(Box::new(self.statement()?))
+        } else {
+            None
+        };
+
+        Ok(Stmt::If(
+            Box::new(condition),
+            Box::new(then_branch),
+            else_branch,
+            self.create_loc(line),
+        ))
     }
 
     fn print_statement(&mut self) -> Result<Stmt, String> {
@@ -224,7 +261,7 @@ impl Parser {
     }
 
     fn assignment(&mut self) -> Result<Expr, String> {
-        let expr = self.equality()?;
+        let expr = self.or()?;
 
         if self.match_token(vec![TokenType::Equal]) {
             let equals = self.previous().unwrap();
@@ -243,6 +280,40 @@ impl Parser {
                 "Invalid assignment target: {:?} at line {}.",
                 equals, equals.line
             ));
+        }
+
+        Ok(expr)
+    }
+
+    fn or(&mut self) -> Result<Expr, String> {
+        let mut expr = self.and()?;
+
+        while self.match_token(vec![TokenType::Or]) {
+            let operator = self.previous().unwrap();
+            let right = self.and()?;
+            expr = Expr::Logical(
+                Box::new(expr),
+                Self::operator_to_logical(operator.kind),
+                Box::new(right),
+                self.create_loc(operator.line),
+            );
+        }
+
+        Ok(expr)
+    }
+
+    fn and(&mut self) -> Result<Expr, String> {
+        let mut expr = self.equality()?;
+
+        while self.match_token(vec![TokenType::And]) {
+            let operator = self.previous().unwrap();
+            let right = self.equality()?;
+            expr = Expr::Logical(
+                Box::new(expr),
+                Self::operator_to_logical(operator.kind),
+                Box::new(right),
+                self.create_loc(operator.line),
+            );
         }
 
         Ok(expr)
@@ -625,6 +696,14 @@ impl Parser {
         match operator {
             TokenType::BangEqual => EqualityOperator::NotEqual,
             TokenType::EqualEqual => EqualityOperator::Equal,
+            _ => unreachable!(),
+        }
+    }
+
+    fn operator_to_logical(operator: TokenType) -> LogicalOperator {
+        match operator {
+            TokenType::And => LogicalOperator::And,
+            TokenType::Or => LogicalOperator::Or,
             _ => unreachable!(),
         }
     }

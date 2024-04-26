@@ -21,6 +21,20 @@ pub enum ASTValue {
 }
 
 impl ASTValue {
+    /// The truthiness of the value.
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            ASTValue::Boolean(_, b) => *b,
+            ASTValue::Int(_, i) => *i != 0,
+            ASTValue::Int2(_, _, _) => true,
+            ASTValue::Int3(_, _, _, _) => true,
+            ASTValue::Int4(_, _, _, _, _) => true,
+            ASTValue::String(_, s) => !s.is_empty(),
+            ASTValue::Function(_, _, _) => true,
+            ASTValue::None => false,
+        }
+    }
+
     // The components of the value.
     pub fn components(&self) -> usize {
         match self {
@@ -83,6 +97,7 @@ impl ASTValue {
 /// Statements in the AST
 #[derive(Clone, Debug)]
 pub enum Stmt {
+    If(Box<Expr>, Box<Stmt>, Option<Box<Stmt>>, Location),
     Print(Box<Expr>, Location),
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
@@ -102,6 +117,7 @@ pub enum Stmt {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Value(ASTValue, Location),
+    Logical(Box<Expr>, LogicalOperator, Box<Expr>, Location),
     Unary(UnaryOperator, Box<Expr>, Location),
     Equality(Box<Expr>, EqualityOperator, Box<Expr>, Location),
     Comparison(Box<Expr>, ComparisonOperator, Box<Expr>, Location),
@@ -110,6 +126,13 @@ pub enum Expr {
     Variable(String, Vec<u8>, Location),
     VariableAssignment(String, Vec<u8>, Box<Expr>, Location),
     FunctionCall(Box<Expr>, Vec<Box<Expr>>, Location),
+}
+
+/// Logical operators in the AST
+#[derive(Clone, PartialEq, Debug)]
+pub enum LogicalOperator {
+    And,
+    Or,
 }
 
 /// Unary operators in the AST
@@ -264,6 +287,7 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
+    #[allow(clippy::too_many_arguments)]
     fn function_declaration(
         &mut self,
         name: &str,
@@ -275,9 +299,27 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn _return(
+    fn return_stmt(
         &mut self,
         expr: &Expr,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
+
+    fn if_stmt(
+        &mut self,
+        cond: &Expr,
+        then_stmt: &Stmt,
+        else_stmt: &Option<Box<Stmt>>,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
+
+    fn logical_expr(
+        &mut self,
+        left: &Expr,
+        op: &LogicalOperator,
+        right: &Expr,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -286,6 +328,9 @@ pub trait Visitor {
 impl Stmt {
     pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
         match self {
+            Stmt::If(cond, then_stmt, else_stmt, loc) => {
+                visitor.if_stmt(cond, then_stmt, else_stmt, loc, ctx)
+            }
             Stmt::Print(expression, loc) => visitor.print(expression, loc, ctx),
             Stmt::Block(list, loc) => visitor.block(list, loc, ctx),
             Stmt::Expression(expression, loc) => visitor.expression(expression, loc, ctx),
@@ -295,7 +340,7 @@ impl Stmt {
             Stmt::FunctionDeclaration(name, args, body, returns, export, loc) => {
                 visitor.function_declaration(name, args, body, returns, export, loc, ctx)
             }
-            Stmt::Return(expr, loc) => visitor._return(expr, loc, ctx),
+            Stmt::Return(expr, loc) => visitor.return_stmt(expr, loc, ctx),
         }
     }
 }
@@ -304,6 +349,7 @@ impl Expr {
     pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
         match self {
             Expr::Value(value, loc) => visitor.value(value.clone(), loc, ctx),
+            Expr::Logical(left, op, right, loc) => visitor.logical_expr(left, op, right, loc, ctx),
             Expr::Unary(op, expr, loc) => visitor.unary(op, expr, loc, ctx),
             Expr::Equality(left, op, right, loc) => visitor.equality(left, op, right, loc, ctx),
             Expr::Comparison(left, op, right, loc) => visitor.comparison(left, op, right, loc, ctx),

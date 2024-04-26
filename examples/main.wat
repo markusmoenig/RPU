@@ -21,13 +21,36 @@
         )
     )
 
-    ;; function 'doubler'
-    (func $doubler (param $y i64) (result i64)
+    ;; function 'fib'
+    (func $fib (param $n i64) (result i64)
 
-        local.get $y
+
+        local.get $n
+        
+        (i64.const 1)
+        (i64.le_s)
+
+        (if
+            (then
+                local.get $n
+                
+                (return)
+            )
+        )
+
+        
+        local.get $n
         
         (i64.const 2)
-        (i64.mul)
+        (i64.sub)
+        (call $fib)
+        
+        local.get $n
+        
+        (i64.const 1)
+        (i64.sub)
+        (call $fib)
+        (i64.add)
         (return)
     )
 
@@ -35,6 +58,7 @@
     (func $main (export "main") (param $x i64) (result i64)
         (local $result_x i64)
         (local $result_y i64)
+        (local $test i64)
 
         (i64.const 2)
         (i64.const 5)
@@ -43,10 +67,31 @@
         (call $_rpu_scalar_mul_vec2_i64)
         local.set $result_y
         local.set $result_x
+        (i64.const 0)
+        local.set $test
+
+        (i64.const 2)
+        (i64.const 2)
+        (i64.eq)
+
+        (if
+            (then
+                (i64.const 3)
+                local.set $test
+            )
+            (else
+                (i64.const 4)
+                local.set $test
+            )
+        )
+
         
-        local.get $result_x
+        local.get $x
         
-        (call $doubler)
+        (call $fib)
+        local.set $test
+        local.get $test
+        
         (return)
     )
 )

@@ -295,14 +295,15 @@ impl Visitor for CompileVisitor {
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        print!("-- Equality ");
         left.accept(self, ctx)?;
-        match op {
-            EqualityOperator::NotEqual => print!(" != "),
-            EqualityOperator::Equal => print!(" == "),
-        }
         right.accept(self, ctx)?;
-        println!(" --");
+
+        let instr = match op {
+            EqualityOperator::NotEqual => format!("(i{}.ne)", ctx.pr),
+            EqualityOperator::Equal => format!("(i{}.eq)", ctx.pr),
+        };
+
+        ctx.add_wat(&instr);
 
         Ok(ASTValue::None)
     }
@@ -315,18 +316,19 @@ impl Visitor for CompileVisitor {
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        print!("-- Comparison ");
-        left.accept(self, ctx)?;
-        match op {
-            ComparisonOperator::Greater => print!(" > "),
-            ComparisonOperator::GreaterEqual => print!(" >= "),
-            ComparisonOperator::Less => print!(" < "),
-            ComparisonOperator::LessEqual => print!(" <= "),
-        }
-        right.accept(self, ctx)?;
-        println!(" --");
+        let left_value = left.accept(self, ctx)?;
+        let right_value = right.accept(self, ctx)?;
 
-        Ok(ASTValue::None)
+        let instr = match op {
+            ComparisonOperator::Greater => format!("(i{}.gt_s)", ctx.pr),
+            ComparisonOperator::GreaterEqual => format!("(i{}.ge_s)", ctx.pr),
+            ComparisonOperator::Less => format!("(i{}.lt_s)", ctx.pr),
+            ComparisonOperator::LessEqual => format!("(i{}.le_s)", ctx.pr),
+        };
+
+        ctx.add_wat(&instr);
+
+        Ok(left_value)
     }
 
     fn binary(
@@ -556,7 +558,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn _return(
+    fn return_stmt(
         &mut self,
         expr: &Expr,
         loc: &Location,
@@ -578,5 +580,63 @@ impl Visitor for CompileVisitor {
         ctx.add_wat("(return)");
 
         Ok(rc)
+    }
+
+    fn if_stmt(
+        &mut self,
+        cond: &Expr,
+        then_stmt: &Stmt,
+        else_stmt: &Option<Box<Stmt>>,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        ctx.add_line();
+        let _rc = cond.accept(self, ctx)?;
+
+        ctx.add_line();
+
+        // let instr = format!("(if (result i{})", ctx.pr);
+        let instr = "(if".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        let instr = "(then".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        let _ = then_stmt.accept(self, ctx)?;
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+        if let Some(es) = else_stmt {
+            let instr = "(else".to_string();
+            ctx.add_wat(&instr);
+            ctx.add_indention();
+            let _ = es.accept(self, ctx)?;
+            ctx.remove_indention();
+            ctx.add_wat(")");
+        }
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+        ctx.add_line();
+
+        Ok(ASTValue::None)
+    }
+
+    fn logical_expr(
+        &mut self,
+        left: &Expr,
+        _op: &LogicalOperator,
+        right: &Expr,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        let _l = left.accept(self, ctx)?;
+        let _r = right.accept(self, ctx)?;
+
+        //if op == &LogicalOperator::And {}
+
+        Ok(ASTValue::None)
     }
 }
