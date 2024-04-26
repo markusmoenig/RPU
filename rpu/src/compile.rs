@@ -298,6 +298,8 @@ impl Visitor for CompileVisitor {
         left.accept(self, ctx)?;
         right.accept(self, ctx)?;
 
+        // TODO Check if we can compare these two values
+
         let instr = match op {
             EqualityOperator::NotEqual => format!("(i{}.ne)", ctx.pr),
             EqualityOperator::Equal => format!("(i{}.eq)", ctx.pr),
@@ -317,7 +319,9 @@ impl Visitor for CompileVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let left_value = left.accept(self, ctx)?;
-        let right_value = right.accept(self, ctx)?;
+        let _right_value = right.accept(self, ctx)?;
+
+        // TODO Check if we can compare these two values
 
         let instr = match op {
             ComparisonOperator::Greater => format!("(i{}.gt_s)", ctx.pr),
@@ -530,7 +534,7 @@ impl Visitor for CompileVisitor {
         ctx.add_wat(&instr);
         ctx.add_indention();
 
-        ctx.wat.push_str("__LOCALS__\n");
+        ctx.wat.push_str("__LOCALS__");
 
         let mut last_value = ASTValue::None;
         for stmt in body {
@@ -593,7 +597,7 @@ impl Visitor for CompileVisitor {
         ctx.add_line();
         let _rc = cond.accept(self, ctx)?;
 
-        ctx.add_line();
+        //ctx.add_line();
 
         // let instr = format!("(if (result i{})", ctx.pr);
         let instr = "(if".to_string();
@@ -619,7 +623,7 @@ impl Visitor for CompileVisitor {
 
         ctx.remove_indention();
         ctx.add_wat(")");
-        ctx.add_line();
+        //ctx.add_line();
 
         Ok(ASTValue::None)
     }

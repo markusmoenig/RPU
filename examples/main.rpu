@@ -1,25 +1,5 @@
-int fib(int n) {
-  if (n <= 1) return n;
-  return fib(n - 2) + fib(n - 1);
-}
-
-//int doubler(int y) {
-//    return y * 2;
-//}
-
-export int main(int x) {
+export ivec2 main(int x) {
     ivec2 result = 2 * ivec2(5, 2);
-    int test = 0;
 
-    if (2 == 2) {
-        test = 3;
-    } else {
-        test = 4;
-    }
-
-    test = fib(x);
-
-    return test;
-
-    //return result.xy;
+    return result.yx;
 }
