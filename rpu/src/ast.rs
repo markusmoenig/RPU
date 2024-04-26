@@ -3,7 +3,7 @@ use crate::prelude::*;
 #[macro_export]
 macro_rules! empty_expr {
     () => {
-        Box::new(Expr::Value(ASTValue::None, Location::default()))
+        Box::new(Expr::Value(ASTValue::None, vec![], Location::default()))
     };
 }
 
@@ -53,7 +53,7 @@ impl ASTValue {
             ASTValue::Boolean(_, _) => "bool".to_string(),
             ASTValue::Int(_, _) => "int".to_string(),
             ASTValue::Int2(_, _, _) => "ivec2".to_string(),
-            ASTValue::Int3(_, _, _, _) => "ivec4".to_string(),
+            ASTValue::Int3(_, _, _, _) => "ivec3".to_string(),
             ASTValue::Int4(_, _, _, _, _) => "ivec4".to_string(),
             ASTValue::String(_, _) => "string".to_string(),
             ASTValue::Function(_, _, _) => "fn".to_string(),
@@ -116,7 +116,7 @@ pub enum Stmt {
 /// Expressions in the AST
 #[derive(Clone, Debug)]
 pub enum Expr {
-    Value(ASTValue, Location),
+    Value(ASTValue, Vec<u8>, Location),
     Logical(Box<Expr>, LogicalOperator, Box<Expr>, Location),
     Unary(UnaryOperator, Box<Expr>, Location),
     Equality(Box<Expr>, EqualityOperator, Box<Expr>, Location),
@@ -216,6 +216,7 @@ pub trait Visitor {
     fn value(
         &mut self,
         value: ASTValue,
+        swizzle: &[u8],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -348,7 +349,7 @@ impl Stmt {
 impl Expr {
     pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
         match self {
-            Expr::Value(value, loc) => visitor.value(value.clone(), loc, ctx),
+            Expr::Value(value, swizzle, loc) => visitor.value(value.clone(), swizzle, loc, ctx),
             Expr::Logical(left, op, right, loc) => visitor.logical_expr(left, op, right, loc, ctx),
             Expr::Unary(op, expr, loc) => visitor.unary(op, expr, loc, ctx),
             Expr::Equality(left, op, right, loc) => visitor.equality(left, op, right, loc, ctx),

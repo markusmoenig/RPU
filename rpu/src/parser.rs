@@ -456,6 +456,7 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Value(
                     ASTValue::Boolean(None, false),
+                    vec![],
                     self.create_loc(token.line),
                 ))
             }
@@ -463,19 +464,29 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Value(
                     ASTValue::Boolean(None, true),
+                    vec![],
                     self.create_loc(token.line),
                 ))
             }
             TokenType::Void => {
                 self.advance();
-                Ok(Expr::Value(ASTValue::None, self.create_loc(token.line)))
+                Ok(Expr::Value(
+                    ASTValue::None,
+                    vec![],
+                    self.create_loc(token.line),
+                ))
             }
-            TokenType::Semicolon => Ok(Expr::Value(ASTValue::None, self.create_loc(token.line))),
+            TokenType::Semicolon => Ok(Expr::Value(
+                ASTValue::None,
+                vec![],
+                self.create_loc(token.line),
+            )),
             TokenType::Number => {
                 self.advance();
                 if let Ok(number) = token.lexeme.parse::<i32>() {
                     Ok(Expr::Value(
                         ASTValue::Int(None, number),
+                        vec![],
                         self.create_loc(token.line),
                     ))
                 } else {
@@ -489,9 +500,10 @@ impl Parser {
                     if self.match_token(vec![TokenType::Comma]) {
                         let y = self.expression()?;
                         if self.match_token(vec![TokenType::RightParen]) {
-                            // TODO: Swizzling for constants.
+                            let swizzle: Vec<u8> = self.get_swizzle_at_current();
                             Ok(Expr::Value(
                                 ASTValue::Int2(None, Box::new(x), Box::new(y)),
+                                swizzle,
                                 self.create_loc(token.line),
                             ))
                         } else {

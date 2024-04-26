@@ -104,6 +104,16 @@ impl Visitor for CompileVisitor {
 
         // Use the type of the variable
         if let Some(vv) = self.environment.get(&name) {
+            println!("Variable '{}' has {} components", name, vv.components());
+            if incoming_components != vv.components() {
+                return Err(format!(
+                    "Variable '{}' has {} components, but expression has {} {}",
+                    name,
+                    v.components(),
+                    incoming_components,
+                    loc.describe()
+                ));
+            }
             v = vv;
         }
 
@@ -239,11 +249,24 @@ impl Visitor for CompileVisitor {
     fn value(
         &mut self,
         value: ASTValue,
-        _loc: &Location,
+        swizzle: &[u8],
+        loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let mut rc = ASTValue::None;
         let instr;
+
+        if swizzle.len() > 4 {
+            return Err(format!(
+                "Maximal swizzle length is 4, got {} for constant {}",
+                swizzle.len(),
+                loc.describe()
+            ));
+        }
+
+        if !swizzle.is_empty() {
+            rc = ctx.create_value_from_swizzle(swizzle.len());
+        }
 
         match value {
             ASTValue::Boolean(_, f) => {
@@ -255,17 +278,33 @@ impl Visitor for CompileVisitor {
                 rc = ASTValue::Int(None, i);
             }
             ASTValue::Int2(_, x, y) => {
-                _ = x.accept(self, ctx)?;
-                _ = y.accept(self, ctx)?;
                 instr = "".to_string();
-                rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+                if swizzle.is_empty() {
+                    _ = x.accept(self, ctx)?;
+                    _ = y.accept(self, ctx)?;
+                    rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+                } else {
+                    for s in swizzle {
+                        match s {
+                            0 => {
+                                _ = x.accept(self, ctx)?;
+                            }
+                            1 => {
+                                _ = y.accept(self, ctx)?;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
             _ => {
                 instr = "".to_string();
             }
         };
 
-        ctx.add_wat(&instr);
+        if !instr.is_empty() {
+            ctx.add_wat(&instr);
+        }
         Ok(rc)
     }
 
