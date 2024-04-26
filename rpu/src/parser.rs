@@ -70,17 +70,17 @@ impl Parser {
                 if self.tokens[self.current + 1].kind == TokenType::LeftParen {
                     self.function(export, ASTValue::from_token_type(&token_type))
                 } else {
-                    self.var_declaration()
+                    self.var_declaration(ASTValue::from_token_type(&token_type))
                 }
             } else {
-                self.var_declaration()
+                self.var_declaration(ASTValue::from_token_type(&token_type))
             }
         } else {
             self.statement()
         }
     }
 
-    fn var_declaration(&mut self) -> Result<Stmt, String> {
+    fn var_declaration(&mut self, static_type: ASTValue) -> Result<Stmt, String> {
         let name = self.consume(TokenType::Identifier, "Expect variable name.")?;
         let line = self.current_line;
 
@@ -104,6 +104,7 @@ impl Parser {
 
         Ok(Stmt::VarDeclaration(
             name.lexeme,
+            static_type,
             init,
             self.create_loc(line),
         ))

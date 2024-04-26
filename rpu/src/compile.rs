@@ -57,11 +57,25 @@ impl Visitor for CompileVisitor {
     fn var_declaration(
         &mut self,
         name: &str,
+        static_type: &ASTValue,
         expression: &Expr,
-        _loc: &Location,
+        loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let v = expression.accept(self, ctx)?;
+
+        let incoming_components = v.components();
+
+        // Compare incoming components with the static type of the variable
+        if incoming_components != static_type.components() {
+            return Err(format!(
+                "Variable type '{}' has {} component(s), but expression has {} {}",
+                name,
+                v.components(),
+                incoming_components,
+                loc.describe()
+            ));
+        }
 
         match &v {
             ASTValue::Int(_, _) => {

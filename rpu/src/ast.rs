@@ -101,7 +101,7 @@ pub enum Stmt {
     Print(Box<Expr>, Location),
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
-    VarDeclaration(String, Box<Expr>, Location),
+    VarDeclaration(String, ASTValue, Box<Expr>, Location),
     FunctionDeclaration(
         String,
         Vec<ASTValue>,
@@ -208,6 +208,7 @@ pub trait Visitor {
     fn var_declaration(
         &mut self,
         name: &str,
+        static_type: &ASTValue,
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
@@ -335,8 +336,8 @@ impl Stmt {
             Stmt::Print(expression, loc) => visitor.print(expression, loc, ctx),
             Stmt::Block(list, loc) => visitor.block(list, loc, ctx),
             Stmt::Expression(expression, loc) => visitor.expression(expression, loc, ctx),
-            Stmt::VarDeclaration(name, initializer, loc) => {
-                visitor.var_declaration(name, initializer, loc, ctx)
+            Stmt::VarDeclaration(name, static_type, initializer, loc) => {
+                visitor.var_declaration(name, static_type, initializer, loc, ctx)
             }
             Stmt::FunctionDeclaration(name, args, body, returns, export, loc) => {
                 visitor.function_declaration(name, args, body, returns, export, loc, ctx)
