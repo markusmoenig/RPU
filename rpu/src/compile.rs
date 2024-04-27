@@ -64,15 +64,13 @@ impl Visitor for CompileVisitor {
     ) -> Result<ASTValue, String> {
         let v = expression.accept(self, ctx)?;
 
-        let incoming_components = v.components();
-
-        // Compare incoming components with the static type of the variable
-        if incoming_components != static_type.components() {
+        // Compare incoming expression type with the static type.
+        if v.to_type() != static_type.to_type() {
             return Err(format!(
-                "Variable type '{}' has {} component(s), but expression has {} {}",
+                "Variable '{}' has type '{}', but expression has type '{}' {}",
                 name,
-                v.components(),
-                incoming_components,
+                static_type.to_type(),
+                v.to_type(),
                 loc.describe()
             ));
         }

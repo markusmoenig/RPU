@@ -22,7 +22,7 @@
     )
 
     ;; function 'main'
-    (func $main (export "main") (param $x i64) (result i64 i64)
+    (func $main (export "main")  (result i64 i64)
         (local $result_x i64)
         (local $result_y i64)
         (i64.const 2)

@@ -15,7 +15,72 @@ impl RPU {
         Self {}
     }
 
-    pub fn compile_from_path(&mut self, mut path: PathBuf) -> Result<(), String> {
+    pub fn compile_to_wat_from_path(&self, path: PathBuf) -> Result<String, String> {
+        if let Ok(main) = std::fs::read_to_string(path.clone()) {
+            let scanner = Scanner::new(main);
+            let mut parser = Parser::new();
+
+            parser.parse(scanner)
+        } else {
+            Err("Could not read file.".to_string())
+        }
+    }
+
+    pub fn compile_to_wat(&self, rpu_source: String) -> Result<String, String> {
+        let scanner = Scanner::new(rpu_source);
+        let mut parser = Parser::new();
+
+        parser.parse(scanner)
+    }
+
+    pub fn compile_and_run(
+        &self,
+        source: &str,
+        func_name: &str,
+        args: Vec<Value>,
+    ) -> Result<Vec<Value>, String> {
+        let rc = self.compile_to_wat(source.to_string());
+        match rc {
+            Ok(wat) => self.compile_wat_and_run(&wat, func_name, args),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
+    pub fn compile_wat_and_run(
+        &self,
+        wat: &str,
+        func_name: &str,
+        args: Vec<Value>,
+    ) -> Result<Vec<Value>, String> {
+        let mut store = Store::default();
+        let module_rc = Module::new(&store, wat);
+        match module_rc {
+            Ok(module) => {
+                let import_object = imports! {};
+                if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
+                    if let Ok(func) = instance.exports.get_function(func_name) {
+                        match func.call(&mut store, &args) {
+                            Ok(values) => return Ok(values.to_vec()),
+                            Err(err) => return Err(err.to_string()),
+                        }
+                    }
+                }
+            }
+            Err(err) => return Err(err.to_string()),
+        }
+
+        Err("Unknown error".to_string())
+    }
+
+    pub fn compile_wat_to_module(&mut self, wat: String, store: &Store) -> Result<Module, String> {
+        let rc = Module::new(store, wat);
+        match rc {
+            Ok(module) => Ok(module),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
+    pub fn compile_wat_from_path(&mut self, mut path: PathBuf) -> Result<(), String> {
         if let Ok(main) = std::fs::read_to_string(path.clone()) {
             //println!("{}", main);
             let scanner = Scanner::new(main);

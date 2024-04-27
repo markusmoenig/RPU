@@ -1,5 +1,5 @@
-export ivec2 main(int x) {
-    ivec2 result = 2 * ivec2(5, 2).x;
+export ivec2 main() {
+    ivec2 result = 2 * ivec2(5, 2);
 
     return result;
 }
