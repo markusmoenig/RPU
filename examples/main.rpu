@@ -1,5 +1,5 @@
-export ivec2 main() {
-    ivec2 result = 2 * ivec2(5, 2);
+export vec4 main() {
+    vec4 result = 2.0 * vec4(1.0, 3.0, 5.0, 7.0) / 1.5;
 
     return result;
 }

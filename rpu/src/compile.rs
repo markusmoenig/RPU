@@ -94,6 +94,92 @@ impl Visitor for CompileVisitor {
                 let instr = format!("local.set ${}_x", name);
                 ctx.add_wat(&instr);
             }
+            ASTValue::Int3(_, _, _, _) => {
+                let instr = format!("(local ${}_x i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_y i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_z i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+
+                let instr = format!("local.set ${}_z", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_y", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_x", name);
+                ctx.add_wat(&instr);
+            }
+            ASTValue::Int4(_, _, _, _, _) => {
+                let instr = format!("(local ${}_x i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_y i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_z i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_w i{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+
+                let instr = format!("local.set ${}_w", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_z", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_y", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_x", name);
+                ctx.add_wat(&instr);
+            }
+            ASTValue::Float(_, _) => {
+                let instr = format!("(local ${} f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+
+                let instr = format!("local.set ${}", name);
+                ctx.add_wat(&instr);
+            }
+            ASTValue::Float2(_, _, _) => {
+                let instr = format!("(local ${}_x f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_y f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+
+                let instr = format!("local.set ${}_y", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_x", name);
+                ctx.add_wat(&instr);
+            }
+            ASTValue::Float3(_, _, _, _) => {
+                let instr = format!("(local ${}_x f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_y f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_z f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+
+                let instr = format!("local.set ${}_z", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_y", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_x", name);
+                ctx.add_wat(&instr);
+            }
+            ASTValue::Float4(_, _, _, _, _) => {
+                let instr = format!("(local ${}_x f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_y f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_z f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+                let instr = format!("(local ${}_w f{})", name, ctx.pr);
+                ctx.wat_locals.push_str(&format!("        {}\n", instr));
+
+                let instr = format!("local.set ${}_w", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_z", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_y", name);
+                ctx.add_wat(&instr);
+                let instr = format!("local.set ${}_x", name);
+                ctx.add_wat(&instr);
+            }
             _ => {}
         }
 
@@ -150,11 +236,11 @@ impl Visitor for CompileVisitor {
         }
 
         match &v {
-            ASTValue::Int(_, _) => {
+            ASTValue::Int(_, _) | ASTValue::Float(_, _) => {
                 let instr = format!("local.set ${}", name);
                 ctx.add_wat(&instr);
             }
-            ASTValue::Int2(_, _, _) => {
+            ASTValue::Int2(_, _, _) | ASTValue::Float2(_, _, _) => {
                 if swizzle.is_empty() {
                     let instr = format!("local.set ${}_y", name);
                     ctx.add_wat(&instr);
@@ -169,6 +255,82 @@ impl Visitor for CompileVisitor {
                             }
                             1 => {
                                 let instr = format!("local.set ${}_y", name);
+                                ctx.add_wat(&instr);
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "Swizzle '{}' out of range for '{}' {}",
+                                    ctx.deswizzle(*s),
+                                    name,
+                                    loc.describe()
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+            ASTValue::Int3(_, _, _, _) | ASTValue::Float3(_, _, _, _) => {
+                if swizzle.is_empty() {
+                    let instr = format!("local.set ${}_z", name);
+                    ctx.add_wat(&instr);
+                    let instr = format!("local.set ${}_y", name);
+                    ctx.add_wat(&instr);
+                    let instr = format!("local.set ${}_x", name);
+                    ctx.add_wat(&instr);
+                } else {
+                    for s in swizzle.iter().rev() {
+                        match s {
+                            0 => {
+                                let instr = format!("local.set ${}_x", name);
+                                ctx.add_wat(&instr);
+                            }
+                            1 => {
+                                let instr = format!("local.set ${}_y", name);
+                                ctx.add_wat(&instr);
+                            }
+                            2 => {
+                                let instr = format!("local.set ${}_z", name);
+                                ctx.add_wat(&instr);
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "Swizzle '{}' out of range for '{}' {}",
+                                    ctx.deswizzle(*s),
+                                    name,
+                                    loc.describe()
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+            ASTValue::Int4(_, _, _, _, _) | ASTValue::Float4(_, _, _, _, _) => {
+                if swizzle.is_empty() {
+                    let instr = format!("local.set ${}_w", name);
+                    ctx.add_wat(&instr);
+                    let instr = format!("local.set ${}_z", name);
+                    ctx.add_wat(&instr);
+                    let instr = format!("local.set ${}_y", name);
+                    ctx.add_wat(&instr);
+                    let instr = format!("local.set ${}_x", name);
+                    ctx.add_wat(&instr);
+                } else {
+                    for s in swizzle.iter().rev() {
+                        match s {
+                            0 => {
+                                let instr = format!("local.set ${}_x", name);
+                                ctx.add_wat(&instr);
+                            }
+                            1 => {
+                                let instr = format!("local.set ${}_y", name);
+                                ctx.add_wat(&instr);
+                            }
+                            2 => {
+                                let instr = format!("local.set ${}_z", name);
+                                ctx.add_wat(&instr);
+                            }
+                            3 => {
+                                let instr = format!("local.set ${}_w", name);
                                 ctx.add_wat(&instr);
                             }
                             _ => {
@@ -244,6 +406,175 @@ impl Visitor for CompileVisitor {
                         }
                     }
                 }
+                ASTValue::Int3(_, _, _, _) => {
+                    if swizzle.is_empty() {
+                        let instr = format!("local.get ${}_x", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_y", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_z", name);
+                        ctx.add_wat(&instr);
+                        rc = ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                    } else {
+                        for s in swizzle {
+                            match s {
+                                0 => {
+                                    let instr = format!("local.get ${}_x", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                1 => {
+                                    let instr = format!("local.get ${}_y", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                2 => {
+                                    let instr = format!("local.get ${}_z", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                ASTValue::Int4(_, _, _, _, _) => {
+                    if swizzle.is_empty() {
+                        let instr = format!("local.get ${}_x", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_y", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_z", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_w", name);
+                        ctx.add_wat(&instr);
+                        rc = ASTValue::Int4(
+                            None,
+                            empty_expr!(),
+                            empty_expr!(),
+                            empty_expr!(),
+                            empty_expr!(),
+                        );
+                    } else {
+                        for s in swizzle {
+                            match s {
+                                0 => {
+                                    let instr = format!("local.get ${}_x", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                1 => {
+                                    let instr = format!("local.get ${}_y", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                2 => {
+                                    let instr = format!("local.get ${}_z", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                3 => {
+                                    let instr = format!("local.get ${}_w", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                ASTValue::Float(_, _) => {
+                    let instr = format!("local.get ${}", name);
+                    ctx.add_wat(&instr);
+                    rc = ASTValue::Float(None, 0.0);
+                }
+                ASTValue::Float2(_, _, _) => {
+                    if swizzle.is_empty() {
+                        let instr = format!("local.get ${}_x", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_y", name);
+                        ctx.add_wat(&instr);
+                        rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
+                    } else {
+                        for s in swizzle {
+                            match s {
+                                0 => {
+                                    let instr = format!("local.get ${}_x", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                1 => {
+                                    let instr = format!("local.get ${}_y", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                ASTValue::Float3(_, _, _, _) => {
+                    if swizzle.is_empty() {
+                        let instr = format!("local.get ${}_x", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_y", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_z", name);
+                        ctx.add_wat(&instr);
+                        rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                    } else {
+                        for s in swizzle {
+                            match s {
+                                0 => {
+                                    let instr = format!("local.get ${}_x", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                1 => {
+                                    let instr = format!("local.get ${}_y", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                2 => {
+                                    let instr = format!("local.get ${}_z", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                ASTValue::Float4(_, _, _, _, _) => {
+                    if swizzle.is_empty() {
+                        let instr = format!("local.get ${}_x", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_y", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_z", name);
+                        ctx.add_wat(&instr);
+                        let instr = format!("local.get ${}_w", name);
+                        ctx.add_wat(&instr);
+                        rc = ASTValue::Float4(
+                            None,
+                            empty_expr!(),
+                            empty_expr!(),
+                            empty_expr!(),
+                            empty_expr!(),
+                        );
+                    } else {
+                        for s in swizzle {
+                            match s {
+                                0 => {
+                                    let instr = format!("local.get ${}_x", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                1 => {
+                                    let instr = format!("local.get ${}_y", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                2 => {
+                                    let instr = format!("local.get ${}_z", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                3 => {
+                                    let instr = format!("local.get ${}_w", name);
+                                    ctx.add_wat(&instr);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+
                 _ => {}
             }
         } else {
@@ -289,11 +620,22 @@ impl Visitor for CompileVisitor {
                 instr = format!("(i{}.const {})", ctx.pr, i);
                 rc = ASTValue::Int(None, i);
             }
-            ASTValue::Int2(_, x, y) => {
+            ASTValue::Int2(comps_txt, x, y) => {
                 instr = "".to_string();
+                let comps: i32 = comps_txt.unwrap().parse().unwrap();
                 if swizzle.is_empty() {
-                    _ = x.accept(self, ctx)?;
-                    _ = y.accept(self, ctx)?;
+                    let _x = x.accept(self, ctx)?;
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = y.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = y.accept(self, ctx)?;
+                    }
                     rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
                 } else {
                     for s in swizzle {
@@ -302,13 +644,317 @@ impl Visitor for CompileVisitor {
                                 _ = x.accept(self, ctx)?;
                             }
                             1 => {
-                                _ = y.accept(self, ctx)?;
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = y.accept(self, ctx)?;
+                                }
                             }
                             _ => {}
                         }
                     }
                 }
             }
+            ASTValue::Int3(comps_txt, x, y, z) => {
+                instr = "".to_string();
+                let comps: i32 = comps_txt.unwrap().parse().unwrap();
+                if swizzle.is_empty() {
+                    let _x = x.accept(self, ctx)?;
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = y.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = y.accept(self, ctx)?;
+                    }
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = z.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = z.accept(self, ctx)?;
+                    }
+                    rc = ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                } else {
+                    for s in swizzle {
+                        match s {
+                            0 => {
+                                _ = x.accept(self, ctx)?;
+                            }
+                            1 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = y.accept(self, ctx)?;
+                                }
+                            }
+                            2 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = z.accept(self, ctx)?;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            ASTValue::Int4(comps_txt, x, y, z, w) => {
+                instr = "".to_string();
+                let comps: i32 = comps_txt.unwrap().parse().unwrap();
+                if swizzle.is_empty() {
+                    let _x = x.accept(self, ctx)?;
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = y.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = y.accept(self, ctx)?;
+                    }
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = z.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = z.accept(self, ctx)?;
+                    }
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = w.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = w.accept(self, ctx)?;
+                    }
+                    rc = ASTValue::Int4(
+                        None,
+                        empty_expr!(),
+                        empty_expr!(),
+                        empty_expr!(),
+                        empty_expr!(),
+                    );
+                } else {
+                    for s in swizzle {
+                        match s {
+                            0 => {
+                                _ = x.accept(self, ctx)?;
+                            }
+                            1 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = y.accept(self, ctx)?;
+                                }
+                            }
+                            2 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = z.accept(self, ctx)?;
+                                }
+                            }
+                            3 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = w.accept(self, ctx)?;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            ASTValue::Float(_, i) => {
+                instr = format!("(f{}.const {})", ctx.pr, i);
+                rc = ASTValue::Float(None, i);
+            }
+            ASTValue::Float2(comps_txt, x, y) => {
+                instr = "".to_string();
+                let comps: i32 = comps_txt.unwrap().parse().unwrap();
+                if swizzle.is_empty() {
+                    let _x = x.accept(self, ctx)?;
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = y.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = y.accept(self, ctx)?;
+                    }
+                    rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
+                } else {
+                    for s in swizzle {
+                        match s {
+                            0 => {
+                                _ = x.accept(self, ctx)?;
+                            }
+                            1 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = y.accept(self, ctx)?;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            ASTValue::Float3(comps_txt, x, y, z) => {
+                instr = "".to_string();
+                let comps: i32 = comps_txt.unwrap().parse().unwrap();
+                if swizzle.is_empty() {
+                    let _x = x.accept(self, ctx)?;
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = y.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = y.accept(self, ctx)?;
+                    }
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = z.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = z.accept(self, ctx)?;
+                    }
+                    rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                } else {
+                    for s in swizzle {
+                        match s {
+                            0 => {
+                                _ = x.accept(self, ctx)?;
+                            }
+                            1 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = y.accept(self, ctx)?;
+                                }
+                            }
+                            2 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = z.accept(self, ctx)?;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            ASTValue::Float4(comps_txt, x, y, z, w) => {
+                instr = "".to_string();
+                let comps: i32 = comps_txt.unwrap().parse().unwrap();
+                if swizzle.is_empty() {
+                    let _x = x.accept(self, ctx)?;
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = y.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = y.accept(self, ctx)?;
+                    }
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = z.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = z.accept(self, ctx)?;
+                    }
+                    if comps == 1 {
+                        if _x.components() == 1 {
+                            // Fill with x
+                            _ = x.accept(self, ctx)?;
+                        } else {
+                            // Fill with zero
+                            _ = w.accept(self, ctx)?;
+                        }
+                    } else {
+                        _ = w.accept(self, ctx)?;
+                    }
+                    rc = ASTValue::Float4(
+                        None,
+                        empty_expr!(),
+                        empty_expr!(),
+                        empty_expr!(),
+                        empty_expr!(),
+                    );
+                } else {
+                    for s in swizzle {
+                        match s {
+                            0 => {
+                                _ = x.accept(self, ctx)?;
+                            }
+                            1 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = y.accept(self, ctx)?;
+                                }
+                            }
+                            2 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = z.accept(self, ctx)?;
+                                }
+                            }
+                            3 => {
+                                if comps == 1 {
+                                    _ = x.accept(self, ctx)?;
+                                } else {
+                                    _ = w.accept(self, ctx)?;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
             _ => {
                 instr = "".to_string();
             }
@@ -401,6 +1047,7 @@ impl Visitor for CompileVisitor {
         //println!("{:?} {:?}", left_type, right_type);
 
         let instr = match (&left_type, &right_type) {
+            // Int x Int
             (ASTValue::Int(_, _), ASTValue::Int(_, _)) => {
                 rc = ASTValue::Int(None, 0);
                 match op {
@@ -410,6 +1057,7 @@ impl Visitor for CompileVisitor {
                     BinaryOperator::Divide => format!("(i{}.div)", ctx.precision.describe()),
                 }
             }
+            // Int x Int2
             (ASTValue::Int(_, _), ASTValue::Int2(_, _, _)) => {
                 rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
                 match op {
@@ -432,6 +1080,7 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
+            // Int2 x Int
             (ASTValue::Int2(_, _, _), ASTValue::Int(_, _)) => {
                 rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
                 match op {
@@ -451,6 +1100,261 @@ impl Visitor for CompileVisitor {
                     BinaryOperator::Divide => {
                         ctx.gen_vec2_scalar(&format!("i{}", ctx.pr), "div_s");
                         format!("(call $_rpu_vec2_div_s_scalar_i{})", ctx.pr)
+                    }
+                }
+            }
+            // Int x Int3
+            (ASTValue::Int(_, _), ASTValue::Int3(_, _, _, _)) => {
+                rc = ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_scalar_vec3(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_scalar_add_vec3_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_scalar_vec3(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_scalar_sub_vec3_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_scalar_vec3(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_scalar_mul_vec3_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_scalar_vec3(&format!("i{}", ctx.pr), "div_s");
+                        format!("(call $_rpu_scalar_div_s_vec3_i{})", ctx.pr)
+                    }
+                }
+            }
+            // Int3 x Int
+            (ASTValue::Int3(_, _, _, _), ASTValue::Int(_, _)) => {
+                rc = ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec3_scalar(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec3_add_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec3_scalar(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec3_sub_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec3_scalar(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec3_mul_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec3_scalar(&format!("i{}", ctx.pr), "div_s");
+                        format!("(call $_rpu_vec3_div_s_scalar_i{})", ctx.pr)
+                    }
+                }
+            }
+            // Int x Int4
+            (ASTValue::Int(_, _), ASTValue::Int4(_, _, _, _, _)) => {
+                rc = ASTValue::Int4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                );
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_scalar_vec4(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_scalar_add_vec4_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_scalar_vec4(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_scalar_sub_vec4_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_scalar_vec4(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_scalar_mul_vec4_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_scalar_vec4(&format!("i{}", ctx.pr), "div_s");
+                        format!("(call $_rpu_scalar_div_s_vec4_i{})", ctx.pr)
+                    }
+                }
+            }
+            // Int4 x Int
+            (ASTValue::Int4(_, _, _, _, _), ASTValue::Int(_, _)) => {
+                rc = ASTValue::Int4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                );
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec4_scalar(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec4_add_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec4_scalar(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec4_sub_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec4_scalar(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec4_mul_scalar_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec4_scalar(&format!("i{}", ctx.pr), "div_s");
+                        format!("(call $_rpu_vec4_div_s_scalar_i{})", ctx.pr)
+                    }
+                }
+            }
+            // Float x Float
+            (ASTValue::Float(_, _), ASTValue::Float(_, _)) => {
+                rc = ASTValue::Float(None, 0.0);
+                match op {
+                    BinaryOperator::Add => format!("(f{}.add)", ctx.precision.describe()),
+                    BinaryOperator::Subtract => format!("(f{}.sub)", ctx.precision.describe()),
+                    BinaryOperator::Multiply => format!("(f{}.mul)", ctx.precision.describe()),
+                    BinaryOperator::Divide => format!("(f{}.div)", ctx.precision.describe()),
+                }
+            }
+            // Float x Float2
+            (ASTValue::Float(_, _), ASTValue::Float2(_, _, _)) => {
+                rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
+                match op {
+                    // Scalar and ivec2
+                    BinaryOperator::Add => {
+                        ctx.gen_scalar_vec2(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_scalar_add_vec2_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_scalar_vec2(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_scalar_sub_vec2_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_scalar_vec2(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_scalar_mul_vec2_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_scalar_vec2(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_scalar_div_vec2_f{})", ctx.pr)
+                    }
+                }
+            }
+            // Float2 x Float
+            (ASTValue::Float2(_, _, _), ASTValue::Float(_, _)) => {
+                rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec2_scalar(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec2_add_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec2_scalar(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec2_sub_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec2_scalar(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec2_mul_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec2_scalar(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec2_div_scalar_f{})", ctx.pr)
+                    }
+                }
+            }
+            // Float x Float3
+            (ASTValue::Float(_, _), ASTValue::Float3(_, _, _, _)) => {
+                rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_scalar_vec3(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_scalar_add_vec3_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_scalar_vec3(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_scalar_sub_vec3_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_scalar_vec3(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_scalar_mul_vec3_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_scalar_vec3(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_scalar_div_vec3_f{})", ctx.pr)
+                    }
+                }
+            }
+            // Float3 x Float
+            (ASTValue::Float3(_, _, _, _), ASTValue::Float(_, _)) => {
+                rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec3_scalar(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec3_add_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec3_scalar(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec3_sub_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec3_scalar(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec3_mul_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec3_scalar(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec3_div_scalar_f{})", ctx.pr)
+                    }
+                }
+            }
+            // Float x Float4
+            (ASTValue::Float(_, _), ASTValue::Float4(_, _, _, _, _)) => {
+                rc = ASTValue::Float4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                );
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_scalar_vec4(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_scalar_add_vec4_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_scalar_vec4(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_scalar_sub_vec4_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_scalar_vec4(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_scalar_mul_vec4_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_scalar_vec4(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_scalar_div_vec4_f{})", ctx.pr)
+                    }
+                }
+            }
+            // Float4 x Float
+            (ASTValue::Float4(_, _, _, _, _), ASTValue::Float(_, _)) => {
+                rc = ASTValue::Float4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                );
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec4_scalar(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec4_add_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec4_scalar(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec4_sub_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec4_scalar(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec4_mul_scalar_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec4_scalar(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec4_div_scalar_f{})", ctx.pr)
                     }
                 }
             }
@@ -556,6 +1460,72 @@ impl Visitor for CompileVisitor {
                 ASTValue::Int2(name, _, _) => {
                     params += &format!(
                         "(param ${}_x i{}) (param ${}_y i{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe()
+                    );
+                }
+                ASTValue::Int3(name, _, _, _) => {
+                    params += &format!(
+                        "(param ${}_x i{}) (param ${}_y i{}) (param ${}_z i{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe()
+                    );
+                }
+                ASTValue::Int4(name, _, _, _, _) => {
+                    params += &format!(
+                        "(param ${}_x i{}) (param ${}_y i{}) (param ${}_z i{}) (param ${}_w i{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe()
+                    );
+                }
+                ASTValue::Float(name, _) => {
+                    params += &format!(
+                        "(param ${} f{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe()
+                    );
+                    self.environment
+                        .define(name.clone().unwrap(), ASTValue::Int(None, 0));
+                }
+                ASTValue::Float2(name, _, _) => {
+                    params += &format!(
+                        "(param ${}_x f{}) (param ${}_y f{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe()
+                    );
+                }
+                ASTValue::Float3(name, _, _, _) => {
+                    params += &format!(
+                        "(param ${}_x f{}) (param ${}_y f{}) (param ${}_z f{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe()
+                    );
+                }
+                ASTValue::Float4(name, _, _, _, _) => {
+                    params += &format!(
+                        "(param ${}_x f{}) (param ${}_y f{}) (param ${}_z f{}) (param ${}_w f{})",
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
+                        name.clone().unwrap(),
+                        ctx.precision.describe(),
                         name.clone().unwrap(),
                         ctx.precision.describe(),
                         name.clone().unwrap(),

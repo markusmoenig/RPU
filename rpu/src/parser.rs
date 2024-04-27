@@ -1,4 +1,4 @@
-use crate::{empty_expr, prelude::*};
+use crate::{empty_expr, prelude::*, zero_expr_float, zero_expr_int};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -60,6 +60,10 @@ impl Parser {
             TokenType::Int2,
             TokenType::Int3,
             TokenType::Int4,
+            TokenType::Float,
+            TokenType::Float2,
+            TokenType::Float3,
+            TokenType::Float4,
         ]) {
             // Decide between function or var declaration
 
@@ -193,6 +197,7 @@ impl Parser {
                     ));
                 }
 
+                // TODO: Add other parameter types
                 if self.check(TokenType::Int) {
                     self.advance();
                     let param_name = self
@@ -482,7 +487,7 @@ impl Parser {
                 vec![],
                 self.create_loc(token.line),
             )),
-            TokenType::Number => {
+            TokenType::IntegerNumber => {
                 self.advance();
                 if let Ok(number) = token.lexeme.parse::<i32>() {
                     Ok(Expr::Value(
@@ -491,30 +496,211 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err("Invalid Number".to_string())
+                    Err(format!("Invalid integer number at line {}.", token.line))
                 }
             }
             TokenType::Int2 => {
                 self.advance();
                 if self.match_token(vec![TokenType::LeftParen]) {
-                    let x = self.expression()?;
-                    if self.match_token(vec![TokenType::Comma]) {
-                        let y = self.expression()?;
-                        if self.match_token(vec![TokenType::RightParen]) {
-                            let swizzle: Vec<u8> = self.get_swizzle_at_current();
-                            Ok(Expr::Value(
-                                ASTValue::Int2(None, Box::new(x), Box::new(y)),
-                                swizzle,
-                                self.create_loc(token.line),
-                            ))
-                        } else {
-                            Err("Expected ')' after ivec2".to_string())
-                        }
-                    } else {
-                        Err("Expected ',' after ivec2".to_string())
-                    }
+                    let comps = self.read_vec_components(2, token.line)?;
+                    let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    Ok(Expr::Value(
+                        ASTValue::Int2(
+                            Some(format!("{}", comps.len())),
+                            if !comps.is_empty() {
+                                Box::new(comps[0].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                            if comps.len() > 1 {
+                                Box::new(comps[1].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                        ),
+                        swizzle,
+                        self.create_loc(token.line),
+                    ))
                 } else {
-                    Err("Expected '(' after ivec2".to_string())
+                    Err(format!("Expected '(' after ivec2 at line {}.", token.line))
+                }
+            }
+            TokenType::Int3 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let comps = self.read_vec_components(3, token.line)?;
+                    let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    Ok(Expr::Value(
+                        ASTValue::Int3(
+                            Some(format!("{}", comps.len())),
+                            if !comps.is_empty() {
+                                Box::new(comps[0].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                            if comps.len() > 1 {
+                                Box::new(comps[1].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                            if comps.len() > 2 {
+                                Box::new(comps[2].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                        ),
+                        swizzle,
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Expected '(' after ivec3 at line {}.", token.line))
+                }
+            }
+            TokenType::Int4 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let comps = self.read_vec_components(4, token.line)?;
+                    let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    Ok(Expr::Value(
+                        ASTValue::Int4(
+                            Some(format!("{}", comps.len())),
+                            if !comps.is_empty() {
+                                Box::new(comps[0].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                            if comps.len() > 1 {
+                                Box::new(comps[1].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                            if comps.len() > 2 {
+                                Box::new(comps[2].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                            if comps.len() > 3 {
+                                Box::new(comps[3].clone())
+                            } else {
+                                zero_expr_int!()
+                            },
+                        ),
+                        swizzle,
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Expected '(' after ivec4 at line {}.", token.line))
+                }
+            }
+            TokenType::FloatNumber => {
+                self.advance();
+                if let Ok(number) = token.lexeme.parse::<f32>() {
+                    Ok(Expr::Value(
+                        ASTValue::Float(None, number),
+                        vec![],
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Invalid float number at line {}.", token.line))
+                }
+            }
+            TokenType::Float2 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let comps = self.read_vec_components(2, token.line)?;
+                    let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    Ok(Expr::Value(
+                        ASTValue::Float2(
+                            Some(format!("{}", comps.len())),
+                            if !comps.is_empty() {
+                                Box::new(comps[0].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                            if comps.len() > 1 {
+                                Box::new(comps[1].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                        ),
+                        swizzle,
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Expected '(' after vec2 at line {}.", token.line))
+                }
+            }
+            TokenType::Float3 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let comps = self.read_vec_components(3, token.line)?;
+                    let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    Ok(Expr::Value(
+                        ASTValue::Float3(
+                            Some(format!("{}", comps.len())),
+                            if !comps.is_empty() {
+                                Box::new(comps[0].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                            if comps.len() > 1 {
+                                Box::new(comps[1].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                            if comps.len() > 2 {
+                                Box::new(comps[2].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                        ),
+                        swizzle,
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Expected '(' after vec3 at line {}.", token.line))
+                }
+            }
+            TokenType::Float4 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let comps = self.read_vec_components(4, token.line)?;
+                    let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    Ok(Expr::Value(
+                        ASTValue::Float4(
+                            Some(format!("{}", comps.len())),
+                            if !comps.is_empty() {
+                                Box::new(comps[0].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                            if comps.len() > 1 {
+                                Box::new(comps[1].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                            if comps.len() > 2 {
+                                Box::new(comps[2].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                            if comps.len() > 3 {
+                                Box::new(comps[3].clone())
+                            } else {
+                                zero_expr_float!()
+                            },
+                        ),
+                        swizzle,
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Expected '(' after vec4 at line {}.", token.line))
                 }
             }
             TokenType::LeftParen => {
@@ -541,6 +727,35 @@ impl Parser {
                 token.lexeme, token.line
             )),
         }
+    }
+
+    /// Reads the components of a vector up to `max_comps` components. Can terminate early if closing parenthesis is found.
+    /// Check for component validity is done in the compiler.
+    fn read_vec_components(&mut self, max_comps: usize, line: usize) -> Result<Vec<Expr>, String> {
+        let mut components = vec![];
+        let mut count = 0;
+
+        if self.match_token(vec![TokenType::RightParen]) {
+            return Ok(components);
+        }
+
+        while count < max_comps {
+            let expr = self.expression()?;
+            components.push(expr);
+            count += 1;
+
+            if !self.match_token(vec![TokenType::Comma]) {
+                if !self.match_token(vec![TokenType::RightParen]) {
+                    return Err(format!(
+                        "Expected ')' after vector components at line {}.",
+                        line
+                    ));
+                }
+                break;
+            }
+        }
+
+        Ok(components)
     }
 
     /// Returns the swizzle at the current token if any.

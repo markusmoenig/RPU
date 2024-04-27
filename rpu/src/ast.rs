@@ -7,16 +7,38 @@ macro_rules! empty_expr {
     };
 }
 
+#[macro_export]
+macro_rules! zero_expr_int {
+    () => {
+        Box::new(Expr::Value(
+            ASTValue::Int(None, 0),
+            vec![],
+            Location::default(),
+        ))
+    };
+}
+
+#[macro_export]
+macro_rules! zero_expr_float {
+    () => {
+        Box::new(Expr::Value(
+            ASTValue::Float(None, 0.0),
+            vec![],
+            Location::default(),
+        ))
+    };
+}
+
 /// Values in the AST
 #[derive(Clone, Debug)]
 pub enum ASTValue {
     None,
-    Boolean(Option<String>, bool),
+    Boolean(Option<Box<ASTValue>>, bool),
     Int(Option<String>, i32),
     Int2(Option<String>, Box<Expr>, Box<Expr>),
     Int3(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>),
     Int4(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>, Box<Expr>),
-    Float(Option<String>, f64),
+    Float(Option<String>, f32),
     Float2(Option<String>, Box<Expr>, Box<Expr>),
     Float3(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>),
     Float4(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>, Box<Expr>),
@@ -80,6 +102,10 @@ impl ASTValue {
             ASTValue::Int2(_, _, _) => Some(format!("i{} i{}", pr, pr)),
             ASTValue::Int3(_, _, _, _) => Some(format!("i{} i{} i{}", pr, pr, pr)),
             ASTValue::Int4(_, _, _, _, _) => Some(format!("i{} i{} i{} i{}", pr, pr, pr, pr)),
+            ASTValue::Float(_, _) => Some(format!("f{}", pr)),
+            ASTValue::Float2(_, _, _) => Some(format!("f{} f{}", pr, pr)),
+            ASTValue::Float3(_, _, _, _) => Some(format!("f{} f{} f{}", pr, pr, pr)),
+            ASTValue::Float4(_, _, _, _, _) => Some(format!("f{} f{} f{} f{}", pr, pr, pr, pr)),
             _ => None,
         }
     }
@@ -94,6 +120,18 @@ impl ASTValue {
             TokenType::Int2 => ASTValue::Int2(None, empty_expr!(), empty_expr!()),
             TokenType::Int3 => ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!()),
             TokenType::Int4 => ASTValue::Int4(
+                None,
+                empty_expr!(),
+                empty_expr!(),
+                empty_expr!(),
+                empty_expr!(),
+            ),
+            TokenType::Float => ASTValue::Float(None, 0.0),
+            TokenType::Float2 => ASTValue::Float2(None, empty_expr!(), empty_expr!()),
+            TokenType::Float3 => {
+                ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!())
+            }
+            TokenType::Float4 => ASTValue::Float4(
                 None,
                 empty_expr!(),
                 empty_expr!(),

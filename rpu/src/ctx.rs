@@ -199,4 +199,198 @@ impl Context {
         self.math_funcs_included.insert(func_name);
         self.math_funcs.push_str(&str);
     }
+
+    pub fn gen_scalar_vec3(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_scalar_{}_vec3_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let str = format!(
+            r#"
+    ;; scalar {op} vec3 ({data_type})
+    (func ${func_name}
+        (param $scalar {data_type})  ;; Scalar
+        (param $vec3_x {data_type})  ;; x component of vec3
+        (param $vec3_y {data_type})  ;; y component of vec3
+        (param $vec3_z {data_type})  ;; y component of vec3
+        (result {data_type} {data_type} {data_type})  ;; Return three {data_type} results, the new x, y and z components
+
+        ;; Calculate the new x component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec3_x)  ;; Get the x component
+        )
+
+        ;; Calculate the new y component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec3_y)  ;; Get the y component
+        )
+
+        ;; Calculate the new z component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec3_z)  ;; Get the z component
+        )
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    pub fn gen_vec3_scalar(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_vec3_{}_scalar_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let str = format!(
+            r#"
+    ;; vec3 {op} scalar ({data_type})
+    (func ${func_name}
+        (param $vec3_x {data_type})    ;; x component of vec3
+        (param $vec3_y {data_type})    ;; y component of vec3
+        (param $vec3_z {data_type})    ;; z component of vec3
+        (param $scalar {data_type})    ;; Scalar
+        (result {data_type} {data_type} {data_type})       ;; Return three {data_type} results, the new x, y and z components
+
+        ;; Calculate the new x component and return it
+        ({data_type}.{op}
+            (local.get $vec3_x)  ;; Get the x component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new y component and return it
+        ({data_type}.{op}
+            (local.get $vec3_y)  ;; Get the y component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new z component and return it
+        ({data_type}.{op}
+            (local.get $vec3_z)  ;; Get the z component
+            (local.get $scalar)  ;; Get the scalar
+        )
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    pub fn gen_scalar_vec4(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_scalar_{}_vec4_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let str = format!(
+            r#"
+    ;; scalar {op} vec4 ({data_type})
+    (func ${func_name}
+        (param $scalar {data_type})  ;; Scalar
+        (param $vec4_x {data_type})  ;; x component of vec4
+        (param $vec4_y {data_type})  ;; y component of vec4
+        (param $vec4_z {data_type})  ;; z component of vec4
+        (param $vec4_w {data_type})  ;; w component of vec4
+        (result {data_type} {data_type} {data_type} {data_type})  ;; Return four {data_type} results, the new x, y, z and w components
+
+        ;; Calculate the new x component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec4_x)  ;; Get the x component
+        )
+
+        ;; Calculate the new y component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec4_y)  ;; Get the y component
+        )
+
+        ;; Calculate the new z component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec4_z)  ;; Get the z component
+        )
+
+        ;; Calculate the new w component and return it
+        ({data_type}.{op}
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec4_w)  ;; Get the w component
+        )
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    pub fn gen_vec4_scalar(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_vec4_{}_scalar_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let str = format!(
+            r#"
+    ;; vec4 {op} scalar ({data_type})
+    (func ${func_name}
+        (param $vec4_x {data_type})    ;; x component of vec4
+        (param $vec4_y {data_type})    ;; y component of vec4
+        (param $vec4_z {data_type})    ;; z component of vec4
+        (param $vec4_w {data_type})    ;; w component of vec4
+        (param $scalar {data_type})    ;; Scalar
+        (result {data_type} {data_type} {data_type} {data_type})       ;; Return four {data_type} results, the new x, y, z and w components
+
+        ;; Calculate the new x component and return it
+        ({data_type}.{op}
+            (local.get $vec4_x)  ;; Get the x component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new y component and return it
+        ({data_type}.{op}
+            (local.get $vec4_y)  ;; Get the y component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new z component and return it
+        ({data_type}.{op}
+            (local.get $vec4_z)  ;; Get the z component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new w component and return it
+        ({data_type}.{op}
+            (local.get $vec4_w)  ;; Get the w component
+            (local.get $scalar)  ;; Get the scalar
+        )
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
 }

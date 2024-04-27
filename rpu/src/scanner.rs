@@ -36,7 +36,8 @@ pub enum TokenType {
     // Literals.
     Identifier,
     String,
-    Number,
+    IntegerNumber,
+    FloatNumber,
 
     // Keywords.
     And,
@@ -60,6 +61,11 @@ pub enum TokenType {
     Int2,
     Int3,
     Int4,
+
+    Float,
+    Float2,
+    Float3,
+    Float4,
 
     Error,
     Eof,
@@ -116,6 +122,11 @@ impl Scanner {
         keywords.insert("ivec2", TokenType::Int2);
         keywords.insert("ivec3", TokenType::Int3);
         keywords.insert("ivec4", TokenType::Int4);
+
+        keywords.insert("float", TokenType::Float);
+        keywords.insert("vec2", TokenType::Float2);
+        keywords.insert("vec3", TokenType::Float3);
+        keywords.insert("vec4", TokenType::Float4);
 
         keywords.insert("export", TokenType::Export);
 
@@ -294,14 +305,20 @@ impl Scanner {
             self.advance();
         }
 
+        let mut is_float = false;
         if self.peek() == b'.' && is_digit(self.peek_next()) {
+            is_float = true;
             self.advance();
             while is_digit(self.peek()) {
                 self.advance();
             }
         }
 
-        self.make_token(TokenType::Number)
+        if is_float {
+            self.make_token(TokenType::FloatNumber)
+        } else {
+            self.make_token(TokenType::IntegerNumber)
+        }
     }
 
     fn hex_color(&mut self) -> Token {
