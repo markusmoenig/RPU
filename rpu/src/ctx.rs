@@ -393,4 +393,60 @@ impl Context {
         self.math_funcs_included.insert(func_name);
         self.math_funcs.push_str(&str);
     }
+
+    pub fn gen_vec_length(&mut self, components: u32) -> String {
+        let func_name = format!("_rpu_vec{}_length_f{}", components, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_vector_length(components);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+
+    fn generate_wat_vector_length(&self, dim: u32) -> String {
+        let full_precision = format!("f{}", self.pr);
+
+        let mut params = String::new();
+        let mut body = String::new();
+
+        // Generate parameters and calculation body
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            params.push_str(&format!(" (param ${} {})", coord, full_precision));
+            if i == 0 {
+                body.push_str(&format!(
+                    "\n        local.get ${}\n        local.get ${}\n        {full_precision}.mul",
+                    coord,
+                    coord,
+                    full_precision = full_precision
+                ));
+            } else {
+                body.push_str(&format!("\n        local.get ${}\n        local.get ${}\n        {full_precision}.mul\n        {full_precision}.add", coord, coord, full_precision=full_precision));
+            }
+        }
+
+        body.push_str(&format!(
+            "\n        {full_precision}.sqrt",
+            full_precision = full_precision
+        ));
+
+        // Assemble the complete function with indented formatting
+        format!(
+            "\n    ;; vec{} length\n    (func $_rpu_vec{}_length_{}{} (result {})        {})\n",
+            dim, dim, full_precision, params, full_precision, body
+        )
+    }
 }

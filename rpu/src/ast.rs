@@ -72,6 +72,10 @@ impl ASTValue {
             ASTValue::Int2(_, _, _) => 2,
             ASTValue::Int3(_, _, _, _) => 3,
             ASTValue::Int4(_, _, _, _, _) => 4,
+            ASTValue::Float(_, _) => 1,
+            ASTValue::Float2(_, _, _) => 2,
+            ASTValue::Float3(_, _, _, _) => 3,
+            ASTValue::Float4(_, _, _, _, _) => 4,
             _ => 0,
         }
     }

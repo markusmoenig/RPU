@@ -12,9 +12,20 @@ impl Visitor for CompileVisitor {
     where
         Self: Sized,
     {
+        let mut functions: FxHashMap<String, ASTValue> = FxHashMap::default();
+
+        functions.insert(
+            "length".to_string(),
+            ASTValue::Function(
+                "length".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
         Self {
             environment: Environment::default(),
-            functions: FxHashMap::default(),
+            functions,
         }
     }
 
@@ -1404,10 +1415,25 @@ impl Visitor for CompileVisitor {
                 ));
             }
 
-            for index in 0..args.len() {
-                let rc = args[index].accept(self, ctx)?;
-                if rc.to_type() != func_args[index].to_type() {
+            if name == "length" {
+                let v = args[0].accept(self, ctx)?;
+                let components = v.components();
+                if !(1..=4).contains(&components) {
                     return Err(format!(
+                        "Invalid number of components {} {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                let func_name = ctx.gen_vec_length(v.components() as u32);
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = ASTValue::Float(None, 0.0);
+            } else {
+                for index in 0..args.len() {
+                    let rc = args[index].accept(self, ctx)?;
+                    if rc.to_type() != func_args[index].to_type() {
+                        return Err(format!(
                         "Function '{}' expects argument {} to be of type '{}', but '{}' was provided {}",
                         name,
                         index,
@@ -1415,12 +1441,13 @@ impl Visitor for CompileVisitor {
                         rc.to_type(),
                         loc.describe()
                     ));
+                    }
                 }
-            }
 
-            let instr = format!("(call ${})", name);
-            ctx.add_wat(&instr);
-            rc = *returns;
+                let instr = format!("(call ${})", name);
+                ctx.add_wat(&instr);
+                rc = *returns;
+            }
         }
 
         Ok(rc)

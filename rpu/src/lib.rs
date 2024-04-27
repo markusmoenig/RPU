@@ -60,6 +60,22 @@ mod tests {
     }
 
     #[test]
+    fn vec_length() {
+        let rpu = RPU::new();
+        assert_eq!(
+            rpu.compile_and_run(
+                "export float main() {
+                    return length(vec3(1.0, 3.0, 5.0));
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![WasmValue::F64(5.916079783099616)])
+        );
+    }
+
+    #[test]
     fn fib() {
         let rpu = RPU::new();
         let rc = rpu.compile_to_wat_from_path(std::path::PathBuf::from("../examples/fib.rpu"));
