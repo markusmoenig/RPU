@@ -1,4 +1,9 @@
-export float main() {
+export vec4 shader(vec2 uv, vec2 size) {
+
+    return vec4(1.0, 0.0, 0.0, 1.0);
+}
+
+export float main(float test) {
     float result = length(vec3(1.0, 3.0, 5.0));
 
     return result;

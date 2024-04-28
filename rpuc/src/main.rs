@@ -19,7 +19,7 @@ fn main() {
             path.set_extension("wat");
             _ = std::fs::write(path, wat.clone());
 
-            let rc = rpu.compile_wat_and_run(&wat, "main", vec![]);
+            let rc = rpu.compile_wat_and_run(&wat, "main", vec![WasmValue::F64(10.0)]);
             match rc {
                 Ok(values) => {
                     println!("{:?}", values);

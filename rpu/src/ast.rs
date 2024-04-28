@@ -33,7 +33,7 @@ macro_rules! zero_expr_float {
 #[derive(Clone, Debug)]
 pub enum ASTValue {
     None,
-    Boolean(Option<Box<ASTValue>>, bool),
+    Boolean(Option<String>, bool),
     Int(Option<String>, i32),
     Int2(Option<String>, Box<Expr>, Box<Expr>),
     Int3(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>),
@@ -47,6 +47,22 @@ pub enum ASTValue {
 }
 
 impl ASTValue {
+    /// Returns the value as a float if it is one.
+    pub fn to_float(&self) -> Option<f32> {
+        match self {
+            ASTValue::Float(_, f) => Some(*f),
+            _ => None,
+        }
+    }
+
+    ///
+    pub fn to_int(&self) -> Option<i32> {
+        match self {
+            ASTValue::Int(_, i) => Some(*i),
+            _ => None,
+        }
+    }
+
     /// The truthiness of the value.
     pub fn is_truthy(&self) -> bool {
         match self {
@@ -115,35 +131,52 @@ impl ASTValue {
     }
 
     /// Creates an ASTValue from a TokenType.
-    pub fn from_token_type(token_type: &TokenType) -> ASTValue {
+    pub fn from_token_type(name: Option<String>, token_type: &TokenType) -> ASTValue {
         match token_type {
             TokenType::Void => ASTValue::None,
-            TokenType::True => ASTValue::Boolean(None, true),
-            TokenType::False => ASTValue::Boolean(None, false),
-            TokenType::Int => ASTValue::Int(None, 0),
-            TokenType::Int2 => ASTValue::Int2(None, empty_expr!(), empty_expr!()),
-            TokenType::Int3 => ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!()),
+            TokenType::True => ASTValue::Boolean(name, true),
+            TokenType::False => ASTValue::Boolean(name, false),
+            TokenType::Int => ASTValue::Int(name, 0),
+            TokenType::Int2 => ASTValue::Int2(name, empty_expr!(), empty_expr!()),
+            TokenType::Int3 => ASTValue::Int3(name, empty_expr!(), empty_expr!(), empty_expr!()),
             TokenType::Int4 => ASTValue::Int4(
-                None,
+                name,
                 empty_expr!(),
                 empty_expr!(),
                 empty_expr!(),
                 empty_expr!(),
             ),
-            TokenType::Float => ASTValue::Float(None, 0.0),
-            TokenType::Float2 => ASTValue::Float2(None, empty_expr!(), empty_expr!()),
+            TokenType::Float => ASTValue::Float(name, 0.0),
+            TokenType::Float2 => ASTValue::Float2(name, empty_expr!(), empty_expr!()),
             TokenType::Float3 => {
-                ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!())
+                ASTValue::Float3(name, empty_expr!(), empty_expr!(), empty_expr!())
             }
             TokenType::Float4 => ASTValue::Float4(
-                None,
+                name,
                 empty_expr!(),
                 empty_expr!(),
                 empty_expr!(),
                 empty_expr!(),
             ),
-            TokenType::String => ASTValue::String(None, "".to_string()),
+            TokenType::String => ASTValue::String(name, "".to_string()),
             _ => ASTValue::None,
+        }
+    }
+
+    pub fn name(&self) -> Option<String> {
+        match self {
+            ASTValue::Boolean(name, _) => name.clone(),
+            ASTValue::Int(name, _) => name.clone(),
+            ASTValue::Int2(name, _, _) => name.clone(),
+            ASTValue::Int3(name, _, _, _) => name.clone(),
+            ASTValue::Int4(name, _, _, _, _) => name.clone(),
+            ASTValue::Float(name, _) => name.clone(),
+            ASTValue::Float2(name, _, _) => name.clone(),
+            ASTValue::Float3(name, _, _, _) => name.clone(),
+            ASTValue::Float4(name, _, _, _, _) => name.clone(),
+            ASTValue::String(name, _) => name.clone(),
+            ASTValue::Function(name, _, _) => Some(name.clone()),
+            ASTValue::None => None,
         }
     }
 }

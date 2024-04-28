@@ -72,12 +72,12 @@ impl Parser {
                 self.statement()
             } else if self.current + 1 < self.tokens.len() {
                 if self.tokens[self.current + 1].kind == TokenType::LeftParen {
-                    self.function(export, ASTValue::from_token_type(&token_type))
+                    self.function(export, ASTValue::from_token_type(None, &token_type))
                 } else {
-                    self.var_declaration(ASTValue::from_token_type(&token_type))
+                    self.var_declaration(ASTValue::from_token_type(None, &token_type))
                 }
             } else {
-                self.var_declaration(ASTValue::from_token_type(&token_type))
+                self.var_declaration(ASTValue::from_token_type(None, &token_type))
             }
         } else {
             self.statement()
@@ -197,16 +197,24 @@ impl Parser {
                     ));
                 }
 
-                // TODO: Add other parameter types
-                if self.check(TokenType::Int) {
-                    self.advance();
+                if let Some(token_type) = self.match_token_and_return(vec![
+                    TokenType::Void,
+                    TokenType::Int,
+                    TokenType::Int2,
+                    TokenType::Int3,
+                    TokenType::Int4,
+                    TokenType::Float,
+                    TokenType::Float2,
+                    TokenType::Float3,
+                    TokenType::Float4,
+                ]) {
                     let param_name = self
                         .consume(
                             TokenType::Identifier,
                             &format!("Expect parameter name at line {}.", line),
                         )?
                         .lexeme;
-                    parameters.push(ASTValue::Int(Some(param_name), 0));
+                    parameters.push(ASTValue::from_token_type(Some(param_name), &token_type));
                 } else {
                     return Err(format!(
                         "Invalid parameter type '{}' at line {}.",

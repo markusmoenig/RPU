@@ -64,4 +64,9 @@ impl Environment {
     pub fn get_return(&self) -> Option<ASTValue> {
         self.scoped_returns.last().cloned()
     }
+
+    /// Returns true if the current scope is the global scope.
+    pub fn is_global_scope(&self) -> bool {
+        self.scopes.len() == 1
+    }
 }

@@ -16,8 +16,17 @@
         f64.add
         f64.sqrt)
 
+    ;; function 'shader'
+    (func $shader (export "shader") (param $uv_x f64) (param $uv_y f64)(param $size_x f64) (param $size_y f64) (result f64 f64 f64 f64)
+        (f64.const 1)
+        (f64.const 0)
+        (f64.const 0)
+        (f64.const 1)
+        (return)
+    )
+
     ;; function 'main'
-    (func $main (export "main")  (result f64)
+    (func $main (export "main") (param $test f64) (result f64)
         (local $result f64)
         
         (f64.const 1)

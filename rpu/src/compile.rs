@@ -86,6 +86,12 @@ impl Visitor for CompileVisitor {
             ));
         }
 
+        // Global function definition. We write these out in the module header in gen_wat().
+        if self.environment.is_global_scope() {
+            ctx.globals.insert(name.to_string(), v.clone());
+            return Ok(ASTValue::None);
+        }
+
         match &v {
             ASTValue::Int(_, _) => {
                 let instr = format!("(local ${} i{})", name, ctx.pr);
@@ -213,7 +219,6 @@ impl Visitor for CompileVisitor {
 
         // Use the type of the variable
         if let Some(vv) = self.environment.get(&name) {
-            println!("Variable '{}' has {} components", name, vv.components());
             if incoming_components != vv.components() {
                 return Err(format!(
                     "Variable '{}' has {} components, but expression has {} {}",
@@ -1055,8 +1060,6 @@ impl Visitor for CompileVisitor {
         let right_type = right.accept(self, ctx)?;
         let rc;
 
-        //println!("{:?} {:?}", left_type, right_type);
-
         let instr = match (&left_type, &right_type) {
             // Int x Int
             (ASTValue::Int(_, _), ASTValue::Int(_, _)) => {
@@ -1474,6 +1477,11 @@ impl Visitor for CompileVisitor {
         self.environment.begin_scope(returns.clone());
 
         for param in args {
+            // Save the param into the environment
+            if let Some(name) = param.name() {
+                self.environment.define(name, param.clone());
+            }
+
             match param {
                 ASTValue::Int(name, _) => {
                     params += &format!(
@@ -1481,8 +1489,6 @@ impl Visitor for CompileVisitor {
                         name.clone().unwrap(),
                         ctx.precision.describe()
                     );
-                    self.environment
-                        .define(name.clone().unwrap(), ASTValue::Int(None, 0));
                 }
                 ASTValue::Int2(name, _, _) => {
                     params += &format!(
@@ -1523,8 +1529,6 @@ impl Visitor for CompileVisitor {
                         name.clone().unwrap(),
                         ctx.precision.describe()
                     );
-                    self.environment
-                        .define(name.clone().unwrap(), ASTValue::Int(None, 0));
                 }
                 ASTValue::Float2(name, _, _) => {
                     params += &format!(

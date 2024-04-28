@@ -33,6 +33,9 @@ pub struct Context {
     math_funcs_included: rustc_hash::FxHashSet<String>,
     math_funcs: String,
 
+    /// Global variables
+    pub globals: FxHashMap<String, ASTValue>,
+
     /// The current indentation level
     indention: usize,
 
@@ -57,6 +60,8 @@ impl Context {
 
             math_funcs_included: rustc_hash::FxHashSet::default(),
             math_funcs: String::new(),
+
+            globals: FxHashMap::default(),
 
             indention: 1,
 
@@ -117,6 +122,25 @@ impl Context {
     /// Generate the final wat code
     pub fn gen_wat(&mut self) -> String {
         let mut output = "(module\n    (memory 1)\n".to_string();
+
+        for (name, value) in self.globals.iter() {
+            if let ASTValue::Float(_, value) = value {
+                let mut str_value = format!("{:.}", value);
+                if !str_value.contains('.') {
+                    str_value.push_str(".0");
+                }
+                output += &format!(
+                    "    (global ${} (mut f{}) (f{}.const {}))\n",
+                    name, self.pr, self.pr, str_value
+                );
+            } else if let ASTValue::Int(_, value) = value {
+                output += &format!(
+                    "    (global ${} (mut i{}) (i{}.const {}))\n",
+                    name, self.pr, self.pr, value
+                );
+            }
+        }
+
         output += &self.math_funcs;
         output += &self.wat;
         output += &")\n";

@@ -18,6 +18,7 @@ pub mod prelude {
     pub use crate::scanner::*;
     pub use maths_rs::prelude::*;
     pub use rustc_hash::FxHashMap;
+    pub use wasmer::Value as WasmValue;
 }
 
 pub use rpu::RPU;
