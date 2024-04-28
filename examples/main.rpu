@@ -1,11 +1,10 @@
 export vec4 shader(vec2 uv, vec2 size) {
-
     float d = length(uv - 0.5) - 0.25;
     d = smoothstep(0.0, 0.005, d);
 
-    //vec4 c = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 1.0, 0.0, 1.0), d);
+    vec4 c = mix(vec4(0.0, 0.0, 0.0, 1.0), vec4(1.0, 1.0, 1.0, 1.0), d);
 
-    return vec4(d, d, d, 1.0);
+    return c;
 }
 
 export float main(float test) {

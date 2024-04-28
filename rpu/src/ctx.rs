@@ -582,9 +582,15 @@ impl Context {
             ));
         }
 
+        let mut result_type = " (result".to_string();
+        for _ in 0..dim {
+            result_type.push_str(&format!(" {} ", full_precision));
+        }
+        result_type.push(')');
+
         format!(
-            "\n    ;; vec{} smoothstep\n    (func $_rpu_smoothstep_vec{}_f{}{} (result {})\n{}        {})\n\n",dim,
-            dim, self.pr, params, full_precision, locals, body
+            "\n    ;; vec{} smoothstep\n    (func $_rpu_smoothstep_vec{}_f{}{} {}\n       {}        {})\n\n",dim,
+            dim, self.pr, params, result_type, locals, body
         )
     }
 
@@ -663,8 +669,11 @@ impl Context {
             ));
         }
 
-        // Return the result directly from the stack
-        let result_type = format!(" (result{})", " ".repeat(dim as usize) + &full_precision);
+        let mut result_type = " (result".to_string();
+        for _ in 0..dim {
+            result_type.push_str(&format!(" {} ", full_precision));
+        }
+        result_type.push(')');
 
         format!(
             "\n    ;; vec{} mix\n    (func $_rpu_mix_vec{}_f{}{} {}\n        {})\n",

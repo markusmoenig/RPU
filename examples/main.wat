@@ -33,8 +33,8 @@
         f64.sqrt)
 
     ;; vec1 smoothstep
-    (func $_rpu_smoothstep_vec1_f64 (param $edge0_x f64) (param $edge1_x f64) (param $x f64) (result f64)
- (local $t_x f64)        
+    (func $_rpu_smoothstep_vec1_f64 (param $edge0_x f64) (param $edge1_x f64) (param $x f64)  (result f64 )
+        (local $t_x f64)        
         ;; Calculate normalized t for the component x
         local.get $x
         local.get $edge0_x
@@ -64,6 +64,42 @@
         f64.sub)
 
 
+    ;; vec4 mix
+    (func $_rpu_mix_vec4_f64 (param $edge0_x f64) (param $edge0_y f64) (param $edge0_z f64) (param $edge0_w f64) (param $edge1_x f64) (param $edge1_y f64) (param $edge1_z f64) (param $edge1_w f64) (param $factor f64)  (result f64  f64  f64  f64 )
+        
+        ;; Calculate linear interpolation for component x
+        local.get $edge0_x
+        local.get $edge1_x
+        local.get $edge0_x
+        f64.sub
+        local.get $factor
+        f64.mul
+        f64.add
+        ;; Calculate linear interpolation for component y
+        local.get $edge0_y
+        local.get $edge1_y
+        local.get $edge0_y
+        f64.sub
+        local.get $factor
+        f64.mul
+        f64.add
+        ;; Calculate linear interpolation for component z
+        local.get $edge0_z
+        local.get $edge1_z
+        local.get $edge0_z
+        f64.sub
+        local.get $factor
+        f64.mul
+        f64.add
+        ;; Calculate linear interpolation for component w
+        local.get $edge0_w
+        local.get $edge1_w
+        local.get $edge0_w
+        f64.sub
+        local.get $factor
+        f64.mul
+        f64.add)
+
     ;; vec3 length
     (func $_rpu_vec3_length_f64 (param $x f64) (param $y f64) (param $z f64) (result f64)        
         local.get $x
@@ -82,6 +118,10 @@
     ;; function 'shader'
     (func $shader (export "shader") (param $uv_x f64) (param $uv_y f64)(param $size_x f64) (param $size_y f64) (result f64 f64 f64 f64)
         (local $d f64)
+        (local $c_x f64)
+        (local $c_y f64)
+        (local $c_z f64)
+        (local $c_w f64)
         
         local.get $uv_x
         local.get $uv_y
@@ -99,13 +139,27 @@
         
         (call $_rpu_smoothstep_vec1_f64)
         local.set $d
-        local.get $d
         
-        local.get $d
-        
-        local.get $d
-        
+        (f64.const 0)
+        (f64.const 0)
+        (f64.const 0)
         (f64.const 1)
+        (f64.const 1)
+        (f64.const 1)
+        (f64.const 1)
+        (f64.const 1)
+        local.get $d
+        
+        (call $_rpu_mix_vec4_f64)
+        local.set $c_w
+        local.set $c_z
+        local.set $c_y
+        local.set $c_x
+        local.get $c_x
+        local.get $c_y
+        local.get $c_z
+        local.get $c_w
+        
         (return)
     )
 

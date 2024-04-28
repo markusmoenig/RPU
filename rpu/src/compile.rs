@@ -1451,8 +1451,8 @@ impl Visitor for CompileVisitor {
                 ctx.add_wat(&instr);
                 rc = ASTValue::Float(None, 0.0);
             } else if name == "smoothstep" {
-                let v = args[0].accept(self, ctx)?;
-                let components = v.components();
+                let a1 = args[0].accept(self, ctx)?;
+                let components = a1.components();
                 if !(1..=4).contains(&components) {
                     return Err(format!(
                         "Invalid number of components {} {}",
@@ -1460,17 +1460,34 @@ impl Visitor for CompileVisitor {
                         loc.describe()
                     ));
                 }
-                let _ = args[1].accept(self, ctx)?;
-                let _ = args[2].accept(self, ctx)?;
+                let a2 = args[1].accept(self, ctx)?;
 
-                let func_name = ctx.gen_vec_smoothstep(v.components() as u32);
+                if a1.to_type() != a2.to_type() {
+                    return Err(format!(
+                        "'mix' expects the first two arguments to be the same type, but '{}' and '{}' were provided {}",
+                        a1.to_type(),
+                        a2.to_type(),
+                        loc.describe()
+                    ));
+                }
+
+                let a3 = args[2].accept(self, ctx)?;
+                if a3.to_type() != "float" {
+                    return Err(format!(
+                        "'mix' expects the third argument to be of type 'float', but '{}' was provided {}",
+                        a3.to_type(),
+                        loc.describe()
+                    ));
+                }
+
+                let func_name = ctx.gen_vec_smoothstep(components as u32);
 
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
-                rc = ASTValue::Float(None, 0.0);
+                rc = a1;
             } else if name == "mix" {
-                let v = args[0].accept(self, ctx)?;
-                let components = v.components();
+                let a1 = args[0].accept(self, ctx)?;
+                let components = a1.components();
                 if !(1..=4).contains(&components) {
                     return Err(format!(
                         "Invalid number of components {} {}",
@@ -1478,14 +1495,31 @@ impl Visitor for CompileVisitor {
                         loc.describe()
                     ));
                 }
-                let _ = args[1].accept(self, ctx)?;
-                let _ = args[2].accept(self, ctx)?;
+                let a2 = args[1].accept(self, ctx)?;
 
-                let func_name = ctx.gen_vec_mix(v.components() as u32);
+                if a1.to_type() != a2.to_type() {
+                    return Err(format!(
+                        "'mix' expects the first two arguments to be the same type, but '{}' and '{}' were provided {}",
+                        a1.to_type(),
+                        a2.to_type(),
+                        loc.describe()
+                    ));
+                }
+
+                let a3 = args[2].accept(self, ctx)?;
+                if a3.to_type() != "float" {
+                    return Err(format!(
+                        "'mix' expects the third argument to be of type 'float', but '{}' was provided {}",
+                        a3.to_type(),
+                        loc.describe()
+                    ));
+                }
+
+                let func_name = ctx.gen_vec_mix(components as u32);
 
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
-                rc = v; //ASTValue::Float(None, 0.0);
+                rc = a1;
             } else {
                 for index in 0..args.len() {
                     let rc = args[index].accept(self, ctx)?;
