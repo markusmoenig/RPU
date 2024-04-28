@@ -99,8 +99,8 @@ impl RPU {
                         for y in 0..buffer.height {
                             for x in 0..buffer.width {
                                 let args = vec![
-                                    Value::F64(x as f64 / buffer.width as f64),
-                                    Value::F64(1.0 - y as f64 / buffer.height as f64),
+                                    Value::F64(x as f64),
+                                    Value::F64(buffer.height as f64 - y as f64),
                                     Value::F64(buffer.width as f64),
                                     Value::F64(buffer.height as f64),
                                 ];

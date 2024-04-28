@@ -1388,6 +1388,50 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
+            // Int2 x Int2
+            (ASTValue::Int2(_, _, _), ASTValue::Int2(_, _, _)) => {
+                rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec2_vec2(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec2_add_vec2_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec2_vec2(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec2_sub_vec2_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec2_vec2(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec2_mul_vec2_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec2_vec2(&format!("i{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec2_div_vec2_i{})", ctx.pr)
+                    }
+                }
+            }
+            // Float2 x Float2
+            (ASTValue::Float2(_, _, _), ASTValue::Float2(_, _, _)) => {
+                rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec2_vec2(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec2_add_vec2_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec2_vec2(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec2_sub_vec2_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec2_vec2(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec2_mul_vec2_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec2_vec2(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec2_div_vec2_f{})", ctx.pr)
+                    }
+                }
+            }
             _ => {
                 return Err(format!(
                     "Invalid types '{}' '{}' for operator '{}' {}",

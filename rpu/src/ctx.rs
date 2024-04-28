@@ -165,6 +165,43 @@ impl Context {
         output
     }
 
+    pub fn gen_vec2_vec2(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_vec2_{}_vec2_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let str = format!(
+            r#"
+    ;; vec2 {op} vec2 ({data_type})
+    (func ${func_name}
+        (param $vec2l_x {data_type})
+        (param $vec2l_y {data_type})
+        (param $vec2r_x {data_type})
+        (param $vec2r_y {data_type})
+        (result {data_type} {data_type})
+
+        ({data_type}.{op}
+            (local.get $vec2l_x)
+            (local.get $vec2r_x)
+        )
+
+        ({data_type}.{op}
+            (local.get $vec2l_y)
+            (local.get $vec2r_y)
+        )
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
     pub fn gen_scalar_vec2(&mut self, data_type: &str, op: &str) {
         let func_name = format!("_rpu_scalar_{}_vec2_{}", op, data_type);
 

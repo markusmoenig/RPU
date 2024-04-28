@@ -6,7 +6,9 @@ RPU compiles to WAT code and uses **wasmer** as a runtime. The GLSL features lik
 
 You can choose between 32 and 64 bit precision during compile time.
 
-Fibonacci example without any graphics features:
+# CPU Only Usage
+
+Fibonacci example like in a general purpose language:
 
 ```glsl
 int fib(int n) {
@@ -23,14 +25,24 @@ You can see the generated WAT file [here](/examples/fib.wat).
 
 A fibonacci sequence of 42 executes in about a second on my M3.
 
-Something a bit more graphical:
+---
+
+A simple shader example:
 
 ```glsl
-export ivec2 main(int x) {
-    ivec2 result = 2 * ivec2(5, 2);
+export vec4 shader(vec2 coord, vec2 resolution) {
+    vec2 uv = (2.0 * coord - resolution.xy) / resolution.y;
 
-    return result.yx;
+    float d = length(uv) - 0.5;
+    d = smoothstep(0.0, 0.01, d);
+
+    vec4 c = mix(vec4(0.0, 0.0, 0.0, 1.0), vec4(1.0, 1.0, 1.0, 1.0), d);
+
+    return c;
 }
 ```
 
-The GLSL features are right now under development.
+Generates this image (remember this runs on the CPU via WA):
+![Disc](/examples/disc.png)
+
+This runs in about 90ms in 800x600 in 64-bit on my machine.

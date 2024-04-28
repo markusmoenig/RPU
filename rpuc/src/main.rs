@@ -3,7 +3,7 @@ pub use rpu::prelude::*;
 
 fn main() {
     let mut path = std::path::PathBuf::new();
-    let as_shader = true;
+    let as_shader = false;
     path.push("examples/main.rpu");
 
     let args: Vec<String> = std::env::args().collect();
