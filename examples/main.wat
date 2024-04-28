@@ -116,12 +116,28 @@
         f64.sqrt)
 
     ;; function 'shader'
-    (func $shader (export "shader") (param $uv_x f64) (param $uv_y f64)(param $size_x f64) (param $size_y f64) (result f64 f64 f64 f64)
+    (func $shader (export "shader") (param $uv_raw_x f64) (param $uv_raw_y f64)(param $size_x f64) (param $size_y f64) (result f64 f64 f64 f64)
+        (local $uv_x f64)
+        (local $uv_y f64)
         (local $d f64)
         (local $c_x f64)
         (local $c_y f64)
         (local $c_z f64)
         (local $c_w f64)
+        local.get $uv_raw_x
+        local.get $uv_raw_y
+        
+        local.set $uv_y
+        local.set $uv_x
+        local.get $uv_y
+        
+        local.get $size_x
+        
+        local.get $size_y
+        
+        (f64.div)
+        (f64.div)
+        local.set $uv_y
         
         local.get $uv_x
         local.get $uv_y

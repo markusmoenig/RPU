@@ -63,6 +63,17 @@ impl ASTValue {
         }
     }
 
+    /// Returns true if the value is float based.
+    pub fn is_float_based(&self) -> bool {
+        matches!(
+            self,
+            ASTValue::Float(_, _)
+                | ASTValue::Float2(_, _, _)
+                | ASTValue::Float3(_, _, _, _)
+                | ASTValue::Float4(_, _, _, _, _)
+        )
+    }
+
     /// The truthiness of the value.
     pub fn is_truthy(&self) -> bool {
         match self {

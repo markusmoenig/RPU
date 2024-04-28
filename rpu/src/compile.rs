@@ -232,12 +232,11 @@ impl Visitor for CompileVisitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let mut v = expression.accept(self, ctx)?;
-
         let incoming_components = v.components();
 
         // Use the type of the variable
         if let Some(vv) = self.environment.get(&name) {
-            if incoming_components != vv.components() {
+            if swizzle.is_empty() && incoming_components != vv.components() {
                 return Err(format!(
                     "Variable '{}' has {} components, but expression has {} {}",
                     name,
@@ -406,11 +405,10 @@ impl Visitor for CompileVisitor {
             ));
         }
 
-        if !swizzle.is_empty() {
-            rc = ctx.create_value_from_swizzle(swizzle.len());
-        }
-
         if let Some(v) = self.environment.get(&name) {
+            if !swizzle.is_empty() {
+                rc = ctx.create_value_from_swizzle(&v, swizzle.len());
+            }
             match &v {
                 ASTValue::Int(_, _) => {
                     let instr = format!("local.get ${}", name);
@@ -642,7 +640,7 @@ impl Visitor for CompileVisitor {
         }
 
         if !swizzle.is_empty() {
-            rc = ctx.create_value_from_swizzle(swizzle.len());
+            rc = ctx.create_value_from_swizzle(&value, swizzle.len());
         }
 
         match value {
@@ -1392,7 +1390,7 @@ impl Visitor for CompileVisitor {
             }
             _ => {
                 return Err(format!(
-                    "Invalid types {:?} {:?} for operator '{}' {}",
+                    "Invalid types '{}' '{}' for operator '{}' {}",
                     left_type.to_type(),
                     right_type.to_type(),
                     op.describe(),

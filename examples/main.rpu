@@ -1,4 +1,7 @@
-export vec4 shader(vec2 uv, vec2 size) {
+export vec4 shader(vec2 uv_raw, vec2 size) {
+    vec2 uv = uv_raw;
+    uv.y = uv.y / (size.x / size.y);
+
     float d = length(uv - 0.5) - 0.25;
     d = smoothstep(0.0, 0.005, d);
 

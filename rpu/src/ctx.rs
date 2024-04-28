@@ -103,19 +103,36 @@ impl Context {
         }
     }
 
-    pub fn create_value_from_swizzle(&self, components: usize) -> ASTValue {
-        match components {
-            1 => ASTValue::Int(None, 0),
-            2 => ASTValue::Int2(None, empty_expr!(), empty_expr!()),
-            3 => ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!()),
-            4 => ASTValue::Int4(
-                None,
-                empty_expr!(),
-                empty_expr!(),
-                empty_expr!(),
-                empty_expr!(),
-            ),
-            _ => panic!("Invalid swizzle components"),
+    /// Create the return value from a swizzle.
+    pub fn create_value_from_swizzle(&self, base: &ASTValue, components: usize) -> ASTValue {
+        if base.is_float_based() {
+            match components {
+                1 => ASTValue::Float(None, 0.0),
+                2 => ASTValue::Float2(None, empty_expr!(), empty_expr!()),
+                3 => ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!()),
+                4 => ASTValue::Float4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                ),
+                _ => panic!("Invalid swizzle components"),
+            }
+        } else {
+            match components {
+                1 => ASTValue::Int(None, 0),
+                2 => ASTValue::Int2(None, empty_expr!(), empty_expr!()),
+                3 => ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!()),
+                4 => ASTValue::Int4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                ),
+                _ => panic!("Invalid swizzle components"),
+            }
         }
     }
 
