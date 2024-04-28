@@ -23,6 +23,24 @@ impl Visitor for CompileVisitor {
             ),
         );
 
+        functions.insert(
+            "smoothstep".to_string(),
+            ASTValue::Function(
+                "smoothstep".to_string(),
+                vec![ASTValue::None, ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "mix".to_string(),
+            ASTValue::Function(
+                "mix".to_string(),
+                vec![ASTValue::None, ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
         Self {
             environment: Environment::default(),
             functions,
@@ -989,13 +1007,13 @@ impl Visitor for CompileVisitor {
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        print!("-- Unary ");
         expr.accept(self, ctx)?;
         match op {
             UnaryOperator::Negate => print!(" ! "),
-            UnaryOperator::Minus => print!(" - "),
+            UnaryOperator::Minus => {
+                ctx.add_wat("f64.neg");
+            }
         }
-        println!(" --");
 
         Ok(ASTValue::None)
     }
@@ -1432,6 +1450,42 @@ impl Visitor for CompileVisitor {
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
                 rc = ASTValue::Float(None, 0.0);
+            } else if name == "smoothstep" {
+                let v = args[0].accept(self, ctx)?;
+                let components = v.components();
+                if !(1..=4).contains(&components) {
+                    return Err(format!(
+                        "Invalid number of components {} {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                let _ = args[1].accept(self, ctx)?;
+                let _ = args[2].accept(self, ctx)?;
+
+                let func_name = ctx.gen_vec_smoothstep(v.components() as u32);
+
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = ASTValue::Float(None, 0.0);
+            } else if name == "mix" {
+                let v = args[0].accept(self, ctx)?;
+                let components = v.components();
+                if !(1..=4).contains(&components) {
+                    return Err(format!(
+                        "Invalid number of components {} {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                let _ = args[1].accept(self, ctx)?;
+                let _ = args[2].accept(self, ctx)?;
+
+                let func_name = ctx.gen_vec_mix(v.components() as u32);
+
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = v; //ASTValue::Float(None, 0.0);
             } else {
                 for index in 0..args.len() {
                     let rc = args[index].accept(self, ctx)?;

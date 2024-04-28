@@ -473,4 +473,202 @@ impl Context {
             dim, dim, full_precision, params, full_precision, body
         )
     }
+
+    // Smoothstep function
+
+    pub fn gen_vec_smoothstep(&mut self, components: u32) -> String {
+        let func_name = format!("_rpu_smoothstep_vec{}_f{}", components, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_smoothstep(components);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+
+    fn generate_wat_smoothstep(&self, dim: u32) -> String {
+        let full_precision = format!("f{}", self.pr); // Prepends 'f' to the precision
+
+        let mut params = String::new();
+        let mut body = String::new();
+        let mut locals = String::new();
+        let mut params_edge0 = String::new();
+        let mut params_edge1 = String::new();
+
+        // Generate parameters for edge0, edge1, and x (scalar)
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            params_edge0.push_str(&format!(
+                " (param $edge0_{coord} {precision})",
+                coord = coord,
+                precision = full_precision
+            ));
+            params_edge1.push_str(&format!(
+                " (param $edge1_{coord} {precision})",
+                coord = coord,
+                precision = full_precision
+            ));
+
+            locals.push_str(&format!(
+                " (local $t_{coord} {precision})",
+                coord = coord,
+                precision = full_precision
+            )); // Declare local for t
+        }
+
+        params.push_str(&format!(
+            " (param $x {precision})",
+            precision = full_precision
+        ));
+
+        // Scalar factor x is added after vector components
+        let params_factor = format!(" (param $x {precision})", precision = full_precision);
+
+        // Combine all parameters in correct order
+        let params = format!("{}{}{}", params_edge0, params_edge1, params_factor);
+
+        // Generate smooth step computation for each component
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+            body.push_str(&format!(
+                "
+        ;; Calculate normalized t for the component {coord}
+        local.get $x
+        local.get $edge0_{coord}
+        {full_precision}.sub
+        local.get $edge1_{coord}
+        local.get $edge0_{coord}
+        {full_precision}.sub
+        {full_precision}.div
+        local.tee $t_{coord}
+        {full_precision}.const 0
+        {full_precision}.max
+        {full_precision}.const 1
+        {full_precision}.min
+        local.set $t_{coord}
+
+        ;; Calculate smoothstep polynomial 3t^2 - 2t^3
+        local.get $t_{coord}
+        local.get $t_{coord}
+        {full_precision}.mul
+        {full_precision}.const 3
+        {full_precision}.mul
+        local.get $t_{coord}
+        local.get $t_{coord}
+        {full_precision}.mul
+        {full_precision}.const 2
+        {full_precision}.mul
+        {full_precision}.sub",
+                coord = coord,
+                full_precision = full_precision
+            ));
+        }
+
+        format!(
+            "\n    ;; vec{} smoothstep\n    (func $_rpu_smoothstep_vec{}_f{}{} (result {})\n{}        {})\n\n",dim,
+            dim, self.pr, params, full_precision, locals, body
+        )
+    }
+
+    pub fn gen_vec_mix(&mut self, components: u32) -> String {
+        let func_name = format!("_rpu_mix_vec{}_f{}", components, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_mix(components);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+
+    fn generate_wat_mix(&self, dim: u32) -> String {
+        let full_precision = format!("f{}", self.pr); // Prepends 'f' to the precision
+
+        let mut body = String::new();
+        let mut params_edge0 = String::new();
+        let mut params_edge1 = String::new();
+
+        // Generate parameters for edge0, edge1, and x (scalar)
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            params_edge0.push_str(&format!(
+                " (param $edge0_{coord} {precision})",
+                coord = coord,
+                precision = full_precision
+            ));
+            params_edge1.push_str(&format!(
+                " (param $edge1_{coord} {precision})",
+                coord = coord,
+                precision = full_precision
+            ));
+        }
+
+        // Scalar factor is added after vector components
+        let params_factor = format!(" (param $factor {precision})", precision = full_precision);
+
+        // Combine all parameters in correct order
+        let params = format!("{}{}{}", params_edge0, params_edge1, params_factor);
+
+        // Generate smooth step computation for each component
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            body.push_str(&format!(
+                "
+        ;; Calculate linear interpolation for component {coord}
+        local.get $edge0_{coord}
+        local.get $edge1_{coord}
+        local.get $edge0_{coord}
+        {full_precision}.sub
+        local.get $factor
+        {full_precision}.mul
+        {full_precision}.add",
+                coord = coord,
+                full_precision = full_precision
+            ));
+        }
+
+        // Return the result directly from the stack
+        let result_type = format!(" (result{})", " ".repeat(dim as usize) + &full_precision);
+
+        format!(
+            "\n    ;; vec{} mix\n    (func $_rpu_mix_vec{}_f{}{} {}\n        {})\n",
+            dim, dim, self.pr, params, result_type, body
+        )
+    }
 }
