@@ -2,11 +2,11 @@ RPU is a GLSL / C like programming language which compiles to WebAssembly (WAT) 
 
 You can use it as a general purpose programming language, as a shader language for 2D and 3D renderering and as a (very) fast embedded scripting language for Rust based applications.
 
-RPU compiles to WAT code and uses **wasmer** as a runtime. The GLSL features like vecs, swizzles and math functions get compiled on-demand. They do not introduce any overhead or speed / size penalties if not used.
+RPU compiles to WAT code and uses [wasmer](https://crates.io/crates/wasmer) as a runtime. The GLSL features like vecs, swizzles and math functions get compiled on-demand. They do not introduce any overhead or speed / size penalties if not used.
 
 You can choose between 32 and 64 bit precision during compile time.
 
-All mathematically functions are implemented in pure WebAssembly. This means that the generated WAT code is very small and fast.
+All math functions are implemented in pure WebAssembly. This means that the generated WAT code is very small and fast.
 
 ---
 
@@ -54,3 +54,5 @@ This runs in about 90ms in 800x600 in 64-bit on my machine.
 - [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4
 - [x] Basic math operators: +, -, \*, /
 - [x] Basic math functions: mix, smoothstep, length, normalize
+- [x] Basic control structures: if
+- [x] Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc
