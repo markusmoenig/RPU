@@ -25,7 +25,7 @@ export int main(int x) {
 
 You can see the generated WAT file [here](/examples/fib.wat).
 
-To execute it with a secuence of 42 run `cargo run --release -- --source examples/fib.rpu -f main -a 42`. It executes in about a second on my M3.
+It executes in about a second on my M3.
 
 ---
 
@@ -44,7 +44,7 @@ export vec4 shader(vec2 coord, vec2 resolution) {
 }
 ```
 
-`cargo run --release -- --source examples/dic.rpu -f shader` generates the following image:
+By executing the shader it generates the following image:
 ![Disc](/examples/disc.png)
 
 This runs in about 90ms in 800x600 in 64-bit on my machine.

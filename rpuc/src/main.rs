@@ -12,7 +12,7 @@ fn main() {
                 .short('s')
                 .long("source")
                 .value_name("FILE")
-                .help("Sets the source file to use")
+                .help("Sets the source file to compile and execute")
                 .required(true)
                 .action(ArgAction::Set),
         )
@@ -23,6 +23,15 @@ fn main() {
                 .action(ArgAction::Set)
                 .value_name("STRING")
                 .help("The function name to execute. Defaults to 'main'"),
+        )
+        .arg(
+            Arg::new("precision")
+                .short('p')
+                .long("precision")
+                .help("The numerical precision. Defaults to '64'")
+                .action(ArgAction::Set)
+                .value_name("STRING")
+                .value_parser(clap::builder::ValueParser::string()),
         )
         .arg(
             Arg::new("arg")
@@ -45,23 +54,45 @@ fn main() {
         function_name = f;
     }
 
+    let mut high_precision = true;
+    let mut precision_str = "64".to_string();
+    if let Some(precision) = matches.get_one::<String>("precision") {
+        if precision == "32" {
+            high_precision = false;
+            precision_str = "32".to_string();
+        }
+    }
+
     let mut arguments: Vec<WasmValue> = vec![];
     let mut arg_string = String::new();
     if let Some(number_str) = matches.get_one::<String>("arg") {
         arg_string = number_str.clone();
         match number_str.parse::<i64>() {
-            Ok(num) => arguments.push(WasmValue::I64(num)),
+            Ok(num) => {
+                if high_precision {
+                    arguments.push(WasmValue::I64(num))
+                } else {
+                    arguments.push(WasmValue::I32(num as i32))
+                }
+            }
             Err(_) => match number_str.parse::<f64>() {
-                Ok(num) => arguments.push(WasmValue::F64(num)),
+                Ok(num) => {
+                    if high_precision {
+                        arguments.push(WasmValue::F64(num))
+                    } else {
+                        arguments.push(WasmValue::F32(num as f32))
+                    }
+                }
                 Err(_) => println!("Invalid number format"),
             },
         }
     }
 
     println!(
-        "Input '{}'. Function '{}'. Argument '{}'.",
+        "Input '{}'. Function '{}'. Precision: '{}'. Argument '{}'.",
         path.to_str().unwrap(),
         function_name,
+        precision_str,
         if arguments.is_empty() {
             "None"
         } else {
@@ -72,7 +103,7 @@ fn main() {
     let as_shader = function_name.starts_with("shader");
 
     let rpu = RPU::new();
-    let rc = rpu.compile_to_wat_from_path(path.clone());
+    let rc = rpu.compile_to_wat_from_path(path.clone(), high_precision);
 
     match rc {
         Ok(wat) => {
@@ -92,7 +123,8 @@ fn main() {
                 }
             } else {
                 let mut buffer = ColorBuffer::new(800, 600);
-                let rc = rpu.compile_wat_and_run_as_shader_sync(&wat, "shader", &mut buffer);
+                let rc =
+                    rpu.compile_wat_and_run_as_shader(&wat, "shader", &mut buffer, high_precision);
                 match rc {
                     Ok(_) => {
                         path.set_extension("png");

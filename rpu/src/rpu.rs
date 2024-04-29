@@ -1,16 +1,17 @@
 use crate::prelude::*;
-use rayon::prelude::*;
-use std::collections::VecDeque;
+//use rayon::prelude::*;
+//use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+//use std::sync::{Arc, Mutex};
 use wasmer::{imports, Instance, Module, Store, Value};
 
+/*
 struct Tile {
     x: usize,
     y: usize,
     width: usize,
     height: usize,
-}
+    }*/
 
 pub struct RPU {}
 
@@ -25,10 +26,16 @@ impl RPU {
         Self {}
     }
 
-    pub fn compile_to_wat_from_path(&self, path: PathBuf) -> Result<String, String> {
+    /// Compile the RPU source code (given by its path) to WAT source code.
+    pub fn compile_to_wat_from_path(
+        &self,
+        path: PathBuf,
+        high_precision: bool,
+    ) -> Result<String, String> {
         if let Ok(main) = std::fs::read_to_string(path.clone()) {
             let scanner = Scanner::new(main);
             let mut parser = Parser::new();
+            parser.set_high_precision(high_precision);
 
             parser.parse(scanner)
         } else {
@@ -36,6 +43,7 @@ impl RPU {
         }
     }
 
+    /// Compile the RPU source code to WAT source code.
     pub fn compile_to_wat(&self, rpu_source: String) -> Result<String, String> {
         let scanner = Scanner::new(rpu_source);
         let mut parser = Parser::new();
@@ -43,6 +51,7 @@ impl RPU {
         parser.parse(scanner)
     }
 
+    /// Compile the RPU source code and run the function with the given arguments.
     pub fn compile_and_run(
         &self,
         source: &str,
@@ -56,6 +65,7 @@ impl RPU {
         }
     }
 
+    /// Compile the WAT source code and run the function with the given arguments.
     pub fn compile_wat_and_run(
         &self,
         wat: &str,
@@ -87,11 +97,13 @@ impl RPU {
         Err("Unknown error".to_string())
     }
 
-    pub fn compile_wat_and_run_as_shader_sync(
+    /// Compile the WAT source code and run the shader with the given arguments. The shader will be executed on the given buffer.
+    pub fn compile_wat_and_run_as_shader(
         &self,
         wat: &str,
         func_name: &str,
         buffer: &mut ColorBuffer,
+        high_precision: bool,
     ) -> Result<Vec<Value>, String> {
         let mut store = Store::default();
         let module_rc = Module::new(&store, wat);
@@ -103,19 +115,41 @@ impl RPU {
                         let _start = self.get_time();
                         for y in 0..buffer.height {
                             for x in 0..buffer.width {
-                                let args = vec![
-                                    Value::F64(x as f64),
-                                    Value::F64(buffer.height as f64 - y as f64),
-                                    Value::F64(buffer.width as f64),
-                                    Value::F64(buffer.height as f64),
-                                ];
+                                let args = if high_precision {
+                                    vec![
+                                        Value::F64(x as f64),
+                                        Value::F64(buffer.height as f64 - y as f64),
+                                        Value::F64(buffer.width as f64),
+                                        Value::F64(buffer.height as f64),
+                                    ]
+                                } else {
+                                    vec![
+                                        Value::F32(x as f32),
+                                        Value::F32(buffer.height as f32 - y as f32),
+                                        Value::F32(buffer.width as f32),
+                                        Value::F32(buffer.height as f32),
+                                    ]
+                                };
+
                                 match func.call(&mut store, &args) {
                                     Ok(values) => {
-                                        let r = values[0].f64().unwrap();
-                                        let g = values[1].f64().unwrap();
-                                        let b = values[2].f64().unwrap();
-                                        let a = values[3].f64().unwrap();
-                                        buffer.set(x, y, [r, g, b, a]);
+                                        if high_precision {
+                                            let r = values[0].f64().unwrap();
+                                            let g = values[1].f64().unwrap();
+                                            let b = values[2].f64().unwrap();
+                                            let a = values[3].f64().unwrap();
+                                            buffer.set(x, y, [r, g, b, a]);
+                                        } else {
+                                            let r = values[0].f32().unwrap();
+                                            let g = values[1].f32().unwrap();
+                                            let b = values[2].f32().unwrap();
+                                            let a = values[3].f32().unwrap();
+                                            buffer.set(
+                                                x,
+                                                y,
+                                                [r as f64, g as f64, b as f64, a as f64],
+                                            );
+                                        }
                                     }
                                     Err(err) => return Err(err.to_string()),
                                 }
@@ -132,6 +166,7 @@ impl RPU {
         Ok(vec![])
     }
 
+    /*
     pub fn compile_wat_and_run_as_shader(
         &self,
         wat: &str,
@@ -325,7 +360,7 @@ impl RPU {
         }
 
         Ok(())
-    }
+        }*/
 
     /// Get the current time
     pub fn get_time(&self) -> u128 {

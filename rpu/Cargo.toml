@@ -1,11 +1,14 @@
 [package]
 name = "rpu"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
+description = "RPU is a GLSL like programming language which compiles to WebAssembly (WAT). Fast and embeddable."
+license = "MIT"
+keywords = ["language", "glsl", "graphics", "shader", "rendering"]
+repository = "https://github.com/markusmoenig/RPU.git"
 
 [dependencies]
 rustc-hash = "1.1.0"
 wasmer = "4.2.8"
-maths-rs = "0.2.6"
 rayon = "1.10.0"
 image = "0.25.1"

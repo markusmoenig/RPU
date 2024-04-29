@@ -70,6 +70,17 @@ impl Context {
         }
     }
 
+    /// Adjusts the precision.
+    pub fn set_high_precision(&mut self, high: bool) {
+        if high {
+            self.precision = Precision::P64;
+            self.pr = "64".to_string();
+        } else {
+            self.precision = Precision::P32;
+            self.pr = "32".to_string();
+        }
+    }
+
     /// Adds indention
     pub fn add_indention(&mut self) {
         self.indention += 1;

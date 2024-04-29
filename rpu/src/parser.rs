@@ -4,6 +4,8 @@ pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
     current_line: usize,
+
+    high_precision: bool,
 }
 
 impl Default for Parser {
@@ -18,7 +20,14 @@ impl Parser {
             tokens: Vec::new(),
             current: 0,
             current_line: 0,
+
+            high_precision: true,
         }
+    }
+
+    /// Sets high (64 bit) or low (32 bit) precision.
+    pub fn set_high_precision(&mut self, high_precision: bool) {
+        self.high_precision = high_precision;
     }
 
     pub fn parse(&mut self, scanner: Scanner) -> Result<String, String> {
@@ -33,6 +42,7 @@ impl Parser {
 
         let mut visitor = CompileVisitor::new();
         let mut ctx = Context::default();
+        ctx.set_high_precision(self.high_precision);
 
         for statement in statements {
             _ = statement.accept(&mut visitor, &mut ctx)?;

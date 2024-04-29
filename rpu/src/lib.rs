@@ -16,7 +16,6 @@ pub mod prelude {
     pub use crate::parser::*;
     pub use crate::rpu::RPU;
     pub use crate::scanner::*;
-    pub use maths_rs::prelude::*;
     pub use rustc_hash::FxHashMap;
     pub use wasmer::Value as WasmValue;
 }
@@ -100,7 +99,8 @@ mod tests {
     #[test]
     fn fib() {
         let rpu = RPU::new();
-        let rc = rpu.compile_to_wat_from_path(std::path::PathBuf::from("../examples/fib.rpu"));
+        let rc =
+            rpu.compile_to_wat_from_path(std::path::PathBuf::from("../examples/fib.rpu"), true);
         match rc {
             Ok(wat) => {
                 assert_eq!(
