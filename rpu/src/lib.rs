@@ -77,6 +77,27 @@ mod tests {
     }
 
     #[test]
+    fn vec_normalize() {
+        let rpu = RPU::new();
+        assert_eq!(
+            rpu.compile_and_run(
+                "export vec3 main() {
+                    vec3 result = normalize(vec3(1.0, 3.0, 5.0));
+                    return result;
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![
+                WasmValue::F64(0.1690308509457033),
+                WasmValue::F64(0.50709255283711),
+                WasmValue::F64(0.8451542547285166)
+            ])
+        );
+    }
+
+    #[test]
     fn fib() {
         let rpu = RPU::new();
         let rc = rpu.compile_to_wat_from_path(std::path::PathBuf::from("../examples/fib.rpu"));

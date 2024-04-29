@@ -528,7 +528,7 @@ impl Context {
         )
     }
 
-    // Smoothstep function
+    // Smoothstep
 
     pub fn gen_vec_smoothstep(&mut self, components: u32) -> String {
         let func_name = format!("_rpu_smoothstep_vec{}_f{}", components, self.pr);
@@ -663,6 +663,8 @@ impl Context {
         func_name
     }
 
+    // mix
+
     fn generate_wat_mix(&self, dim: u32) -> String {
         let full_precision = format!("f{}", self.pr); // Prepends 'f' to the precision
 
@@ -732,6 +734,95 @@ impl Context {
         format!(
             "\n    ;; vec{} mix\n    (func $_rpu_mix_vec{}_f{}{} {}\n        {})\n",
             dim, dim, self.pr, params, result_type, body
+        )
+    }
+
+    // normalize
+
+    pub fn gen_vec_normalize(&mut self, components: u32) -> String {
+        let func_name = format!("_rpu_normalize_vec{}_f{}", components, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_normalize(components);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+
+    fn generate_wat_normalize(&self, dim: u32) -> String {
+        let full_precision = format!("f{}", self.pr);
+
+        // TODO: Prevent calculating the length for each
+
+        let mut params = String::new();
+        let mut body = String::new();
+        let mut length_calculation = String::new();
+
+        // Generate parameters and length calculation
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            params.push_str(&format!(" (param ${} {})", coord, full_precision));
+            length_calculation.push_str(&format!(
+                "\n        local.get ${}\n        local.get ${}\n        {full_precision}.mul",
+                coord,
+                coord,
+                full_precision = full_precision
+            ));
+            if i == 0 {
+                //length_calculation.push_str(&format!(""));
+            } else {
+                length_calculation.push_str(&format!(
+                    "\n        {full_precision}.add",
+                    full_precision = full_precision
+                ));
+            }
+        }
+
+        length_calculation.push_str(&format!(
+            "\n        {full_precision}.sqrt",
+            full_precision = full_precision
+        ));
+
+        // Normalize each component
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            body.push_str(&format!(
+                "\n        local.get ${}\n    {length_calculation}\n        {full_precision}.div",
+                coord,
+                length_calculation = length_calculation,
+                full_precision = full_precision
+            ));
+        }
+
+        let mut result_type = " (result".to_string();
+        for _ in 0..dim {
+            result_type.push_str(&format!(" {} ", full_precision));
+        }
+        result_type.push(')');
+
+        // Assemble the complete function with indented formatting
+        format!(
+            "\n    ;; vec{} normalize\n    (func $_rpu_normalize_vec{}_{}{} {}\n        {})\n",
+            dim, dim, full_precision, params, result_type, body
         )
     }
 }

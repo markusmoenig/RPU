@@ -1,5 +1,5 @@
-export float main(float test) {
-    float result = length(vec3(1.0, 3.0, 5.0));
+export vec3 main(float test) {
+    vec3 result = normalize(vec3(1.0, 3.0, 5.0));
 
     return result;
 }

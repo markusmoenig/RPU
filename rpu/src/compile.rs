@@ -24,6 +24,15 @@ impl Visitor for CompileVisitor {
         );
 
         functions.insert(
+            "normalize".to_string(),
+            ASTValue::Function(
+                "normalize".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
             "smoothstep".to_string(),
             ASTValue::Function(
                 "smoothstep".to_string(),
@@ -1492,6 +1501,20 @@ impl Visitor for CompileVisitor {
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
                 rc = ASTValue::Float(None, 0.0);
+            } else if name == "normalize" {
+                let v = args[0].accept(self, ctx)?;
+                let components = v.components();
+                if !(1..=4).contains(&components) {
+                    return Err(format!(
+                        "Invalid number of components {} {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                let func_name = ctx.gen_vec_normalize(v.components() as u32);
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = v;
             } else if name == "smoothstep" {
                 let a1 = args[0].accept(self, ctx)?;
                 let components = a1.components();

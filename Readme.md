@@ -6,7 +6,7 @@ RPU compiles to WAT code and uses **wasmer** as a runtime. The GLSL features lik
 
 You can choose between 32 and 64 bit precision during compile time.
 
-# CPU Only Usage
+All mathematically functions are implemented in pure WebAssembly. This means that the generated WAT code is very small and fast.
 
 Fibonacci example like in a general purpose language:
 
@@ -34,15 +34,15 @@ export vec4 shader(vec2 coord, vec2 resolution) {
     vec2 uv = (2.0 * coord - resolution.xy) / resolution.y;
 
     float d = length(uv) - 0.5;
-    d = smoothstep(0.0, 0.01, d);
+    d = 1.0 - smoothstep(0.0, 0.01, d);
 
-    vec4 c = mix(vec4(0.0, 0.0, 0.0, 1.0), vec4(1.0, 1.0, 1.0, 1.0), d);
+    vec4 c = mix(vec4(0.2, 0.2, 0.2, 1.0), vec4(1.0, 1.0, 1.0, 1.0), d);
 
     return c;
 }
 ```
 
-Generates this image (remember this runs on the CPU via WA):
+Generates this image:
 ![Disc](/examples/disc.png)
 
 This runs in about 90ms in 800x600 in 64-bit on my machine.
