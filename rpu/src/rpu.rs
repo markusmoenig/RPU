@@ -69,8 +69,13 @@ impl RPU {
                 let import_object = imports! {};
                 if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
                     if let Ok(func) = instance.exports.get_function(func_name) {
+                        let _start = self.get_time();
                         match func.call(&mut store, &args) {
-                            Ok(values) => return Ok(values.to_vec()),
+                            Ok(values) => {
+                                let _stop = self.get_time();
+                                println!("Execution time: {:?} ms.", _stop - _start);
+                                return Ok(values.to_vec());
+                            }
                             Err(err) => return Err(err.to_string()),
                         }
                     }
@@ -117,7 +122,7 @@ impl RPU {
                             }
                         }
                         let _stop = self.get_time();
-                        println!("shader time {:?}ms", _stop - _start);
+                        println!("Shader execution time: {:?} ms.", _stop - _start);
                     }
                 }
             }
