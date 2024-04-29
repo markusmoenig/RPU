@@ -757,8 +757,6 @@ impl Context {
     fn generate_wat_normalize(&self, dim: u32) -> String {
         let full_precision = format!("f{}", self.pr);
 
-        // TODO: Prevent calculating the length for each
-
         let mut params = String::new();
         let mut body = String::new();
         let mut length_calculation = String::new();
@@ -780,9 +778,7 @@ impl Context {
                 coord,
                 full_precision = full_precision
             ));
-            if i == 0 {
-                //length_calculation.push_str(&format!(""));
-            } else {
+            if i > 0 {
                 length_calculation.push_str(&format!(
                     "\n        {full_precision}.add",
                     full_precision = full_precision
@@ -791,9 +787,11 @@ impl Context {
         }
 
         length_calculation.push_str(&format!(
-            "\n        {full_precision}.sqrt",
+            "\n        {full_precision}.sqrt\n        (local.set $magn)",
             full_precision = full_precision
         ));
+
+        body.push_str(&length_calculation);
 
         // Normalize each component
         for i in 0..dim {
@@ -806,9 +804,8 @@ impl Context {
             };
 
             body.push_str(&format!(
-                "\n        local.get ${}\n    {length_calculation}\n        {full_precision}.div",
+                "\n        local.get ${}\n        (local.get $magn)\n        {full_precision}.div",
                 coord,
-                length_calculation = length_calculation,
                 full_precision = full_precision
             ));
         }
@@ -821,8 +818,8 @@ impl Context {
 
         // Assemble the complete function with indented formatting
         format!(
-            "\n    ;; vec{} normalize\n    (func $_rpu_normalize_vec{}_{}{} {}\n        {})\n",
-            dim, dim, full_precision, params, result_type, body
+            "\n    ;; vec{} normalize\n    (func $_rpu_normalize_vec{}_{}{} {}\n        (local $magn {})\n         {})\n",
+            dim, dim, full_precision, params, result_type, full_precision, body
         )
     }
 }

@@ -3,9 +3,8 @@
 
     ;; vec3 normalize
     (func $_rpu_normalize_vec3_f64 (param $x f64) (param $y f64) (param $z f64)  (result f64  f64  f64 )
-        
-        local.get $x
-    
+        (local $magn f64)
+         
         local.get $x
         local.get $x
         f64.mul
@@ -18,36 +17,15 @@
         f64.mul
         f64.add
         f64.sqrt
+        (local.set $magn)
+        local.get $x
+        (local.get $magn)
         f64.div
         local.get $y
-    
-        local.get $x
-        local.get $x
-        f64.mul
-        local.get $y
-        local.get $y
-        f64.mul
-        f64.add
-        local.get $z
-        local.get $z
-        f64.mul
-        f64.add
-        f64.sqrt
+        (local.get $magn)
         f64.div
         local.get $z
-    
-        local.get $x
-        local.get $x
-        f64.mul
-        local.get $y
-        local.get $y
-        f64.mul
-        f64.add
-        local.get $z
-        local.get $z
-        f64.mul
-        f64.add
-        f64.sqrt
+        (local.get $magn)
         f64.div)
 
     ;; function 'main'
