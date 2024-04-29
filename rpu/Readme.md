@@ -23,7 +23,7 @@ export int main(int x) {
 }
 ```
 
-You can see the generated WAT file [here](/examples/fib.wat).
+You can see the generated WAT file [here](../examples/fib.wat).
 
 It executes in about a second on my M3.
 
@@ -45,7 +45,7 @@ export vec4 shader(vec2 coord, vec2 resolution) {
 ```
 
 By executing the shader it generates the following image:
-![Disc](/examples/disc.png)
+![Disc](../examples/disc.png)
 
 This runs in about 90ms in 800x600 in 64-bit on my machine.
 
