@@ -6,7 +6,7 @@ RPU compiles to WAT code and uses [wasmer](https://crates.io/crates/wasmer) as a
 
 You can choose between 32 and 64 bit precision during script compile time.
 
-All math functions are implemented in pure WebAssembly. This means that the generated WAT code is very small and fast.
+All vector based operations (length, dot, cross etc) are implemented in pure WebAssembly. Trigonometric functions are implemented in Rust and are called via the wasmer runtime.
 
 ---
 

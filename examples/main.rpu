@@ -1,5 +1,5 @@
 export vec3 main() {
-    vec3 result = cross(vec3(1.0, 3.0, 5.0), vec3(7.0, 9.0, 11.0));
+    vec3 result = sin(vec3(1.0, 3.0, 4.0));
 
     return result;
 }

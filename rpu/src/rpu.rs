@@ -3,7 +3,7 @@ use crate::prelude::*;
 //use std::collections::VecDeque;
 use std::path::PathBuf;
 //use std::sync::{Arc, Mutex};
-use wasmer::{imports, Instance, Module, Store, Value};
+use wasmer::{imports, Function, Instance, Module, Store, Value};
 
 /*
 struct Tile {
@@ -57,10 +57,11 @@ impl RPU {
         source: &str,
         func_name: &str,
         args: Vec<Value>,
+        high_precision: bool,
     ) -> Result<Vec<Value>, String> {
         let rc = self.compile_to_wat(source.to_string());
         match rc {
-            Ok(wat) => self.compile_wat_and_run(&wat, func_name, args),
+            Ok(wat) => self.compile_wat_and_run(&wat, func_name, args, high_precision),
             Err(err) => Err(err.to_string()),
         }
     }
@@ -71,12 +72,13 @@ impl RPU {
         wat: &str,
         func_name: &str,
         args: Vec<Value>,
+        high_precision: bool,
     ) -> Result<Vec<Value>, String> {
         let mut store = Store::default();
         let module_rc = Module::new(&store, wat);
         match module_rc {
             Ok(module) => {
-                let import_object = imports! {};
+                let import_object = self.create_imports(&mut store, high_precision);
                 if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
                     if let Ok(func) = instance.exports.get_function(func_name) {
                         let _start = self.get_time();
@@ -109,7 +111,7 @@ impl RPU {
         let module_rc = Module::new(&store, wat);
         match module_rc {
             Ok(module) => {
-                let import_object = imports! {};
+                let import_object = self.create_imports(&mut store, high_precision);
                 if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
                     if let Ok(func) = instance.exports.get_function(func_name) {
                         let _start = self.get_time();
@@ -164,6 +166,24 @@ impl RPU {
         }
 
         Ok(vec![])
+    }
+
+    fn create_imports(&self, store: &mut Store, high_precision: bool) -> wasmer::Imports {
+        if high_precision {
+            imports! {
+                "env" => {
+                    "_rpu_sin" => Function::new_typed(store, |x: f64| -> f64 { x.sin() }),
+                    "_rpu_cos" => Function::new_typed(store, |x: f64| -> f64 { x.cos() }),
+                },
+            }
+        } else {
+            imports! {
+                "env" => {
+                    "_rpu_sin" => Function::new_typed(store, |x: f32| -> f32 { x.sin() }),
+                    "_rpu_cos" => Function::new_typed(store, |x: f32| -> f32 { x.cos() }),
+                },
+            }
+        }
     }
 
     /*

@@ -149,7 +149,18 @@ impl Context {
 
     /// Generate the final wat code
     pub fn gen_wat(&mut self) -> String {
-        let mut output = "(module\n    (memory 1)\n".to_string();
+        let mut output = "(module\n".to_string();
+
+        output += &format!(
+            "    (import \"env\" \"_rpu_sin\" (func $_rpu_sin (param f{pr}) (result f{pr})))\n",
+            pr = self.pr
+        );
+        output += &format!(
+            "    (import \"env\" \"_rpu_cos\" (func $_rpu_cos (param f{pr}) (result f{pr})))\n",
+            pr = self.pr
+        );
+
+        output += "\n    (memory 1)\n";
 
         for (name, value) in self.globals.iter() {
             if let ASTValue::Float(_, value) = value {
@@ -1047,6 +1058,91 @@ impl Context {
             precision = self.pr,
             params = params,
             result_type = result_type,
+            body = body
+        )
+    }
+
+    // Vec operations (sin, cos, sqrt, etc.)
+
+    pub fn gen_vec_operation(&mut self, dim: u32, op: &str) -> String {
+        let func_name = format!("_rpu_vec{}_{}_f{}", dim, op, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_vec_op(dim, op);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+
+    fn generate_wat_vec_op(&self, dim: u32, op: &str) -> String {
+        let full_precision = format!("f{}", self.pr);
+
+        let mut params = String::new();
+        let mut body = String::new();
+        let mut result_type = String::new();
+
+        let rpu_call = match op {
+            "sin" => Some("$_rpu_sin"),
+            "cos" => Some("$_rpu_cos"),
+            _ => None,
+        };
+
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            params.push_str(&format!(
+                " (param ${coord} {precision}) ",
+                coord = coord,
+                precision = full_precision
+            ));
+            result_type.push_str(&format!(" {precision}", precision = full_precision));
+        }
+
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            if let Some(rpu_call) = rpu_call {
+                body.push_str(&format!(
+                    "        local.get ${coord}\n        (call {rpu_call})\n",
+                    coord = coord,
+                    rpu_call = rpu_call
+                ));
+            } else {
+                body.push_str(&format!(
+                    "        local.get ${coord}\n        {full_precision}.{op}\n",
+                    coord = coord,
+                    full_precision = full_precision,
+                    op = op
+                ));
+            }
+        }
+
+        body.pop();
+
+        format!(
+            "\n    ;; vec{dim} {op}\n    (func $_rpu_vec{dim}_{op}_{precision} {params} (result{result_type})\n{body})\n",
+            dim = dim,
+            op = op,
+            precision = full_precision,
+            result_type = result_type,
+            params = params,
             body = body
         )
     }

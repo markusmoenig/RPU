@@ -112,7 +112,7 @@ fn main() {
             _ = std::fs::write(path.clone(), wat.clone());
 
             if !as_shader {
-                let rc = rpu.compile_wat_and_run(&wat, "main", arguments);
+                let rc = rpu.compile_wat_and_run(&wat, "main", arguments, high_precision);
                 match rc {
                     Ok(values) => {
                         println!("Returns {:?}", values);

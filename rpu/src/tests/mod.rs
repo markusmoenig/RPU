@@ -13,6 +13,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![WasmValue::I64(2)],
+                true
             ),
             Ok(vec![WasmValue::I64(2)])
         );
@@ -29,6 +30,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![WasmValue::I64(6), WasmValue::I64(12)])
         );
@@ -40,6 +42,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![WasmValue::F64(6.0), WasmValue::F64(12.0)])
         );
@@ -56,6 +59,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![WasmValue::I64(6), WasmValue::I64(10)])
         );
@@ -67,6 +71,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![WasmValue::F64(6.0), WasmValue::F64(10.0)])
         );
@@ -78,6 +83,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![
                 WasmValue::I64(6),
@@ -93,6 +99,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![
                 WasmValue::F64(6.0),
@@ -108,6 +115,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![
                 WasmValue::I64(6),
@@ -124,6 +132,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![
                 WasmValue::F64(6.0),
@@ -145,6 +154,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![WasmValue::F64(5.916079783099616)])
         );
@@ -161,6 +171,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![WasmValue::F64(89.0)])
         );
@@ -177,6 +188,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![
                 WasmValue::F64(-12.0),
@@ -198,6 +210,7 @@ mod tests_rpu {
                 ",
                 "main",
                 vec![],
+                true
             ),
             Ok(vec![
                 WasmValue::F64(0.1690308509457033),
@@ -215,7 +228,7 @@ mod tests_rpu {
         match rc {
             Ok(wat) => {
                 assert_eq!(
-                    rpu.compile_wat_and_run(&wat, "main", vec![WasmValue::I64(10)]),
+                    rpu.compile_wat_and_run(&wat, "main", vec![WasmValue::I64(10)], true),
                     Ok(vec![WasmValue::I64(55)])
                 );
             }

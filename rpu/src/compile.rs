@@ -68,6 +68,33 @@ impl Visitor for CompileVisitor {
             ),
         );
 
+        functions.insert(
+            "sqrt".to_string(),
+            ASTValue::Function(
+                "sqrt".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "sin".to_string(),
+            ASTValue::Function(
+                "sin".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "cos".to_string(),
+            ASTValue::Function(
+                "cos".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
         Self {
             environment: Environment::default(),
             functions,
@@ -1630,6 +1657,27 @@ impl Visitor for CompileVisitor {
                     ));
                 }
                 let func_name = ctx.gen_vec_normalize(v.components() as u32);
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = v;
+            } else if name == "sqrt" || name == "sin" || name == "cos" {
+                let v = args[0].accept(self, ctx)?;
+                let components = v.components();
+                if !(1..=4).contains(&components) {
+                    return Err(format!(
+                        "Invalid number of components '{}' for {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                if !v.is_float_based() {
+                    return Err(format!(
+                        "'{}' expects a float based parameter {}",
+                        name,
+                        loc.describe()
+                    ));
+                }
+                let func_name = ctx.gen_vec_operation(v.components() as u32, &name);
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
                 rc = v;
