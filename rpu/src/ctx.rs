@@ -176,6 +176,7 @@ impl Context {
         output
     }
 
+    /// vec2 op vec2
     pub fn gen_vec2_vec2(&mut self, data_type: &str, op: &str) {
         let func_name = format!("_rpu_vec2_{}_vec2_{}", op, data_type);
 
@@ -201,6 +202,103 @@ impl Context {
         ({data_type}.{op}
             (local.get $vec2l_y)
             (local.get $vec2r_y)
+        )
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    /// vec3 op vec3
+    pub fn gen_vec3_vec3(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_vec3_{}_vec3_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let str = format!(
+            r#"
+    ;; vec3 {op} vec3 ({data_type})
+    (func ${func_name}
+        (param $vec2l_x {data_type})
+        (param $vec2l_y {data_type})
+        (param $vec2l_z {data_type})
+        (param $vec2r_x {data_type})
+        (param $vec2r_y {data_type})
+        (param $vec2r_z {data_type})
+        (result {data_type} {data_type} {data_type})
+
+        ({data_type}.{op}
+            (local.get $vec2l_x)
+            (local.get $vec2r_x)
+        )
+
+        ({data_type}.{op}
+            (local.get $vec2l_y)
+            (local.get $vec2r_y)
+        )
+
+        ({data_type}.{op}
+            (local.get $vec2l_z)
+            (local.get $vec2r_z)
+        )
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    /// vec3 op vec3
+    pub fn gen_vec4_vec4(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_vec4_{}_vec4_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let str = format!(
+            r#"
+    ;; vec4 {op} vec4 ({data_type})
+    (func ${func_name}
+        (param $vec2l_x {data_type})
+        (param $vec2l_y {data_type})
+        (param $vec2l_z {data_type})
+        (param $vec2l_w {data_type})
+        (param $vec2r_x {data_type})
+        (param $vec2r_y {data_type})
+        (param $vec2r_z {data_type})
+        (param $vec2r_w {data_type})
+        (result {data_type} {data_type} {data_type} {data_type})
+
+        ({data_type}.{op}
+            (local.get $vec2l_x)
+            (local.get $vec2r_x)
+        )
+
+        ({data_type}.{op}
+            (local.get $vec2l_y)
+            (local.get $vec2r_y)
+        )
+
+        ({data_type}.{op}
+            (local.get $vec2l_z)
+            (local.get $vec2r_z)
+        )
+
+        ({data_type}.{op}
+            (local.get $vec2l_w)
+            (local.get $vec2r_w)
         )
     )
 "#,

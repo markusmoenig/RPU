@@ -32,6 +32,106 @@ mod tests_rpu {
             ),
             Ok(vec![WasmValue::I64(6), WasmValue::I64(12)])
         );
+        assert_eq!(
+            rpu.compile_and_run(
+                "export vec2 main() {
+                    return 2.0 * vec2(1.0, 2.0) * 3.0;
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![WasmValue::F64(6.0), WasmValue::F64(12.0)])
+        );
+    }
+
+    #[test]
+    fn vec_mul() {
+        let rpu = RPU::new();
+        assert_eq!(
+            rpu.compile_and_run(
+                "export ivec2 main() {
+                    return ivec2(6, 5) * ivec2(1, 2);
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![WasmValue::I64(6), WasmValue::I64(10)])
+        );
+        assert_eq!(
+            rpu.compile_and_run(
+                "export vec2 main() {
+                    return vec2(6.0, 5.0) * vec2(1.0, 2.0);
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![WasmValue::F64(6.0), WasmValue::F64(10.0)])
+        );
+        assert_eq!(
+            rpu.compile_and_run(
+                "export ivec3 main() {
+                    return ivec3(6, 5, 4) * ivec3(1, 2, 3);
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![
+                WasmValue::I64(6),
+                WasmValue::I64(10),
+                WasmValue::I64(12)
+            ])
+        );
+        assert_eq!(
+            rpu.compile_and_run(
+                "export vec3 main() {
+                    return vec3(6.0, 5.0, 4.0) * vec3(1.0, 2.0, 3.0);
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![
+                WasmValue::F64(6.0),
+                WasmValue::F64(10.0),
+                WasmValue::F64(12.0)
+            ])
+        );
+        assert_eq!(
+            rpu.compile_and_run(
+                "export ivec4 main() {
+                    return ivec4(6, 5, 4, 3) * ivec4(1, 2, 3, 4);
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![
+                WasmValue::I64(6),
+                WasmValue::I64(10),
+                WasmValue::I64(12),
+                WasmValue::I64(12)
+            ])
+        );
+        assert_eq!(
+            rpu.compile_and_run(
+                "export vec4 main() {
+                    return vec4(6.0, 5.0, 4.0, 3.0) * vec4(1.0, 2.0, 3.0, 4.0);
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![
+                WasmValue::F64(6.0),
+                WasmValue::F64(10.0),
+                WasmValue::F64(12.0),
+                WasmValue::F64(12.0)
+            ])
+        );
     }
 
     #[test]

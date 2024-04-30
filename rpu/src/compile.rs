@@ -1441,6 +1441,106 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
+            // Int3 x Int3
+            (ASTValue::Int3(_, _, _, _), ASTValue::Int3(_, _, _, _)) => {
+                rc = ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec3_vec3(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec3_add_vec3_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec3_vec3(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec3_sub_vec3_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec3_vec3(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec3_mul_vec3_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec3_vec3(&format!("i{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec3_div_vec3_i{})", ctx.pr)
+                    }
+                }
+            }
+            // Float3 x Float3
+            (ASTValue::Float3(_, _, _, _), ASTValue::Float3(_, _, _, _)) => {
+                rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec3_vec3(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec3_add_vec3_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec3_vec3(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec3_sub_vec3_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec3_vec3(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec3_mul_vec3_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec3_vec3(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec3_div_vec3_f{})", ctx.pr)
+                    }
+                }
+            }
+            // Int4 x Int4
+            (ASTValue::Int4(_, _, _, _, _), ASTValue::Int4(_, _, _, _, _)) => {
+                rc = ASTValue::Int4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                );
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec4_vec4(&format!("i{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec4_add_vec4_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec4_vec4(&format!("i{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec4_sub_vec4_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec4_vec4(&format!("i{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec4_mul_vec4_i{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec4_vec4(&format!("i{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec4_div_vec4_i{})", ctx.pr)
+                    }
+                }
+            }
+            // Float4 x Float4
+            (ASTValue::Float4(_, _, _, _, _), ASTValue::Float4(_, _, _, _, _)) => {
+                rc = ASTValue::Float4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                );
+                match op {
+                    BinaryOperator::Add => {
+                        ctx.gen_vec4_vec4(&format!("f{}", ctx.pr), "add");
+                        format!("(call $_rpu_vec4_add_vec4_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Subtract => {
+                        ctx.gen_vec4_vec4(&format!("f{}", ctx.pr), "sub");
+                        format!("(call $_rpu_vec4_sub_vec4_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec4_vec4(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec4_mul_vec4_f{})", ctx.pr)
+                    }
+                    BinaryOperator::Divide => {
+                        ctx.gen_vec4_vec4(&format!("f{}", ctx.pr), "div");
+                        format!("(call $_rpu_vec4_div_vec4_f{})", ctx.pr)
+                    }
+                }
+            }
             _ => {
                 return Err(format!(
                     "Invalid types '{}' '{}' for operator '{}' {}",
