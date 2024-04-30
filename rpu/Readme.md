@@ -53,6 +53,6 @@ This runs in about 90ms in 800x600 in 64-bit on my machine.
 
 - [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4
 - [x] Basic math operators: +, -, \*, /
-- [x] Basic math functions: mix, smoothstep, length, normalize
+- [x] Basic math functions: dot, cross, mix, smoothstep, length, normalize
 - [x] Basic control structures: if
 - [x] Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc

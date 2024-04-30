@@ -50,6 +50,24 @@ impl Visitor for CompileVisitor {
             ),
         );
 
+        functions.insert(
+            "dot".to_string(),
+            ASTValue::Function(
+                "dot".to_string(),
+                vec![ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "cross".to_string(),
+            ASTValue::Function(
+                "cross".to_string(),
+                vec![ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
         Self {
             environment: Environment::default(),
             functions,
@@ -1627,9 +1645,9 @@ impl Visitor for CompileVisitor {
                 }
                 let a2 = args[1].accept(self, ctx)?;
 
-                if a1.to_type() != a2.to_type() {
+                if a1.to_type() != a2.to_type() || !a1.is_float_based() {
                     return Err(format!(
-                        "'mix' expects the first two arguments to be the same type, but '{}' and '{}' were provided {}",
+                        "'smoothstep' expects the first two arguments to be the same float type, but '{}' and '{}' were provided {}",
                         a1.to_type(),
                         a2.to_type(),
                         loc.describe()
@@ -1639,7 +1657,7 @@ impl Visitor for CompileVisitor {
                 let a3 = args[2].accept(self, ctx)?;
                 if a3.to_type() != "float" {
                     return Err(format!(
-                        "'mix' expects the third argument to be of type 'float', but '{}' was provided {}",
+                        "'smoothstep' expects the third argument to be of type 'float', but '{}' was provided {}",
                         a3.to_type(),
                         loc.describe()
                     ));
@@ -1662,9 +1680,9 @@ impl Visitor for CompileVisitor {
                 }
                 let a2 = args[1].accept(self, ctx)?;
 
-                if a1.to_type() != a2.to_type() {
+                if a1.to_type() != a2.to_type() || !a1.is_float_based() {
                     return Err(format!(
-                        "'mix' expects the first two arguments to be the same type, but '{}' and '{}' were provided {}",
+                        "'mix' expects the first two arguments to be the same float type, but '{}' and '{}' were provided {}",
                         a1.to_type(),
                         a2.to_type(),
                         loc.describe()
@@ -1681,6 +1699,58 @@ impl Visitor for CompileVisitor {
                 }
 
                 let func_name = ctx.gen_vec_mix(components as u32);
+
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = a1;
+            } else if name == "dot" {
+                let a1 = args[0].accept(self, ctx)?;
+                let components = a1.components();
+                if !(2..=4).contains(&components) {
+                    return Err(format!(
+                        "Invalid number of components {} for 'dot' {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                let a2 = args[1].accept(self, ctx)?;
+
+                if a1.to_type() != a2.to_type() || !a1.is_float_based() {
+                    return Err(format!(
+                        "'dot' expects the first two arguments to be the same float type, but '{}' and '{}' were provided {}",
+                        a1.to_type(),
+                        a2.to_type(),
+                        loc.describe()
+                    ));
+                }
+
+                let func_name = ctx.gen_vec_dot_product(components as u32);
+
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = ASTValue::Float(None, 0.0);
+            } else if name == "cross" {
+                let a1 = args[0].accept(self, ctx)?;
+                let components = a1.components();
+                if components != 3 {
+                    return Err(format!(
+                        "Invalid number of components {} for 'dot' {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                let a2 = args[1].accept(self, ctx)?;
+
+                if a1.to_type() != a2.to_type() || !a1.is_float_based() {
+                    return Err(format!(
+                        "'dot' expects the first two arguments to be the same float type, but '{}' and '{}' were provided {}",
+                        a1.to_type(),
+                        a2.to_type(),
+                        loc.describe()
+                    ));
+                }
+
+                let func_name = ctx.gen_vec_cross_product();
 
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);

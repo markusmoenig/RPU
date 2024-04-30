@@ -151,6 +151,42 @@ mod tests_rpu {
     }
 
     #[test]
+    fn dot_product() {
+        let rpu = RPU::new();
+        assert_eq!(
+            rpu.compile_and_run(
+                "export float main() {
+                    return dot(vec3(1.0, 3.0, 5.0), vec3(7.0, 9.0, 11.0));
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![WasmValue::F64(89.0)])
+        );
+    }
+
+    #[test]
+    fn cross_product() {
+        let rpu = RPU::new();
+        assert_eq!(
+            rpu.compile_and_run(
+                "export vec3 main() {
+                    return cross(vec3(1.0, 3.0, 5.0), vec3(7.0, 9.0, 11.0));
+                }
+                ",
+                "main",
+                vec![],
+            ),
+            Ok(vec![
+                WasmValue::F64(-12.0),
+                WasmValue::F64(24.0),
+                WasmValue::F64(-12.0)
+            ])
+        );
+    }
+
+    #[test]
     fn vec_normalize() {
         let rpu = RPU::new();
         assert_eq!(

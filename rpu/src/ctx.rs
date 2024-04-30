@@ -602,7 +602,6 @@ impl Context {
         let mut params = String::new();
         let mut body = String::new();
 
-        // Generate parameters and calculation body
         for i in 0..dim {
             let coord = match i {
                 0 => "x",
@@ -630,7 +629,6 @@ impl Context {
             full_precision = full_precision
         ));
 
-        // Assemble the complete function with indented formatting
         format!(
             "\n    ;; vec{} length\n    (func $_rpu_vec{}_length_{}{} (result {})        {})\n",
             dim, dim, full_precision, params, full_precision, body
@@ -655,7 +653,7 @@ impl Context {
     }
 
     fn generate_wat_smoothstep(&self, dim: u32) -> String {
-        let full_precision = format!("f{}", self.pr); // Prepends 'f' to the precision
+        let full_precision = format!("f{}", self.pr);
 
         let mut params = String::new();
         let mut body = String::new();
@@ -663,7 +661,6 @@ impl Context {
         let mut params_edge0 = String::new();
         let mut params_edge1 = String::new();
 
-        // Generate parameters for edge0, edge1, and x (scalar)
         for i in 0..dim {
             let coord = match i {
                 0 => "x",
@@ -688,7 +685,7 @@ impl Context {
                 " (local $t_{coord} {precision})",
                 coord = coord,
                 precision = full_precision
-            )); // Declare local for t
+            ));
         }
 
         params.push_str(&format!(
@@ -696,13 +693,9 @@ impl Context {
             precision = full_precision
         ));
 
-        // Scalar factor x is added after vector components
         let params_factor = format!(" (param $x {precision})", precision = full_precision);
-
-        // Combine all parameters in correct order
         let params = format!("{}{}{}", params_edge0, params_edge1, params_factor);
 
-        // Generate smooth step computation for each component
         for i in 0..dim {
             let coord = match i {
                 0 => "x",
@@ -781,7 +774,6 @@ impl Context {
         let mut params_edge0 = String::new();
         let mut params_edge1 = String::new();
 
-        // Generate parameters for edge0, edge1, and x (scalar)
         for i in 0..dim {
             let coord = match i {
                 0 => "x",
@@ -803,13 +795,10 @@ impl Context {
             ));
         }
 
-        // Scalar factor is added after vector components
         let params_factor = format!(" (param $factor {precision})", precision = full_precision);
 
-        // Combine all parameters in correct order
         let params = format!("{}{}{}", params_edge0, params_edge1, params_factor);
 
-        // Generate smooth step computation for each component
         for i in 0..dim {
             let coord = match i {
                 0 => "x",
@@ -870,7 +859,6 @@ impl Context {
         let mut body = String::new();
         let mut length_calculation = String::new();
 
-        // Generate parameters and length calculation
         for i in 0..dim {
             let coord = match i {
                 0 => "x",
@@ -902,7 +890,6 @@ impl Context {
 
         body.push_str(&length_calculation);
 
-        // Normalize each component
         for i in 0..dim {
             let coord = match i {
                 0 => "x",
@@ -925,10 +912,142 @@ impl Context {
         }
         result_type.push(')');
 
-        // Assemble the complete function with indented formatting
         format!(
             "\n    ;; vec{} normalize\n    (func $_rpu_normalize_vec{}_{}{} {}\n        (local $magn {})\n         {})\n",
             dim, dim, full_precision, params, result_type, full_precision, body
+        )
+    }
+
+    // Dot product
+
+    pub fn gen_vec_dot_product(&mut self, components: u32) -> String {
+        let func_name = format!("_rpu_dot_product_vec{}_f{}", components, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_dot_product(components);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+
+    fn generate_wat_dot_product(&self, dim: u32) -> String {
+        let full_precision = format!("f{}", self.pr);
+
+        let mut params_a = String::new();
+        let mut params_b = String::new();
+        let mut body = String::new();
+
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            params_a.push_str(&format!(
+                " (param $a_{coord} {precision}) ",
+                coord = coord,
+                precision = full_precision
+            ));
+            params_b.push_str(&format!(
+                " (param $b_{coord} {precision}) ",
+                coord = coord,
+                precision = full_precision
+            ));
+        }
+
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            body.push_str(&format!(
+                "        local.get $a_{coord}\n        local.get $b_{coord}\n        {full_precision}.mul\n",
+                coord=coord, full_precision=full_precision
+            ));
+
+            if i == 0 {
+                body.push_str("        local.set $dot_product\n");
+            } else if i == dim - 1 {
+                body.push_str(&format!(
+                    "        local.get $dot_product\n        {full_precision}.add",
+                    full_precision = full_precision
+                ));
+            } else {
+                body.push_str(&format!("        local.get $dot_product\n        {full_precision}.add\n        local.set $dot_product\n", full_precision=full_precision));
+            }
+        }
+
+        let params = format!("{}{}", params_a, params_b);
+        format!(
+            "\n    ;; vec{dim} dot product\n    (func $_rpu_dot_product_vec{dim}_{precision} {params} (result {precision}) (local $dot_product {precision})\n{body})\n",
+            dim=dim, precision=full_precision, params=params, body=body
+        )
+    }
+
+    // Cross product
+
+    pub fn gen_vec_cross_product(&mut self) -> String {
+        let func_name = format!("_rpu_cross_product_f{}", self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_cross_product();
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+
+    fn generate_wat_cross_product(&self) -> String {
+        let full_precision = format!("f{}", self.pr);
+
+        let params = format!(
+            "(param $a_x {precision}) (param $a_y {precision}) (param $a_z {precision}) \
+             (param $b_x {precision}) (param $b_y {precision}) (param $b_z {precision})",
+            precision = full_precision
+        );
+
+        let body = format!(
+            "    local.get $a_y\n        local.get $b_z\n        {full_precision}.mul\n        \
+        local.get $a_z\n        local.get $b_y\n        {full_precision}.mul\n        \
+             {full_precision}.sub\n        local.set $c_x\n        \
+        local.get $a_z\n        local.get $b_x\n        {full_precision}.mul\n        \
+        local.get $a_x\n        local.get $b_z\n        {full_precision}.mul\n        \
+             {full_precision}.sub\n        local.set $c_y\n        \
+        local.get $a_x\n        local.get $b_y\n        {full_precision}.mul\n        \
+        local.get $a_y\n        local.get $b_x\n        {full_precision}.mul\n        \
+             {full_precision}.sub\n        local.set $c_z",
+            full_precision = full_precision
+        );
+
+        let result_type = format!(
+            "(result {precision} {precision} {precision})",
+            precision = full_precision
+        );
+
+        format!(
+            "\n    ;; cross product\n    (func $_rpu_cross_product_f{precision} {params} {result_type}\n        \
+             (local $c_x f{precision}) (local $c_y f{precision}) (local $c_z f{precision})\n    \
+             {body}\n        local.get $c_x\n        local.get $c_y\n        local.get $c_z)\n",
+            precision = self.pr,
+            params = params,
+            result_type = result_type,
+            body = body
         )
     }
 }
