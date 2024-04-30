@@ -95,6 +95,33 @@ impl Visitor for CompileVisitor {
             ),
         );
 
+        functions.insert(
+            "ceil".to_string(),
+            ASTValue::Function(
+                "ceil".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "floor".to_string(),
+            ASTValue::Function(
+                "floor".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "abs".to_string(),
+            ASTValue::Function(
+                "abs".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
         Self {
             environment: Environment::default(),
             functions,
@@ -1054,20 +1081,19 @@ impl Visitor for CompileVisitor {
 
     fn unary(
         &mut self,
-        op: &UnaryOperator,
+        _op: &UnaryOperator,
         expr: &Expr,
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        expr.accept(self, ctx)?;
-        match op {
-            UnaryOperator::Negate => print!(" ! "),
-            UnaryOperator::Minus => {
-                ctx.add_wat("f64.neg");
-            }
-        }
+        let v = expr.accept(self, ctx)?;
 
-        Ok(ASTValue::None)
+        // !, - have the same behavior right now.
+        let func_name = ctx.gen_vec_operation(v.components() as u32, "neg");
+        let instr = format!("(call ${})", func_name);
+        ctx.add_wat(&instr);
+
+        Ok(v)
     }
 
     fn equality(
@@ -1660,7 +1686,13 @@ impl Visitor for CompileVisitor {
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
                 rc = v;
-            } else if name == "sqrt" || name == "sin" || name == "cos" {
+            } else if name == "sqrt"
+                || name == "sin"
+                || name == "cos"
+                || name == "ceil"
+                || name == "floor"
+                || name == "abs"
+            {
                 let v = args[0].accept(self, ctx)?;
                 let components = v.components();
                 if !(1..=4).contains(&components) {
