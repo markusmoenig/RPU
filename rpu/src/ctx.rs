@@ -172,6 +172,19 @@ impl Context {
             pr = self.pr
         );
 
+        output += &format!(
+            "    (import \"env\" \"_rpu_min\" (func $_rpu_min (param f{pr}) (param f{pr}) (result f{pr})))\n",
+            pr = self.pr
+        );
+        output += &format!(
+            "    (import \"env\" \"_rpu_max\" (func $_rpu_max (param f{pr}) (param f{pr}) (result f{pr})))\n",
+            pr = self.pr
+        );
+        output += &format!(
+            "    (import \"env\" \"_rpu_pow\" (func $_rpu_pow (param f{pr}) (param f{pr}) (result f{pr})))\n",
+            pr = self.pr
+        );
+
         output += "\n    (memory 1)\n";
 
         for (name, value) in self.globals.iter() {
@@ -1091,6 +1104,23 @@ impl Context {
         func_name
     }
 
+    // Operation on a vector (sin, cos, tan, )
+
+    pub fn gen_vec_operation_scalar(&mut self, dim: u32, op: &str) -> String {
+        let func_name = format!("_rpu_vec{}_{}_f{}", dim, op, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_vec_op_scalar(dim, op);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+
     fn generate_wat_vec_op(&self, dim: u32, op: &str) -> String {
         let full_precision = format!("f{}", self.pr);
 
@@ -1142,6 +1172,82 @@ impl Context {
             } else {
                 body.push_str(&format!(
                     "        local.get ${coord}\n        {full_precision}.{op}\n",
+                    coord = coord,
+                    full_precision = full_precision,
+                    op = op
+                ));
+            }
+        }
+
+        body.pop();
+
+        format!(
+            "\n    ;; vec{dim} {op}\n    (func $_rpu_vec{dim}_{op}_{precision} {params} (result{result_type})\n{body})\n",
+            dim = dim,
+            op = op,
+            precision = full_precision,
+            result_type = result_type,
+            params = params,
+            body = body
+        )
+    }
+
+    // Operation on a vector and as scalar (max, min, powf etc.)
+
+    pub fn generate_wat_vec_op_scalar(&self, dim: u32, op: &str) -> String {
+        let full_precision = format!("f{}", self.pr);
+
+        let mut params = String::new();
+        let mut body = String::new();
+        let mut result_type = String::new();
+
+        let rpu_call = match op {
+            "max" => Some("$_rpu_max"),
+            "min" => Some("$_rpu_min"),
+            "pow" => Some("$_rpu_pow"),
+            _ => None,
+        };
+
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            params.push_str(&format!(
+                " (param ${coord} {precision}) ",
+                coord = coord,
+                precision = full_precision
+            ));
+            result_type.push_str(&format!(" {precision}", precision = full_precision));
+        }
+
+        params.push_str(&format!(
+            " (param $scalar {precision}) ",
+            precision = full_precision
+        ));
+
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            if let Some(rpu_call) = rpu_call {
+                body.push_str(&format!(
+                    "        local.get ${coord}\n        local.get $scalar\n        (call {rpu_call})\n",
+                    coord = coord,
+                    rpu_call = rpu_call
+                ));
+            } else {
+                body.push_str(&format!(
+                    "        local.get ${coord}\n        local.get $scalar\n        {full_precision}.{op}\n",
                     coord = coord,
                     full_precision = full_precision,
                     op = op

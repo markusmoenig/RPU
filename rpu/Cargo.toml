@@ -1,6 +1,6 @@
 [package]
 name = "rpu"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2021"
 description = "RPU is a GLSL like programming language which compiles to WebAssembly (WAT). Fast and embeddable."
 license = "MIT"

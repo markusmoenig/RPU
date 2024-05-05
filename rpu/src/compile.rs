@@ -150,6 +150,33 @@ impl Visitor for CompileVisitor {
             ),
         );
 
+        functions.insert(
+            "max".to_string(),
+            ASTValue::Function(
+                "max".to_string(),
+                vec![ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "min".to_string(),
+            ASTValue::Function(
+                "min".to_string(),
+                vec![ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "pow".to_string(),
+            ASTValue::Function(
+                "pow".to_string(),
+                vec![ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
         Self {
             environment: Environment::default(),
             functions,
@@ -1769,6 +1796,48 @@ impl Visitor for CompileVisitor {
                     ));
                 }
                 let func_name = ctx.gen_vec_operation(v.components() as u32, &name);
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = v;
+            } else if name == "max" || name == "min" || name == "pow" {
+                let v = args[0].accept(self, ctx)?;
+
+                if func_args.len() != args.len() {
+                    return Err(format!(
+                        "Function '{}' expects {} arguments, but {} were provided {}",
+                        name,
+                        func_args.len(),
+                        args.len(),
+                        loc.describe()
+                    ));
+                }
+
+                let components = v.components();
+                if !(1..=4).contains(&components) {
+                    return Err(format!(
+                        "Invalid number of components '{}' for {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                if !v.is_float_based() {
+                    return Err(format!(
+                        "'{}' expects a float based parameter {}",
+                        name,
+                        loc.describe()
+                    ));
+                }
+
+                let b = args[1].accept(self, ctx)?;
+                if b.components() != 1 {
+                    return Err(format!(
+                        "Invalid second parameter for '{}' (scalars only) {}",
+                        name,
+                        loc.describe()
+                    ));
+                }
+
+                let func_name = ctx.gen_vec_operation_scalar(v.components() as u32, &name);
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
                 rc = v;

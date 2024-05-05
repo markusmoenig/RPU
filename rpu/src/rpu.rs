@@ -177,6 +177,9 @@ impl RPU {
                     "_rpu_tan" => Function::new_typed(store, |x: f64| -> f64 { x.tan() }),
                     "_rpu_degrees" => Function::new_typed(store, |x: f64| -> f64 { x.to_degrees() }),
                     "_rpu_radians" => Function::new_typed(store, |x: f64| -> f64 { x.to_radians() }),
+                    "_rpu_min" => Function::new_typed(store, |x: f64, y: f64| -> f64 { x.min(y) }),
+                    "_rpu_max" => Function::new_typed(store, |x: f64, y: f64| -> f64 { x.max(y) }),
+                    "_rpu_pow" => Function::new_typed(store, |x: f64, y: f64| -> f64 { x.powf(y) }),
                 },
             }
         } else {
@@ -187,6 +190,9 @@ impl RPU {
                     "_rpu_tan" => Function::new_typed(store, |x: f32| -> f32 { x.tan() }),
                     "_rpu_degrees" => Function::new_typed(store, |x: f32| -> f32 { x.to_degrees() }),
                     "_rpu_radians" => Function::new_typed(store, |x: f32| -> f32 { x.to_radians() }),
+                    "_rpu_min" => Function::new_typed(store, |x: f32, y: f32| -> f32 { x.min(y) }),
+                    "_rpu_max" => Function::new_typed(store, |x: f32, y: f32| -> f32 { x.max(y) }),
+                    "_rpu_pow" => Function::new_typed(store, |x: f32, y: f32| -> f32 { x.powf(y) }),
                 },
             }
         }
