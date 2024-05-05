@@ -5,6 +5,7 @@ use crate::prelude::*;
 pub struct CompileVisitor {
     environment: Environment,
     functions: FxHashMap<String, ASTValue>,
+    break_depth: Vec<i32>,
 }
 
 impl Visitor for CompileVisitor {
@@ -125,6 +126,7 @@ impl Visitor for CompileVisitor {
         Self {
             environment: Environment::default(),
             functions,
+            break_depth: vec![],
         }
     }
 
@@ -147,11 +149,27 @@ impl Visitor for CompileVisitor {
         _loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
+        let instr = "(block".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        if let Some(d) = self.break_depth.last() {
+            self.break_depth.push(d + 1);
+        }
+
         self.environment.begin_scope(ASTValue::None);
         for stmt in list {
             stmt.accept(self, ctx)?;
         }
         self.environment.end_scope();
+
+        if let Some(d) = self.break_depth.last() {
+            self.break_depth.push(d - 1);
+        }
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+
         Ok(ASTValue::None)
     }
 
@@ -1132,11 +1150,22 @@ impl Visitor for CompileVisitor {
 
         // TODO Check if we can compare these two values
 
-        let instr = match op {
-            ComparisonOperator::Greater => format!("(i{}.gt_s)", ctx.pr),
-            ComparisonOperator::GreaterEqual => format!("(i{}.ge_s)", ctx.pr),
-            ComparisonOperator::Less => format!("(i{}.lt_s)", ctx.pr),
-            ComparisonOperator::LessEqual => format!("(i{}.le_s)", ctx.pr),
+        let is_float_based = left_value.is_float_based();
+
+        let instr = if !is_float_based {
+            match op {
+                ComparisonOperator::Greater => format!("(i{}.gt_s)", ctx.pr),
+                ComparisonOperator::GreaterEqual => format!("(i{}.ge_s)", ctx.pr),
+                ComparisonOperator::Less => format!("(i{}.lt_s)", ctx.pr),
+                ComparisonOperator::LessEqual => format!("(i{}.le_s)", ctx.pr),
+            }
+        } else {
+            match op {
+                ComparisonOperator::Greater => format!("(f{}.gt)", ctx.pr),
+                ComparisonOperator::GreaterEqual => format!("(f{}.ge)", ctx.pr),
+                ComparisonOperator::Less => format!("(f{}.lt)", ctx.pr),
+                ComparisonOperator::LessEqual => format!("(f{}.le)", ctx.pr),
+            }
         };
 
         ctx.add_wat(&instr);
@@ -2052,9 +2081,6 @@ impl Visitor for CompileVisitor {
         ctx.add_line();
         let _rc = cond.accept(self, ctx)?;
 
-        //ctx.add_line();
-
-        // let instr = format!("(if (result i{})", ctx.pr);
         let instr = "(if".to_string();
         ctx.add_wat(&instr);
         ctx.add_indention();
@@ -2063,22 +2089,89 @@ impl Visitor for CompileVisitor {
         ctx.add_wat(&instr);
         ctx.add_indention();
 
+        if let Some(d) = self.break_depth.last() {
+            self.break_depth.push(d + 2);
+        }
+
         let _ = then_stmt.accept(self, ctx)?;
 
         ctx.remove_indention();
         ctx.add_wat(")");
+
+        if let Some(d) = self.break_depth.last() {
+            self.break_depth.push(d - 2);
+        }
+
         if let Some(es) = else_stmt {
+            if let Some(d) = self.break_depth.last() {
+                self.break_depth.push(d + 2);
+            }
             let instr = "(else".to_string();
             ctx.add_wat(&instr);
             ctx.add_indention();
             let _ = es.accept(self, ctx)?;
             ctx.remove_indention();
             ctx.add_wat(")");
+            if let Some(d) = self.break_depth.last() {
+                self.break_depth.push(d - 2);
+            }
         }
 
         ctx.remove_indention();
         ctx.add_wat(")");
         //ctx.add_line();
+
+        Ok(ASTValue::None)
+    }
+
+    fn while_stmt(
+        &mut self,
+        cond: &Expr,
+        body_stmt: &Stmt,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        ctx.add_line();
+
+        let instr = "(block".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        let instr = "(loop".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        self.break_depth.push(0);
+
+        let _rc = cond.accept(self, ctx)?;
+
+        let instr = "(i32.eqz)".to_string();
+        ctx.add_wat(&instr);
+
+        let instr = "(br_if 1)".to_string();
+        ctx.add_wat(&instr);
+
+        let _rc = body_stmt.accept(self, ctx)?;
+
+        let instr = "(br 0)".to_string();
+        ctx.add_wat(&instr);
+
+        self.break_depth.pop();
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+
+        Ok(ASTValue::None)
+    }
+
+    fn break_stmt(&mut self, _loc: &Location, ctx: &mut Context) -> Result<ASTValue, String> {
+        if let Some(d) = self.break_depth.last() {
+            let instr = format!("(br {})", d);
+            ctx.add_wat(&instr);
+        }
 
         Ok(ASTValue::None)
     }

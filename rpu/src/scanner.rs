@@ -55,6 +55,7 @@ pub enum TokenType {
     This,
     True,
     While,
+    Break,
     Export,
 
     Int,
@@ -117,6 +118,7 @@ impl Scanner {
         keywords.insert("this", TokenType::This);
         keywords.insert("true", TokenType::True);
         keywords.insert("while", TokenType::While);
+        keywords.insert("break", TokenType::Break);
 
         keywords.insert("int", TokenType::Int);
         keywords.insert("ivec2", TokenType::Int2);

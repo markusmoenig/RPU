@@ -196,6 +196,7 @@ impl ASTValue {
 #[derive(Clone, Debug)]
 pub enum Stmt {
     If(Box<Expr>, Box<Stmt>, Option<Box<Stmt>>, Location),
+    While(Box<Expr>, Box<Stmt>, Location),
     Print(Box<Expr>, Location),
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
@@ -209,6 +210,7 @@ pub enum Stmt {
         Location,
     ),
     Return(Box<Expr>, Location),
+    Break(Location),
 }
 
 /// Expressions in the AST
@@ -406,11 +408,21 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
+    fn break_stmt(&mut self, loc: &Location, ctx: &mut Context) -> Result<ASTValue, String>;
+
     fn if_stmt(
         &mut self,
         cond: &Expr,
         then_stmt: &Stmt,
         else_stmt: &Option<Box<Stmt>>,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
+
+    fn while_stmt(
+        &mut self,
+        cond: &Expr,
+        body_stmt: &Stmt,
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -431,6 +443,7 @@ impl Stmt {
             Stmt::If(cond, then_stmt, else_stmt, loc) => {
                 visitor.if_stmt(cond, then_stmt, else_stmt, loc, ctx)
             }
+            Stmt::While(cond, body, loc) => visitor.while_stmt(cond, body, loc, ctx),
             Stmt::Print(expression, loc) => visitor.print(expression, loc, ctx),
             Stmt::Block(list, loc) => visitor.block(list, loc, ctx),
             Stmt::Expression(expression, loc) => visitor.expression(expression, loc, ctx),
@@ -440,6 +453,7 @@ impl Stmt {
             Stmt::FunctionDeclaration(name, args, body, returns, export, loc) => {
                 visitor.function_declaration(name, args, body, returns, export, loc, ctx)
             }
+            Stmt::Break(loc) => visitor.break_stmt(loc, ctx),
             Stmt::Return(expr, loc) => visitor.return_stmt(expr, loc, ctx),
         }
     }

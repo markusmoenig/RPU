@@ -13,7 +13,7 @@ All vector based operations (length, dot, cross etc) are implemented in pure Web
 - [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4
 - [x] Math operators: +, -, \*, /
 - [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, abs.
-- [x] Control structures: if
+- [x] Control structures: if, while, break, return, export
 - [x] Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc
 
 ---

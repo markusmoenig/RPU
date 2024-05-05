@@ -129,13 +129,38 @@ impl Parser {
             self.if_statement()
         } else if self.match_token(vec![TokenType::Print]) {
             self.print_statement()
+        } else if self.match_token(vec![TokenType::While]) {
+            self.while_statement()
         } else if self.match_token(vec![TokenType::Return]) {
             self.return_statement()
+        } else if self.match_token(vec![TokenType::Break]) {
+            self.break_statement()
         } else if self.match_token(vec![TokenType::LeftBrace]) {
             self.block()
         } else {
             self.expression_statement()
         }
+    }
+
+    fn while_statement(&mut self) -> Result<Stmt, String> {
+        let line = self.current_line;
+        self.consume(
+            TokenType::LeftParen,
+            &format!("Expect '(' after 'while' at line {}.", line),
+        )?;
+        let condition = self.expression()?;
+        self.consume(
+            TokenType::RightParen,
+            &format!("Expect ')' after while condition at line {}.", line),
+        )?;
+
+        let body = self.statement()?;
+
+        Ok(Stmt::While(
+            Box::new(condition),
+            Box::new(body),
+            self.create_loc(line),
+        ))
     }
 
     fn if_statement(&mut self) -> Result<Stmt, String> {
@@ -183,6 +208,15 @@ impl Parser {
             &format!("Expect ';' after return value at line {}.", line),
         )?;
         Ok(Stmt::Return(Box::new(value), self.create_loc(line)))
+    }
+
+    fn break_statement(&mut self) -> Result<Stmt, String> {
+        let line = self.current_line;
+        self.consume(
+            TokenType::Semicolon,
+            &format!("Expect ';' after break statement at line {}.", line),
+        )?;
+        Ok(Stmt::Break(self.create_loc(line)))
     }
 
     fn expression_statement(&mut self) -> Result<Stmt, String> {

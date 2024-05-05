@@ -1,0 +1,14 @@
+export int main() {
+    int counter = 0;
+
+    while (counter < 10) {
+        counter = counter + 1;
+
+        if (counter == 5) {
+            break;
+        }
+
+    }
+
+    return counter;
+}
