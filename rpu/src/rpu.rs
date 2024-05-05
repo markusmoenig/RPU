@@ -1,17 +1,16 @@
 use crate::prelude::*;
-//use rayon::prelude::*;
-//use std::collections::VecDeque;
 use std::path::PathBuf;
-//use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use wasmer::{imports, Function, Instance, Module, Store, Value};
 
-/*
+#[derive(Debug, Clone, Copy)]
 struct Tile {
     x: usize,
     y: usize,
     width: usize,
     height: usize,
-    }*/
+}
 
 pub struct RPU {}
 
@@ -78,7 +77,7 @@ impl RPU {
         let module_rc = Module::new(&store, wat);
         match module_rc {
             Ok(module) => {
-                let import_object = self.create_imports(&mut store, high_precision);
+                let import_object = RPU::create_imports(&mut store, high_precision);
                 if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
                     if let Ok(func) = instance.exports.get_function(func_name) {
                         let _start = self.get_time();
@@ -111,7 +110,7 @@ impl RPU {
         let module_rc = Module::new(&store, wat);
         match module_rc {
             Ok(module) => {
-                let import_object = self.create_imports(&mut store, high_precision);
+                let import_object = RPU::create_imports(&mut store, high_precision);
                 if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
                     if let Ok(func) = instance.exports.get_function(func_name) {
                         let _start = self.get_time();
@@ -168,7 +167,224 @@ impl RPU {
         Ok(vec![])
     }
 
-    fn create_imports(&self, store: &mut Store, high_precision: bool) -> wasmer::Imports {
+    /// Compile the WAT source code and run the shader with the given arguments. The shader will be executed on the given buffer.
+    pub fn compile_wat_and_run_as_tiled_shader(
+        &self,
+        wat: &str,
+        func_name: &str,
+        buffer: &mut Arc<Mutex<ColorBuffer>>,
+        tile_size: (usize, usize),
+        high_precision: bool,
+    ) -> Result<Vec<Value>, String> {
+        let width = buffer.lock().unwrap().width;
+        let height = buffer.lock().unwrap().height;
+
+        let tiles = self.create_tiles(width, height, tile_size.0, tile_size.1);
+
+        //println!("Tiles: {:?}", &tiles);
+
+        let tiles_mutex = Arc::new(Mutex::new(tiles));
+
+        let num_cpus = num_cpus::get();
+        let _start = self.get_time();
+
+        // Create threads
+        let mut handles = vec![];
+        for _ in 0..num_cpus {
+            let tiles_mutex = Arc::clone(&tiles_mutex);
+            let buffer_mutex = Arc::clone(buffer);
+            let fname = func_name.to_string().clone();
+            let wat = wat.to_string().clone();
+
+            let handle = thread::spawn(move || {
+                let mut store = Store::default();
+                let module_rc = Module::new(&store, wat);
+                match module_rc {
+                    Ok(module) => {
+                        let import_object = RPU::create_imports(&mut store, high_precision);
+                        if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
+                            if let Ok(func) = instance.exports.get_function(&fname) {
+                                loop {
+                                    // Lock mutex to access tiles
+                                    let mut tiles = tiles_mutex.lock().unwrap();
+
+                                    // Check if there are remaining tiles
+                                    if let Some(tile) = tiles.pop() {
+                                        // Release mutex before processing tile
+                                        drop(tiles);
+                                        // Process tile
+                                        for h in 0..tile.height {
+                                            for w in 0..tile.width {
+                                                let x = tile.x + w;
+                                                let y = tile.y + h;
+
+                                                if x >= width || y >= height {
+                                                    continue;
+                                                }
+
+                                                let args = if high_precision {
+                                                    vec![
+                                                        Value::F64(x as f64),
+                                                        Value::F64(height as f64 - y as f64),
+                                                        Value::F64(width as f64),
+                                                        Value::F64(height as f64),
+                                                    ]
+                                                } else {
+                                                    vec![
+                                                        Value::F32(x as f32),
+                                                        Value::F32(height as f32 - y as f32),
+                                                        Value::F32(width as f32),
+                                                        Value::F32(height as f32),
+                                                    ]
+                                                };
+
+                                                match func.call(&mut store, &args) {
+                                                    Ok(values) => {
+                                                        if high_precision {
+                                                            let r = values[0].f64().unwrap();
+                                                            let g = values[1].f64().unwrap();
+                                                            let b = values[2].f64().unwrap();
+                                                            let a = values[3].f64().unwrap();
+                                                            buffer_mutex.lock().unwrap().set(
+                                                                x,
+                                                                y,
+                                                                [r, g, b, a],
+                                                            );
+                                                        } else {
+                                                            let r = values[0].f32().unwrap();
+                                                            let g = values[1].f32().unwrap();
+                                                            let b = values[2].f32().unwrap();
+                                                            let a = values[3].f32().unwrap();
+                                                            buffer_mutex.lock().unwrap().set(
+                                                                x,
+                                                                y,
+                                                                [
+                                                                    r as f64, g as f64, b as f64,
+                                                                    a as f64,
+                                                                ],
+                                                            );
+                                                        }
+                                                    }
+                                                    Err(err) => println!("{}", err),
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // No remaining tiles, exit loop
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(err) => println!("{}", err),
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to finish
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let _stop = self.get_time();
+        println!("Shader execution time: {:?} ms.", _stop - _start);
+
+        /*
+        let mut store = Store::default();
+        let module_rc = Module::new(&store, wat);
+        match module_rc {
+            Ok(module) => {
+                let import_object = self.create_imports(&mut store, high_precision);
+                if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
+                    if let Ok(func) = instance.exports.get_function(func_name) {
+                        let _start = self.get_time();
+                        for y in 0..buffer.height {
+                            for x in 0..buffer.width {
+                                let args = if high_precision {
+                                    vec![
+                                        Value::F64(x as f64),
+                                        Value::F64(buffer.height as f64 - y as f64),
+                                        Value::F64(buffer.width as f64),
+                                        Value::F64(buffer.height as f64),
+                                    ]
+                                } else {
+                                    vec![
+                                        Value::F32(x as f32),
+                                        Value::F32(buffer.height as f32 - y as f32),
+                                        Value::F32(buffer.width as f32),
+                                        Value::F32(buffer.height as f32),
+                                    ]
+                                };
+
+                                match func.call(&mut store, &args) {
+                                    Ok(values) => {
+                                        if high_precision {
+                                            let r = values[0].f64().unwrap();
+                                            let g = values[1].f64().unwrap();
+                                            let b = values[2].f64().unwrap();
+                                            let a = values[3].f64().unwrap();
+                                            buffer.set(x, y, [r, g, b, a]);
+                                        } else {
+                                            let r = values[0].f32().unwrap();
+                                            let g = values[1].f32().unwrap();
+                                            let b = values[2].f32().unwrap();
+                                            let a = values[3].f32().unwrap();
+                                            buffer.set(
+                                                x,
+                                                y,
+                                                [r as f64, g as f64, b as f64, a as f64],
+                                            );
+                                        }
+                                    }
+                                    Err(err) => return Err(err.to_string()),
+                                }
+                            }
+                        }
+                        let _stop = self.get_time();
+                        println!("Shader execution time: {:?} ms.", _stop - _start);
+                    }
+                }
+            }
+            Err(err) => return Err(err.to_string()),
+            }*/
+
+        Ok(vec![])
+    }
+
+    /// Create the tiles as a spiral pattern starting from the center.
+    fn create_tiles(
+        &self,
+        image_width: usize,
+        image_height: usize,
+        tile_width: usize,
+        tile_height: usize,
+    ) -> Vec<Tile> {
+        // TODO: Generate the tiles in a nice spiral pattern
+
+        let mut tiles = Vec::new();
+        let mut x = 0;
+        let mut y = 0;
+        while x < image_width && y < image_height {
+            let tile = Tile {
+                x,
+                y,
+                width: tile_width,
+                height: tile_height,
+            };
+            tiles.push(tile);
+            x += tile_width;
+            if x >= image_width {
+                x = 0;
+                y += tile_height;
+            }
+        }
+
+        tiles
+    }
+
+    fn create_imports(store: &mut Store, high_precision: bool) -> wasmer::Imports {
         if high_precision {
             imports! {
                 "env" => {

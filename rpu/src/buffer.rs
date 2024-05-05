@@ -1,9 +1,3 @@
-//use crate::prelude::*;
-use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
-    slice::ParallelSliceMut,
-};
-
 /// A color buffer holding an array of f64 pixels.
 #[derive(PartialEq, Debug, Clone)]
 pub struct ColorBuffer {
@@ -79,7 +73,7 @@ impl ColorBuffer {
         out
     }
 
-    /// Convert the frame to an u8 vec, applying gamma correction
+    /// Convert the frame to an u8 vecc.
     pub fn to_u8_vec(&self) -> Vec<u8> {
         let source = &self.pixels[..];
         let mut out: Vec<u8> = vec![0; self.width * self.height * 4];
@@ -98,32 +92,6 @@ impl ColorBuffer {
         }
 
         out
-    }
-
-    /// Convert the pixel buffer to an Vec<u8> and converts the colors from linear into gamma space in a parallel fashion.
-    pub fn convert_to_u8_at(&self, frame: &mut [u8], at: (usize, usize, usize, usize)) {
-        let (start_x, start_y, width, _height) = at;
-
-        frame
-            .par_chunks_exact_mut(width * 4)
-            .enumerate()
-            .for_each(|(j, line)| {
-                for (i, pixel) in line.chunks_exact_mut(4).enumerate() {
-                    let x = start_x + i % width;
-                    let y = start_y + j;
-
-                    if x < self.width && y < self.height {
-                        let o = y * self.width * 4 + x * 4;
-                        let c = [
-                            (self.pixels[o].powf(0.4545) * 255.0) as u8,
-                            (self.pixels[o + 1].powf(0.4545) * 255.0) as u8,
-                            (self.pixels[o + 2].powf(0.4545) * 255.0) as u8,
-                            (self.pixels[o + 3] * 255.0) as u8,
-                        ];
-                        pixel.copy_from_slice(&c);
-                    }
-                }
-            });
     }
 
     pub fn save(&self, path: std::path::PathBuf) {

@@ -8,6 +8,8 @@ You can choose between 32 and 64 bit precision during script compile time.
 
 All vector based operations (length, dot, cross etc) are implemented in pure WebAssembly. Trigonometric functions are implemented in Rust and are called via the wasmer runtime.
 
+When working on shaders, RPU uses multiple threads to render the image. This is done by splitting the image into tiles and rendering each tile in parallel.
+
 # Currently implemented
 
 - [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4
@@ -63,7 +65,14 @@ let mut buffer = ColorBuffer::new(800, 600);
 let rc = rpu.compile_wat_and_run_as_shader(&wat, "shader", &mut buffer, use_64_bit);
 ```
 
-The color buffer will contain the shader output. See below for an raymarch example.
+The color buffer will contain the shader output. This runs the shader in a single thread. To run the shader in parallel use:
+
+```rust
+let mut buffer = Arc::new(Mutex::new(ColorBuffer::new(800, 600)));
+let rc = rpu.compile_wat_and_run_as_tiled_shader(&wat, "shader", &mut buffer, (80, 80), use_64_bit);
+```
+
+Where (80, 80) is the tile size. The buffer is wrapped in an Arc<Mutex<>> to allow multiple threads to write to it.
 
 # Examples
 
@@ -125,7 +134,7 @@ export vec4 shader(vec2 coord, vec2 resolution) {
     float t = 0.0;
     float max_t = 10.0;
 
-    vec4 col = vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 col = vec4(uv.x, uv.y, 0.0, 1.0);
 
     while (t < max_t) {
         vec3 p = ro + rd * t;
@@ -147,4 +156,4 @@ export vec4 shader(vec2 coord, vec2 resolution) {
 By executing the shader it generates the following image:
 ![Raymarch](../examples/raymarch.png)
 
-This runs in about 450ms in 800x600 in 64-bit on my machine.
+This runs in about 150ms in 800x600 in 64-bit on my machine.

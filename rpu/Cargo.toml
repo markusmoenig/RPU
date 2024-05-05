@@ -10,5 +10,5 @@ repository = "https://github.com/markusmoenig/RPU.git"
 [dependencies]
 rustc-hash = "1.1.0"
 wasmer = "4.2.8"
-rayon = "1.10.0"
 image = "0.25.1"
+num_cpus = "1.16.0"

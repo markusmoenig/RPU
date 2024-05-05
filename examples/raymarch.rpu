@@ -34,7 +34,7 @@ export vec4 shader(vec2 coord, vec2 resolution) {
     float t = 0.0;
     float max_t = 10.0;
 
-    vec4 col = vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 col = vec4(uv.x, uv.y, 0.0, 1.0);
 
     while (t < max_t) {
         vec3 p = ro + rd * t;

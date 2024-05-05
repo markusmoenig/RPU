@@ -8,6 +8,8 @@ You can choose between 32 and 64 bit precision during compile time.
 
 All vector based operations (length, dot, cross etc) are implemented in pure WebAssembly. Trigonometric functions are implemented in Rust and are called via the wasmer runtime.
 
+When working on shaders, RPU uses multiple threads to render the image. This is done by splitting the image into tiles and rendering each tile in parallel.
+
 # Currently implemented
 
 - [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4
@@ -110,4 +112,4 @@ export vec4 shader(vec2 coord, vec2 resolution) {
 By executing the shader it generates the following image:
 ![Raymarch](examples/raymarch.png)
 
-This runs in about 450ms in 800x600 in 64-bit on my machine. You can run the example with `cargo run --release -- --source examples/raymarch.rpu -f shader`.
+This runs in about 150ms in 800x600 in 64-bit on my machine. You can run the example with `cargo run --release -- --source examples/raymarch.rpu -f shader`.

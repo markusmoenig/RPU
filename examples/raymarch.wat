@@ -636,8 +636,10 @@
         local.set $t
         (f64.const 10)
         local.set $max_t
-        (f64.const 0)
-        (f64.const 0)
+        local.get $uv_x
+        
+        local.get $uv_y
+        
         (f64.const 0)
         (f64.const 1)
         local.set $col_w

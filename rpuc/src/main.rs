@@ -1,6 +1,6 @@
-pub use rpu::prelude::*;
-//use std::sync::{Arc, Mutex};
 use clap::{Arg, ArgAction, Command};
+pub use rpu::prelude::*;
+use std::sync::{Arc, Mutex};
 
 fn main() {
     let matches = Command::new("RPU Compiler")
@@ -40,6 +40,15 @@ fn main() {
                 .help("The argument for the function. Could be an integer or a float")
                 .action(ArgAction::Set)
                 .value_name("NUMBER")
+                .value_parser(clap::builder::ValueParser::string()),
+        )
+        .arg(
+            Arg::new("tiled")
+                .short('t')
+                .long("tiled")
+                .help("The size of the tiles for the shader. Defaults to '80x80'")
+                .action(ArgAction::Set)
+                .value_name("STRING")
                 .value_parser(clap::builder::ValueParser::string()),
         )
         .get_matches();
@@ -88,6 +97,16 @@ fn main() {
         }
     }
 
+    let mut tiled: Option<(usize, usize)> = Some((80, 80));
+    if let Some(f) = matches.get_one::<String>("tiled") {
+        let parts: Vec<&str> = f.split('x').collect();
+        if parts.len() == 2 {
+            let x = parts[0].parse::<usize>().unwrap();
+            let y = parts[1].parse::<usize>().unwrap();
+            tiled = Some((x, y));
+        }
+    }
+
     println!(
         "Input '{}'. Function '{}'. Precision: '{}'. Argument '{}'.",
         path.to_str().unwrap(),
@@ -122,17 +141,44 @@ fn main() {
                     }
                 }
             } else {
-                let mut buffer = ColorBuffer::new(800, 600);
-                let rc =
-                    rpu.compile_wat_and_run_as_shader(&wat, "shader", &mut buffer, high_precision);
-                match rc {
-                    Ok(_) => {
-                        path.set_extension("png");
-                        println!("Saved image as {:?}.", path);
-                        buffer.save(path);
+                let mut buffer = Arc::new(Mutex::new(ColorBuffer::new(800, 600)));
+
+                if let Some(tiled) = tiled {
+                    let rc = rpu.compile_wat_and_run_as_tiled_shader(
+                        &wat,
+                        "shader",
+                        &mut buffer,
+                        tiled,
+                        high_precision,
+                    );
+                    match rc {
+                        Ok(_) => {
+                            path.set_extension("png");
+                            println!("Saved image as {:?}.", path);
+                            buffer.lock().unwrap().save(path);
+                        }
+                        Err(err) => {
+                            println!("Error: {}", err);
+                        }
                     }
-                    Err(err) => {
-                        println!("Error: {}", err);
+                } else {
+                    let mut buffer = ColorBuffer::new(800, 600);
+
+                    let rc = rpu.compile_wat_and_run_as_shader(
+                        &wat,
+                        "shader",
+                        &mut buffer,
+                        high_precision,
+                    );
+                    match rc {
+                        Ok(_) => {
+                            path.set_extension("png");
+                            println!("Saved image as {:?}.", path);
+                            buffer.save(path);
+                        }
+                        Err(err) => {
+                            println!("Error: {}", err);
+                        }
                     }
                 }
             }
