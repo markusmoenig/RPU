@@ -123,6 +123,33 @@ impl Visitor for CompileVisitor {
             ),
         );
 
+        functions.insert(
+            "tan".to_string(),
+            ASTValue::Function(
+                "tan".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "degrees".to_string(),
+            ASTValue::Function(
+                "degrees".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "radians".to_string(),
+            ASTValue::Function(
+                "radians".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
         Self {
             environment: Environment::default(),
             functions,
@@ -1721,6 +1748,9 @@ impl Visitor for CompileVisitor {
                 || name == "ceil"
                 || name == "floor"
                 || name == "abs"
+                || name == "tan"
+                || name == "degrees"
+                || name == "radians"
             {
                 let v = args[0].accept(self, ctx)?;
                 let components = v.components();

@@ -174,6 +174,9 @@ impl RPU {
                 "env" => {
                     "_rpu_sin" => Function::new_typed(store, |x: f64| -> f64 { x.sin() }),
                     "_rpu_cos" => Function::new_typed(store, |x: f64| -> f64 { x.cos() }),
+                    "_rpu_tan" => Function::new_typed(store, |x: f64| -> f64 { x.tan() }),
+                    "_rpu_degrees" => Function::new_typed(store, |x: f64| -> f64 { x.to_degrees() }),
+                    "_rpu_radians" => Function::new_typed(store, |x: f64| -> f64 { x.to_radians() }),
                 },
             }
         } else {
@@ -181,6 +184,9 @@ impl RPU {
                 "env" => {
                     "_rpu_sin" => Function::new_typed(store, |x: f32| -> f32 { x.sin() }),
                     "_rpu_cos" => Function::new_typed(store, |x: f32| -> f32 { x.cos() }),
+                    "_rpu_tan" => Function::new_typed(store, |x: f32| -> f32 { x.tan() }),
+                    "_rpu_degrees" => Function::new_typed(store, |x: f32| -> f32 { x.to_degrees() }),
+                    "_rpu_radians" => Function::new_typed(store, |x: f32| -> f32 { x.to_radians() }),
                 },
             }
         }

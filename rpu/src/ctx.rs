@@ -159,6 +159,18 @@ impl Context {
             "    (import \"env\" \"_rpu_cos\" (func $_rpu_cos (param f{pr}) (result f{pr})))\n",
             pr = self.pr
         );
+        output += &format!(
+            "    (import \"env\" \"_rpu_tan\" (func $_rpu_tan (param f{pr}) (result f{pr})))\n",
+            pr = self.pr
+        );
+        output += &format!(
+            "    (import \"env\" \"_rpu_degrees\" (func $_rpu_degrees (param f{pr}) (result f{pr})))\n",
+            pr = self.pr
+        );
+        output += &format!(
+            "    (import \"env\" \"_rpu_radians\" (func $_rpu_radians (param f{pr}) (result f{pr})))\n",
+            pr = self.pr
+        );
 
         output += "\n    (memory 1)\n";
 
@@ -1089,6 +1101,9 @@ impl Context {
         let rpu_call = match op {
             "sin" => Some("$_rpu_sin"),
             "cos" => Some("$_rpu_cos"),
+            "tan" => Some("$_rpu_tan"),
+            "degrees" => Some("$_rpu_degrees"),
+            "radians" => Some("$_rpu_radians"),
             _ => None,
         };
 
