@@ -18,7 +18,7 @@ All vector based operations (length, dot, cross etc) are implemented in pure Web
 
 # Usage
 
-You can use the RPU compiler as a standalone tool or as a [crate](https://crates.io/crates/rpu) in your Rust project.
+You can use the RPU compiler as a [standalone tool](https://crates.io/crates/rpuc) or as a [crate](https://crates.io/crates/rpu) in your Rust project.
 
 # Why RPU?
 
