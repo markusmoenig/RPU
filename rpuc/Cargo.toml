@@ -7,5 +7,5 @@ keywords = ["language", "glsl", "graphics", "shader", "rendering"]
 repository = "https://github.com/markusmoenig/RPU.git"
 
 [dependencies]
-rpu = { path = "../rpu" }
+rpu = { version = "0.2.0", path = "../rpu" }
 clap = "4.5.4"
