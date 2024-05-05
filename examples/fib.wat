@@ -1,4 +1,13 @@
 (module
+    (import "env" "_rpu_sin" (func $_rpu_sin (param f64) (result f64)))
+    (import "env" "_rpu_cos" (func $_rpu_cos (param f64) (result f64)))
+    (import "env" "_rpu_tan" (func $_rpu_tan (param f64) (result f64)))
+    (import "env" "_rpu_degrees" (func $_rpu_degrees (param f64) (result f64)))
+    (import "env" "_rpu_radians" (func $_rpu_radians (param f64) (result f64)))
+    (import "env" "_rpu_min" (func $_rpu_min (param f64) (param f64) (result f64)))
+    (import "env" "_rpu_max" (func $_rpu_max (param f64) (param f64) (result f64)))
+    (import "env" "_rpu_pow" (func $_rpu_pow (param f64) (param f64) (result f64)))
+
     (memory 1)
 
     ;; function 'fib'

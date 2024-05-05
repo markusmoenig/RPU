@@ -1,9 +1,10 @@
 [package]
 name = "rpuc"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT"
+keywords = ["language", "glsl", "graphics", "shader", "rendering"]
+repository = "https://github.com/markusmoenig/RPU.git"
 
 [dependencies]
 rpu = { path = "../rpu" }
