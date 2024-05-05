@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 keywords = ["language", "glsl", "graphics", "shader", "rendering"]
 repository = "https://github.com/markusmoenig/RPU.git"
+description = "RPU is a GLSL like programming language which compiles to WebAssembly (WAT). Fast and embeddable."
 
 [dependencies]
 rpu = { version = "0.2.0", path = "../rpu" }
