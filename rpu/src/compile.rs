@@ -115,6 +115,15 @@ impl Visitor for CompileVisitor {
         );
 
         functions.insert(
+            "fract".to_string(),
+            ASTValue::Function(
+                "fract".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
             "abs".to_string(),
             ASTValue::Function(
                 "abs".to_string(),
@@ -1774,6 +1783,7 @@ impl Visitor for CompileVisitor {
                 || name == "cos"
                 || name == "ceil"
                 || name == "floor"
+                || name == "fract"
                 || name == "abs"
                 || name == "tan"
                 || name == "degrees"

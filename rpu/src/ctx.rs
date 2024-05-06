@@ -182,6 +182,12 @@ impl Context {
                         pr = self.pr
                     );
         }
+        if self.imports_hash.contains("$_rpu_fract") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_fract\" (func $_rpu_fract (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
         if self.imports_hash.contains("$_rpu_radians") {
             output += &format!(
                         "    (import \"env\" \"_rpu_radians\" (func $_rpu_radians (param f{pr}) (result f{pr})))\n",
@@ -1156,6 +1162,7 @@ impl Context {
             "tan" => Some("$_rpu_tan"),
             "degrees" => Some("$_rpu_degrees"),
             "radians" => Some("$_rpu_radians"),
+            "fract" => Some("$_rpu_fract"),
             _ => None,
         };
 
