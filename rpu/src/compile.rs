@@ -2249,6 +2249,75 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
+    fn ternary(
+        &mut self,
+        cond: &Expr,
+        then_expr: &Expr,
+        else_expr: &Expr,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        ctx.add_line();
+        let _rc = cond.accept(self, ctx)?;
+
+        let instr = "(if".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        let instr = "(then".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        if let Some(d) = self.break_depth.last() {
+            self.break_depth.push(d + 2);
+        }
+
+        let then_returns = then_expr.accept(self, ctx)?;
+
+        for _ in 0..then_returns.components() {
+            let instr = "(local.set $result)".to_string();
+            ctx.add_wat(&instr);
+        }
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+
+        if let Some(d) = self.break_depth.last() {
+            self.break_depth.push(d - 2);
+        }
+
+        if let Some(d) = self.break_depth.last() {
+            self.break_depth.push(d + 2);
+        }
+        let instr = "(else".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        let else_returns = else_expr.accept(self, ctx)?;
+
+        for _ in 0..else_returns.components() {
+            let instr = "(local.set $result)".to_string();
+            ctx.add_wat(&instr);
+        }
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+        if let Some(d) = self.break_depth.last() {
+            self.break_depth.push(d - 2);
+        }
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+        //ctx.add_line();
+
+        for _ in 0..then_returns.components() {
+            let instr = "(local.get $result)".to_string();
+            ctx.add_wat(&instr);
+        }
+
+        Ok(then_returns)
+    }
+
     fn while_stmt(
         &mut self,
         cond: &Expr,

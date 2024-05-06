@@ -1,6 +1,6 @@
 [package]
 name = "rpuc"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 keywords = ["language", "glsl", "graphics", "shader", "rendering"]
@@ -8,5 +8,5 @@ repository = "https://github.com/markusmoenig/RPU.git"
 description = "This is the standalone compiler for RPU, a GLSL like programming language which compiles to WebAssembly (WAT)."
 
 [dependencies]
-rpu = { version = "0.2.0", path = "../rpu" }
+rpu = { version = "0.2.2", path = "../rpu" }
 clap = "4.5.4"

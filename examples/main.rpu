@@ -1,6 +1,6 @@
 
-export float  main() {
+export vec2  main() {
     float result = rand();//fract(vec3(3.32, 4.3, 4));
 
-    return result;
+    return (result < 0.5) ? vec2(0.0) : vec2(1.0);
 }

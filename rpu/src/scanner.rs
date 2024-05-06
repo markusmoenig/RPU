@@ -16,6 +16,7 @@ pub enum TokenType {
     Star,
     Dollar,
     Colon,
+    TernaryOperator,
 
     LineFeed,
     Space,
@@ -154,6 +155,7 @@ impl Scanner {
             //b' ' => self.make_token(TokenType::Space),
             //b'\n' => self.make_token(TokenType::LineFeed),
             b'(' => self.make_token(TokenType::LeftParen),
+            b'?' => self.make_token(TokenType::TernaryOperator),
             b')' => self.make_token(TokenType::RightParen),
             b'{' => self.make_token(TokenType::LeftBrace),
             b'}' => self.make_token(TokenType::RightBrace),

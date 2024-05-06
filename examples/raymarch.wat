@@ -600,7 +600,7 @@
         local.set $rd_x
         (f64.const 0)
         local.set $t
-        (f64.const 10)
+        (f64.const 2)
         local.set $max_t
         local.get $uv_x
         local.get $uv_y

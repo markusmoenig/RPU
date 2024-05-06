@@ -33,7 +33,7 @@ export vec4 shader(vec2 coord, vec2 resolution) {
     vec3 rd = GetRayDir(uv, ro, vec3(0), 1.);
 
     float t = 0.;
-    float max_t = 10.;
+    float max_t = 2.;
 
     vec4 col = vec4(uv.x, uv.y, 0., 1.);
 

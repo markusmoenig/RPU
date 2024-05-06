@@ -226,6 +226,7 @@ pub enum Expr {
     Variable(String, Vec<u8>, Location),
     VariableAssignment(String, Vec<u8>, Box<Expr>, Location),
     FunctionCall(Box<Expr>, Vec<Box<Expr>>, Location),
+    Ternary(Box<Expr>, Box<Expr>, Box<Expr>, Location),
 }
 
 /// Logical operators in the AST
@@ -435,6 +436,15 @@ pub trait Visitor {
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
+
+    fn ternary(
+        &mut self,
+        condition: &Expr,
+        then_expr: &Expr,
+        else_expr: &Expr,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
 }
 
 impl Stmt {
@@ -474,6 +484,9 @@ impl Expr {
                 visitor.variable_assignment(name.clone(), swizzle, expr, loc, ctx)
             }
             Expr::FunctionCall(callee, args, loc) => visitor.function_call(callee, args, loc, ctx),
+            Expr::Ternary(cond, then_expr, else_expr, loc) => {
+                visitor.ternary(cond, then_expr, else_expr, loc, ctx)
+            }
         }
     }
 }

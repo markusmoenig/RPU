@@ -14,8 +14,8 @@ When working on shaders, RPU uses multiple threads to render the image. This is 
 
 - [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4
 - [x] Math operators: +, -, \*, /
-- [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand.
-- [x] Control structures: if, else, while, break, return, export
+- [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand
+- [x] Control structures: if, else, ternary (?:), while, break, return, const, export
 - [x] Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc
 
 # Why RPU?

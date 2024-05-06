@@ -8,6 +8,8 @@ pub struct Parser {
     force_floats: bool,
 
     high_precision: bool,
+
+    inside_ternary: bool,
 }
 
 impl Default for Parser {
@@ -26,6 +28,7 @@ impl Parser {
             force_floats: false,
 
             high_precision: true,
+            inside_ternary: false,
         }
     }
 
@@ -321,7 +324,61 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, String> {
-        self.assignment()
+        if !self.inside_ternary && self.look_ahead_for_ternary() {
+            self.ternary_operator()
+        } else {
+            self.assignment()
+        }
+    }
+
+    /// Looks ahead up to the next semicolon to determine if the current expression is a ternary.
+    fn look_ahead_for_ternary(&mut self) -> bool {
+        let mut current = self.current;
+        let mut found_ternary_operator = false;
+
+        while current < self.tokens.len() && self.tokens[current].kind != TokenType::Semicolon {
+            match self.tokens[current].kind {
+                TokenType::TernaryOperator => found_ternary_operator = true,
+                TokenType::Colon => {
+                    if found_ternary_operator {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+
+            current += 1;
+        }
+
+        false
+    }
+
+    fn ternary_operator(&mut self) -> Result<Expr, String> {
+        let line = self.current_line;
+        self.inside_ternary = true;
+
+        let condition = self.expression()?;
+
+        self.consume(
+            TokenType::TernaryOperator,
+            &format!("Expect '?' after condition for ternary at line {}.", line),
+        )?;
+        let then_branch = self.expression()?;
+
+        self.consume(
+            TokenType::Colon,
+            &format!("Expect ':' after condition for ternary at line {}.", line),
+        )?;
+
+        let else_branch = self.expression()?;
+
+        self.inside_ternary = false;
+        Ok(Expr::Ternary(
+            Box::new(condition),
+            Box::new(then_branch),
+            Box::new(else_branch),
+            self.create_loc(line),
+        ))
     }
 
     fn assignment(&mut self) -> Result<Expr, String> {
