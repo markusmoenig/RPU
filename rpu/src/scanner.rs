@@ -57,6 +57,7 @@ pub enum TokenType {
     While,
     Break,
     Export,
+    Const,
 
     Int,
     Int2,
@@ -131,6 +132,7 @@ impl Scanner {
         keywords.insert("vec4", TokenType::Float4);
 
         keywords.insert("export", TokenType::Export);
+        keywords.insert("const", TokenType::Const);
 
         Scanner {
             keywords,

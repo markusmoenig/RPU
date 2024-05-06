@@ -68,6 +68,8 @@ impl Parser {
             export = true;
         }
 
+        _ = self.match_token(vec![TokenType::Const]);
+
         if let Some(token_type) = self.match_token_and_return(vec![
             TokenType::Void,
             TokenType::Int,

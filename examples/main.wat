@@ -17,7 +17,6 @@
         (local $result_x f64)
         (local $result_y f64)
         (local $result_z f64)
-        
         (f64.const 3.32)
         (f64.const 4.3)
         (f64.const 4)
@@ -28,7 +27,6 @@
         local.get $result_x
         local.get $result_y
         local.get $result_z
-        
         (return)
     )
 )

@@ -215,6 +215,8 @@ impl Context {
 
         output += "\n    (memory 1)\n";
 
+        // Write out globals
+
         for (name, value) in self.globals.iter() {
             if let ASTValue::Float(_, value) = value {
                 let mut str_value = format!("{:.}", value);
@@ -225,17 +227,80 @@ impl Context {
                     "    (global ${} (mut f{}) (f{}.const {}))\n",
                     name, self.pr, self.pr, str_value
                 );
+            } else if let ASTValue::Float2(_, value_x, value_y) = value {
+                output += &self.write_global_float(name, "_x", value_x);
+                output += &self.write_global_float(name, "_y", value_y);
+            }
+            if let ASTValue::Float3(_, value_x, value_y, value_z) = value {
+                output += &self.write_global_float(name, "_x", value_x);
+                output += &self.write_global_float(name, "_y", value_y);
+                output += &self.write_global_float(name, "_z", value_z);
+            }
+            if let ASTValue::Float4(_, value_x, value_y, value_z, value_w) = value {
+                output += &self.write_global_float(name, "_x", value_x);
+                output += &self.write_global_float(name, "_y", value_y);
+                output += &self.write_global_float(name, "_z", value_z);
+                output += &self.write_global_float(name, "_w", value_w);
             } else if let ASTValue::Int(_, value) = value {
                 output += &format!(
                     "    (global ${} (mut i{}) (i{}.const {}))\n",
                     name, self.pr, self.pr, value
                 );
+            } else if let ASTValue::Int2(_, value_x, value_y) = value {
+                output += &self.write_global_int(name, "_x", value_x);
+                output += &self.write_global_int(name, "_y", value_y);
+            }
+            if let ASTValue::Int3(_, value_x, value_y, value_z) = value {
+                output += &self.write_global_int(name, "_x", value_x);
+                output += &self.write_global_int(name, "_y", value_y);
+                output += &self.write_global_int(name, "_z", value_z);
+            }
+            if let ASTValue::Int4(_, value_x, value_y, value_z, value_w) = value {
+                output += &self.write_global_int(name, "_x", value_x);
+                output += &self.write_global_int(name, "_y", value_y);
+                output += &self.write_global_int(name, "_z", value_z);
+                output += &self.write_global_int(name, "_w", value_w);
             }
         }
 
         output += &self.math_funcs;
         output += &self.wat;
         output += &")\n";
+
+        output
+    }
+
+    // Write out a global float
+    pub fn write_global_float(&self, name: &str, ext: &str, expr: &Expr) -> String {
+        let mut output = String::new();
+        if let Expr::Value(ASTValue::Float(_, value), _, _) = expr {
+            let mut str_value = format!("{:.}", value);
+            if !str_value.contains('.') {
+                str_value.push_str(".0");
+            }
+            output += &format!(
+                "    (global ${}{} (mut f{}) (f{}.const {}))\n",
+                name, ext, self.pr, self.pr, str_value
+            );
+        } else {
+            panic!("Invalid global float value.");
+        }
+
+        output
+    }
+
+    // Write out a global int
+    pub fn write_global_int(&self, name: &str, ext: &str, expr: &Expr) -> String {
+        let mut output = String::new();
+        if let Expr::Value(ASTValue::Int(_, value), _, _) = expr {
+            let str_value = format!("{:.}", value);
+            output += &format!(
+                "    (global ${}{} (mut i{}) (i{}.const {}))\n",
+                name, ext, self.pr, self.pr, str_value
+            );
+        } else {
+            panic!("Invalid global int value.");
+        }
 
         output
     }

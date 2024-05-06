@@ -567,32 +567,45 @@ impl Visitor for CompileVisitor {
             ));
         }
 
-        if let Some(v) = self.environment.get(&name) {
+        let mut scope = "local";
+
+        // Check if the variable is in the environment
+        let mut vv = self.environment.get(&name);
+
+        // Check if the variable is a global
+        if vv.is_none() {
+            if let Some(global_value) = ctx.globals.get(&name) {
+                scope = "global";
+                vv = Some(global_value.clone());
+            }
+        }
+
+        if let Some(v) = vv {
             if !swizzle.is_empty() {
                 rc = ctx.create_value_from_swizzle(&v, swizzle.len());
             }
             match &v {
                 ASTValue::Int(_, _) => {
-                    let instr = format!("local.get ${}", name);
+                    let instr = format!("{}.get ${}", scope, name);
                     ctx.add_wat(&instr);
                     rc = ASTValue::Int(None, 0);
                 }
                 ASTValue::Int2(_, _, _) => {
                     if swizzle.is_empty() {
-                        let instr = format!("local.get ${}_x", name);
+                        let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_y", name);
+                        let instr = format!("{}.get ${}_y", scope, name);
                         ctx.add_wat(&instr);
                         rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
                     } else {
                         for s in swizzle {
                             match s {
                                 0 => {
-                                    let instr = format!("local.get ${}_x", name);
+                                    let instr = format!("{}.get ${}_x", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 1 => {
-                                    let instr = format!("local.get ${}_y", name);
+                                    let instr = format!("{}.get ${}_y", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 _ => {}
@@ -602,26 +615,26 @@ impl Visitor for CompileVisitor {
                 }
                 ASTValue::Int3(_, _, _, _) => {
                     if swizzle.is_empty() {
-                        let instr = format!("local.get ${}_x", name);
+                        let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_y", name);
+                        let instr = format!("{}.get ${}_y", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_z", name);
+                        let instr = format!("{}.get ${}_z", scope, name);
                         ctx.add_wat(&instr);
                         rc = ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!());
                     } else {
                         for s in swizzle {
                             match s {
                                 0 => {
-                                    let instr = format!("local.get ${}_x", name);
+                                    let instr = format!("{}.get ${}_x", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 1 => {
-                                    let instr = format!("local.get ${}_y", name);
+                                    let instr = format!("{}.get ${}_y", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 2 => {
-                                    let instr = format!("local.get ${}_z", name);
+                                    let instr = format!("{}.get ${}_z", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 _ => {}
@@ -631,13 +644,13 @@ impl Visitor for CompileVisitor {
                 }
                 ASTValue::Int4(_, _, _, _, _) => {
                     if swizzle.is_empty() {
-                        let instr = format!("local.get ${}_x", name);
+                        let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_y", name);
+                        let instr = format!("{}.get ${}_y", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_z", name);
+                        let instr = format!("{}.get ${}_z", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_w", name);
+                        let instr = format!("{}.get ${}_w", scope, name);
                         ctx.add_wat(&instr);
                         rc = ASTValue::Int4(
                             None,
@@ -650,19 +663,19 @@ impl Visitor for CompileVisitor {
                         for s in swizzle {
                             match s {
                                 0 => {
-                                    let instr = format!("local.get ${}_x", name);
+                                    let instr = format!("{}.get ${}_x", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 1 => {
-                                    let instr = format!("local.get ${}_y", name);
+                                    let instr = format!("{}.get ${}_y", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 2 => {
-                                    let instr = format!("local.get ${}_z", name);
+                                    let instr = format!("{}.get ${}_z", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 3 => {
-                                    let instr = format!("local.get ${}_w", name);
+                                    let instr = format!("{}.get ${}_w", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 _ => {}
@@ -671,26 +684,26 @@ impl Visitor for CompileVisitor {
                     }
                 }
                 ASTValue::Float(_, _) => {
-                    let instr = format!("local.get ${}", name);
+                    let instr = format!("{}.get ${}", scope, name);
                     ctx.add_wat(&instr);
                     rc = ASTValue::Float(None, 0.0);
                 }
                 ASTValue::Float2(_, _, _) => {
                     if swizzle.is_empty() {
-                        let instr = format!("local.get ${}_x", name);
+                        let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_y", name);
+                        let instr = format!("{}.get ${}_y", scope, name);
                         ctx.add_wat(&instr);
                         rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
                     } else {
                         for s in swizzle {
                             match s {
                                 0 => {
-                                    let instr = format!("local.get ${}_x", name);
+                                    let instr = format!("{}.get ${}_x", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 1 => {
-                                    let instr = format!("local.get ${}_y", name);
+                                    let instr = format!("{}.get ${}_y", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 _ => {}
@@ -700,26 +713,26 @@ impl Visitor for CompileVisitor {
                 }
                 ASTValue::Float3(_, _, _, _) => {
                     if swizzle.is_empty() {
-                        let instr = format!("local.get ${}_x", name);
+                        let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_y", name);
+                        let instr = format!("{}.get ${}_y", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_z", name);
+                        let instr = format!("{}.get ${}_z", scope, name);
                         ctx.add_wat(&instr);
                         rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
                     } else {
                         for s in swizzle {
                             match s {
                                 0 => {
-                                    let instr = format!("local.get ${}_x", name);
+                                    let instr = format!("{}.get ${}_x", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 1 => {
-                                    let instr = format!("local.get ${}_y", name);
+                                    let instr = format!("{}.get ${}_y", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 2 => {
-                                    let instr = format!("local.get ${}_z", name);
+                                    let instr = format!("{}.get ${}_z", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 _ => {}
@@ -729,13 +742,13 @@ impl Visitor for CompileVisitor {
                 }
                 ASTValue::Float4(_, _, _, _, _) => {
                     if swizzle.is_empty() {
-                        let instr = format!("local.get ${}_x", name);
+                        let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_y", name);
+                        let instr = format!("{}.get ${}_y", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_z", name);
+                        let instr = format!("{}.get ${}_z", scope, name);
                         ctx.add_wat(&instr);
-                        let instr = format!("local.get ${}_w", name);
+                        let instr = format!("{}.get ${}_w", scope, name);
                         ctx.add_wat(&instr);
                         rc = ASTValue::Float4(
                             None,
@@ -748,19 +761,19 @@ impl Visitor for CompileVisitor {
                         for s in swizzle {
                             match s {
                                 0 => {
-                                    let instr = format!("local.get ${}_x", name);
+                                    let instr = format!("{}.get ${}_x", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 1 => {
-                                    let instr = format!("local.get ${}_y", name);
+                                    let instr = format!("{}.get ${}_y", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 2 => {
-                                    let instr = format!("local.get ${}_z", name);
+                                    let instr = format!("{}.get ${}_z", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 3 => {
-                                    let instr = format!("local.get ${}_w", name);
+                                    let instr = format!("{}.get ${}_w", scope, name);
                                     ctx.add_wat(&instr);
                                 }
                                 _ => {}
@@ -771,14 +784,13 @@ impl Visitor for CompileVisitor {
 
                 _ => {}
             }
-        } else {
-            // Check for function call
-            if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
-                rc = ASTValue::Function(name.clone(), args.clone(), body.clone());
-            }
+        } else if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
+            rc = ASTValue::Function(name.clone(), args.clone(), body.clone());
         }
 
-        ctx.add_wat(&instr);
+        if !instr.is_empty() {
+            ctx.add_wat(&instr);
+        }
 
         Ok(rc)
     }
@@ -830,7 +842,7 @@ impl Visitor for CompileVisitor {
                     } else {
                         _ = y.accept(self, ctx)?;
                     }
-                    rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+                    rc = ASTValue::Int2(None, x, y);
                 } else {
                     for s in swizzle {
                         match s {
@@ -876,7 +888,7 @@ impl Visitor for CompileVisitor {
                     } else {
                         _ = z.accept(self, ctx)?;
                     }
-                    rc = ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                    rc = ASTValue::Int3(None, x, y, z);
                 } else {
                     for s in swizzle {
                         match s {
@@ -940,13 +952,7 @@ impl Visitor for CompileVisitor {
                     } else {
                         _ = w.accept(self, ctx)?;
                     }
-                    rc = ASTValue::Int4(
-                        None,
-                        empty_expr!(),
-                        empty_expr!(),
-                        empty_expr!(),
-                        empty_expr!(),
-                    );
+                    rc = ASTValue::Int4(None, x, y, z, w);
                 } else {
                     for s in swizzle {
                         match s {
@@ -999,7 +1005,7 @@ impl Visitor for CompileVisitor {
                     } else {
                         _ = y.accept(self, ctx)?;
                     }
-                    rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
+                    rc = ASTValue::Float2(None, x, y);
                 } else {
                     for s in swizzle {
                         match s {
@@ -1045,7 +1051,7 @@ impl Visitor for CompileVisitor {
                     } else {
                         _ = z.accept(self, ctx)?;
                     }
-                    rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                    rc = ASTValue::Float3(None, x, y, z);
                 } else {
                     for s in swizzle {
                         match s {
@@ -1109,13 +1115,7 @@ impl Visitor for CompileVisitor {
                     } else {
                         _ = w.accept(self, ctx)?;
                     }
-                    rc = ASTValue::Float4(
-                        None,
-                        empty_expr!(),
-                        empty_expr!(),
-                        empty_expr!(),
-                        empty_expr!(),
-                    );
+                    rc = ASTValue::Float4(None, x, y, z, w);
                 } else {
                     for s in swizzle {
                         match s {
@@ -1154,7 +1154,7 @@ impl Visitor for CompileVisitor {
             }
         };
 
-        if !instr.is_empty() {
+        if !instr.is_empty() && !self.environment.is_global_scope() {
             ctx.add_wat(&instr);
         }
         Ok(rc)
