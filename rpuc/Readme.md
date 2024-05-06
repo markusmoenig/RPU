@@ -14,7 +14,7 @@ When working on shaders, RPU uses multiple threads to render the image. This is 
 
 - [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4
 - [x] Math operators: +, -, \*, /
-- [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow.
+- [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand.
 - [x] Control structures: if, else, while, break, return, export
 - [x] Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc
 
@@ -37,6 +37,8 @@ this will return `[I64(55)]` which is the 10th Fibonacci number.
 To execute a shader use
 
 `rpuc --source examples/raymarch.rpu --function shader`. The resulting image will be saved as `examples/raymarch.png`.
+
+For shaders you can specify the tile size with `--tiled 100x100` (default is `80x80`), and the number of iterations (in case your shader is a pathtracer) with `--iterations 100` (default is `1`).
 
 # Examples
 
@@ -90,7 +92,8 @@ vec3 GetNormal(vec3 p) {
 }
 
 export vec4 shader(vec2 coord, vec2 resolution) {
-    vec2 uv = (2.0 * coord - resolution.xy) / resolution.y;
+    // Generate the uv with random jittering for anti-aliasing
+    vec2 uv = (2.0 * (coord + vec2(rand(), rand())) - resolution.xy) / resolution.y;
 
     vec3 ro = vec3(.7, .8, -1.);
     vec3 rd = GetRayDir(uv, ro, vec3(0), 1.);

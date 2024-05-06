@@ -1,6 +1,6 @@
 
-export vec3  main() {
-    vec3 result = fract(vec3(3.32, 4.3, 4));
+export float  main() {
+    float result = rand();//fract(vec3(3.32, 4.3, 4));
 
     return result;
 }

@@ -26,7 +26,8 @@ vec3 GetNormal(vec3 p) {
 }
 
 export vec4 shader(vec2 coord, vec2 resolution) {
-    vec2 uv = (2.0 * coord - resolution.xy) / resolution.y;
+    // Generate the uv with random jittering for anti-aliasing
+    vec2 uv = (2.0 * (coord + vec2(rand(), rand())) - resolution.xy) / resolution.y;
 
     vec3 ro = vec3(.7, .8, -1.);
     vec3 rd = GetRayDir(uv, ro, vec3(0), 1.);

@@ -51,6 +51,15 @@ fn main() {
                 .value_name("STRING")
                 .value_parser(clap::builder::ValueParser::string()),
         )
+        .arg(
+            Arg::new("iterations")
+                .short('i')
+                .long("iterations")
+                .help("The number of rendering iterations. Defaults to 1")
+                .action(ArgAction::Set)
+                .value_name("STRING")
+                .value_parser(clap::builder::ValueParser::string()),
+        )
         .get_matches();
 
     let mut path = std::path::PathBuf::new();
@@ -107,6 +116,13 @@ fn main() {
         }
     }
 
+    let mut iterations: usize = 1;
+    if let Some(str) = matches.get_one::<String>("iterations") {
+        if let Ok(i) = (*str).parse::<usize>() {
+            iterations = i;
+        }
+    }
+
     println!(
         "Input '{}'. Function '{}'. Precision: '{}'. Argument '{}'.",
         path.to_str().unwrap(),
@@ -142,6 +158,7 @@ fn main() {
                 }
             } else {
                 let mut buffer = Arc::new(Mutex::new(ColorBuffer::new(800, 600)));
+                println!("Computing {} iteration(s) ...", iterations);
 
                 if let Some(tiled) = tiled {
                     let rc = rpu.compile_wat_and_run_as_tiled_shader(
@@ -149,6 +166,7 @@ fn main() {
                         "shader",
                         &mut buffer,
                         tiled,
+                        iterations,
                         high_precision,
                     );
                     match rc {

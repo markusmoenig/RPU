@@ -212,6 +212,12 @@ impl Context {
                         pr = self.pr
                     );
         }
+        if self.imports_hash.contains("$_rpu_rand") {
+            output += &format!(
+                "    (import \"env\" \"_rpu_rand\" (func $_rpu_rand (result f{pr})))\n",
+                pr = self.pr
+            );
+        }
 
         output += "\n    (memory 1)\n";
 

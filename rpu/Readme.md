@@ -14,7 +14,7 @@ When working on shaders, RPU uses multiple threads to render the image. This is 
 
 - [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4
 - [x] Math operators: +, -, \*, /
-- [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow.
+- [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand.
 - [x] Control structures: if, else, while, break, return, export
 - [x] Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc
 
@@ -69,10 +69,10 @@ The color buffer will contain the shader output. This runs the shader in a singl
 
 ```rust
 let mut buffer = Arc::new(Mutex::new(ColorBuffer::new(800, 600)));
-let rc = rpu.compile_wat_and_run_as_tiled_shader(&wat, "shader", &mut buffer, (80, 80), use_64_bit);
+let rc = rpu.compile_wat_and_run_as_tiled_shader(&wat, "shader", &mut buffer, (80, 80), 1, use_64_bit);
 ```
 
-Where (80, 80) is the tile size. The buffer is wrapped in an Arc<Mutex<>> to allow multiple threads to write to it.
+Where (80, 80) is the tile size. The buffer is wrapped in an Arc<Mutex<>> to allow multiple threads to write to it. The '1' is the number of iterations to compute (in case the shader is a path tracer).
 
 # Examples
 
@@ -126,7 +126,8 @@ vec3 GetNormal(vec3 p) {
 }
 
 export vec4 shader(vec2 coord, vec2 resolution) {
-    vec2 uv = (2.0 * coord - resolution.xy) / resolution.y;
+    // Generate the uv with random jittering for anti-aliasing
+    vec2 uv = (2.0 * (coord + vec2(rand(), rand())) - resolution.xy) / resolution.y;
 
     vec3 ro = vec3(.7, .8, -1.);
     vec3 rd = GetRayDir(uv, ro, vec3(0), 1.);

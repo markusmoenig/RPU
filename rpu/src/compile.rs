@@ -160,6 +160,11 @@ impl Visitor for CompileVisitor {
         );
 
         functions.insert(
+            "rand".to_string(),
+            ASTValue::Function("rand".to_string(), vec![], Box::new(ASTValue::None)),
+        );
+
+        functions.insert(
             "max".to_string(),
             ASTValue::Function(
                 "max".to_string(),
@@ -1778,6 +1783,17 @@ impl Visitor for CompileVisitor {
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
                 rc = v;
+            } else if name == "rand" {
+                if !args.is_empty() {
+                    return Err(format!(
+                        "'rand' does not take any arguments {}",
+                        loc.describe()
+                    ));
+                }
+                let instr = "(call $_rpu_rand)";
+                ctx.add_wat(instr);
+                ctx.imports_hash.insert("$_rpu_rand".to_string());
+                rc = ASTValue::Float(None, 0.0);
             } else if name == "sqrt"
                 || name == "sin"
                 || name == "cos"
