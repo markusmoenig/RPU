@@ -350,6 +350,7 @@ impl RPU {
                         let mut rng = rand::thread_rng();
                         rng.gen()
                     }),
+                    "_rpu_clamp" => Function::new_typed(store, |x: f64, y: f64, z: f64| -> f64 { x.clamp(y, z) }),
                 },
             }
         } else {
@@ -368,6 +369,7 @@ impl RPU {
                         let mut rng = rand::thread_rng();
                         rng.gen()
                     }),
+                    "_rpu_clamp" => Function::new_typed(store, |x: f32, y: f32, z: f32| -> f32 { x.clamp(y, z) }),
                 },
             }
         }

@@ -295,6 +295,15 @@ pub enum LogicalOperator {
     Or,
 }
 
+impl LogicalOperator {
+    pub fn describe(&self) -> &str {
+        match self {
+            LogicalOperator::And => "&&",
+            LogicalOperator::Or => "||",
+        }
+    }
+}
+
 /// Unary operators in the AST
 #[derive(Clone, Debug)]
 pub enum UnaryOperator {
@@ -331,11 +340,31 @@ pub enum ComparisonOperator {
     LessEqual,
 }
 
+impl ComparisonOperator {
+    pub fn describe(&self) -> &str {
+        match self {
+            ComparisonOperator::Greater => ">",
+            ComparisonOperator::GreaterEqual => ">=",
+            ComparisonOperator::Less => "<",
+            ComparisonOperator::LessEqual => "<=",
+        }
+    }
+}
+
 /// Equality operators in the AST
 #[derive(Clone, Debug)]
 pub enum EqualityOperator {
     NotEqual,
     Equal,
+}
+
+impl EqualityOperator {
+    pub fn describe(&self) -> &str {
+        match self {
+            EqualityOperator::NotEqual => "!=",
+            EqualityOperator::Equal => "==",
+        }
+    }
 }
 
 /// Visitor trait

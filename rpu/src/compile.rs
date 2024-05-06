@@ -191,6 +191,15 @@ impl Visitor for CompileVisitor {
             ),
         );
 
+        functions.insert(
+            "clamp".to_string(),
+            ASTValue::Function(
+                "clamp".to_string(),
+                vec![ASTValue::None, ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
         Self {
             environment: Environment::default(),
             functions,
@@ -225,7 +234,7 @@ impl Visitor for CompileVisitor {
             self.break_depth.push(d + 1);
         }
 
-        self.environment.begin_scope(ASTValue::None);
+        self.environment.begin_scope(ASTValue::None, false);
         for stmt in list {
             stmt.accept(self, ctx)?;
         }
@@ -1187,19 +1196,33 @@ impl Visitor for CompileVisitor {
         left: &Expr,
         op: &EqualityOperator,
         right: &Expr,
-        _loc: &Location,
+        loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        left.accept(self, ctx)?;
-        right.accept(self, ctx)?;
+        let left_value = left.accept(self, ctx)?;
+        let right_value = right.accept(self, ctx)?;
 
-        // TODO Check if we can compare these two values
+        if left_value.to_type() != right_value.to_type() {
+            return Err(format!(
+                "Type mismatch for '{}' operator: '{}' and '{}' {}",
+                op.describe(),
+                left_value.to_type(),
+                right_value.to_type(),
+                loc.describe(),
+            ));
+        }
 
-        let instr = match op {
-            EqualityOperator::NotEqual => format!("(i{}.ne)", ctx.pr),
-            EqualityOperator::Equal => format!("(i{}.eq)", ctx.pr),
+        let instr = if !left_value.is_float_based() {
+            match op {
+                EqualityOperator::NotEqual => format!("(i{}.ne)", ctx.pr),
+                EqualityOperator::Equal => format!("(i{}.eq)", ctx.pr),
+            }
+        } else {
+            match op {
+                EqualityOperator::NotEqual => format!("(f{}.ne)", ctx.pr),
+                EqualityOperator::Equal => format!("(f{}.eq)", ctx.pr),
+            }
         };
-
         ctx.add_wat(&instr);
 
         Ok(ASTValue::None)
@@ -1210,13 +1233,21 @@ impl Visitor for CompileVisitor {
         left: &Expr,
         op: &ComparisonOperator,
         right: &Expr,
-        _loc: &Location,
+        loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
         let left_value = left.accept(self, ctx)?;
-        let _right_value = right.accept(self, ctx)?;
+        let right_value = right.accept(self, ctx)?;
 
-        // TODO Check if we can compare these two values
+        if left_value.to_type() != right_value.to_type() {
+            return Err(format!(
+                "Type mismatch for '{}' operator: '{}' and '{}' {}",
+                op.describe(),
+                left_value.to_type(),
+                right_value.to_type(),
+                loc.describe(),
+            ));
+        }
 
         let is_float_based = left_value.is_float_based();
 
@@ -1867,6 +1898,57 @@ impl Visitor for CompileVisitor {
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
                 rc = v;
+            } else if name == "clamp" {
+                let v = args[0].accept(self, ctx)?;
+
+                if func_args.len() != args.len() {
+                    return Err(format!(
+                        "Function '{}' expects {} arguments, but {} were provided {}",
+                        name,
+                        func_args.len(),
+                        args.len(),
+                        loc.describe()
+                    ));
+                }
+
+                let components = v.components();
+                if !(1..=4).contains(&components) {
+                    return Err(format!(
+                        "Invalid number of components '{}' for {}",
+                        components,
+                        loc.describe()
+                    ));
+                }
+                if !v.is_float_based() {
+                    return Err(format!(
+                        "'{}' expects a float based parameter {}",
+                        name,
+                        loc.describe()
+                    ));
+                }
+
+                let b = args[1].accept(self, ctx)?;
+                if b.components() != 1 {
+                    return Err(format!(
+                        "Invalid second parameter for '{}' (scalars only) {}",
+                        name,
+                        loc.describe()
+                    ));
+                }
+
+                let _ = args[2].accept(self, ctx)?;
+                if b.components() != 1 {
+                    return Err(format!(
+                        "Invalid second parameter for '{}' (scalars only) {}",
+                        name,
+                        loc.describe()
+                    ));
+                }
+
+                let func_name = ctx.gen_vec_operation_scalar_scalar(v.components() as u32, &name);
+                let instr = format!("(call ${})", func_name);
+                ctx.add_wat(&instr);
+                rc = v;
             } else if name == "smoothstep" {
                 let a1 = args[0].accept(self, ctx)?;
                 let components = a1.components();
@@ -2031,7 +2113,7 @@ impl Visitor for CompileVisitor {
         let mut params = String::new();
 
         ctx.wat_locals = String::new();
-        self.environment.begin_scope(returns.clone());
+        self.environment.begin_scope(returns.clone(), true);
 
         for param in args {
             // Save the param into the environment
@@ -2381,7 +2463,7 @@ impl Visitor for CompileVisitor {
     fn logical_expr(
         &mut self,
         left: &Expr,
-        _op: &LogicalOperator,
+        op: &LogicalOperator,
         right: &Expr,
         _loc: &Location,
         ctx: &mut Context,
@@ -2389,7 +2471,16 @@ impl Visitor for CompileVisitor {
         let _l = left.accept(self, ctx)?;
         let _r = right.accept(self, ctx)?;
 
-        //if op == &LogicalOperator::And {}
+        match op {
+            LogicalOperator::And => {
+                let instr = "(i32.and)".to_string();
+                ctx.add_wat(&instr);
+            }
+            LogicalOperator::Or => {
+                let instr = "(i32.or)".to_string();
+                ctx.add_wat(&instr);
+            }
+        }
 
         Ok(ASTValue::None)
     }

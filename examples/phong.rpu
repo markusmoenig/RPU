@@ -1,0 +1,62 @@
+// Based on https://www.shadertoy.com/view/XlXGDj
+
+vec3 ambientColor = vec3(0.05, 0.15, 0.2);
+vec3 diffuseColor = vec3(0.2, 0.6, 0.8);
+vec3 specularColor = vec3(1.0, 1.0, 1.0);
+vec3 lightDir = vec3(0.0, 4.0, 5.0);
+vec3 spherePos = vec3(0.0, 0.5, 0.0);
+
+vec3 GetRayDir(vec2 uv, vec3 p, vec3 l, float z) {
+    vec3 f = normalize(l-p);
+    vec3 r = normalize(cross(vec3(0,1,0), f));
+    vec3 u = cross(f,r);
+    vec3 c = f*z;
+    vec3 i = c + uv.x*r + uv.y*u;
+    return normalize(i);
+}
+
+float raytraceSphere(vec3 ro, vec3 rd, float tmin, float tmax, float r) {
+    vec3 ce = ro - spherePos;
+    float b = dot(rd, ce);
+    float c = dot(ce, ce) - r * r;
+    float t = b * b - c;
+    if (t > tmin) {
+        t = -b - sqrt(t);
+        if (t < tmax)
+            return t;
+    }
+    return -1.0;
+}
+
+export vec4 shader(vec2 coord, vec2 resolution) {
+    // Generate the uv with random jittering for anti-aliasing
+    vec2 uv = (2.0 * (coord + vec2(rand(), rand())) - resolution.xy) / resolution.y;
+
+    vec3 ro = vec3(.5, .8, 3.);
+    vec3 rd = GetRayDir(uv, ro, vec3(0), 1.);
+
+    vec3 color = vec3(0);
+
+    float tmin = 0.1;
+    float tmax = 50.0;
+    float t = raytraceSphere(ro, rd, tmin, tmax, 1.0);
+    if (t > tmin && t < tmax) {
+        vec3 pos = ro + rd * t;
+        vec3 norm = normalize(pos - spherePos);
+        float occ = 0.5 + 0.5 * norm.y;
+
+        float amb = clamp(0.5 + 0.5 * norm.y, 0.0, 1.0);
+        float dif = clamp(dot(lightDir, norm), 0.0, 1.0);
+
+        vec3 h = normalize(-rd + lightDir);
+        float spe = pow(clamp(dot(h, norm), 0.0, 1.0), 64.0);
+
+        color = amb * ambientColor * occ;
+        color = color + dif * diffuseColor * occ;
+        color = color + dif * spe * specularColor * occ;
+    }
+
+    vec3 c = pow(color, 1.0 / 2.2);
+
+    return vec4(c.x, c.y, c.z, 1.0);
+}

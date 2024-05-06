@@ -105,7 +105,6 @@ pub struct Scanner {
 impl Scanner {
     pub fn new(code: String) -> Scanner {
         let mut keywords = FxHashMap::default();
-        keywords.insert("and", TokenType::And);
         keywords.insert("class", TokenType::Class);
         keywords.insert("else", TokenType::Else);
         keywords.insert("false", TokenType::False);
@@ -113,7 +112,6 @@ impl Scanner {
         keywords.insert("fn", TokenType::Fn);
         keywords.insert("if", TokenType::If);
         keywords.insert("void", TokenType::Void);
-        keywords.insert("or", TokenType::Or);
         keywords.insert("print", TokenType::Print);
         keywords.insert("return", TokenType::Return);
         keywords.insert("super", TokenType::Super);
@@ -170,6 +168,8 @@ impl Scanner {
             b':' => self.make_token(TokenType::Colon),
             b'!' if self.matches(b'=') => self.make_token(TokenType::BangEqual),
             b'!' => self.make_token(TokenType::Bang),
+            b'&' if self.matches(b'&') => self.make_token(TokenType::And),
+            b'|' if self.matches(b'|') => self.make_token(TokenType::Or),
             b'=' if self.matches(b'=') => self.make_token(TokenType::EqualEqual),
             b'=' => self.make_token(TokenType::Equal),
             b'<' if self.matches(b'=') => self.make_token(TokenType::LessEqual),

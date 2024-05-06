@@ -1,8 +1,14 @@
 use crate::prelude::*;
 
+pub enum ScopeTypes {
+    Function,
+    Block,
+}
+
 // Define a struct to represent the environment
 pub struct Environment {
     scopes: Vec<FxHashMap<String, ASTValue>>,
+    scopes_types: Vec<ScopeTypes>,
     scoped_returns: Vec<ASTValue>,
 }
 
@@ -16,6 +22,7 @@ impl Environment {
     pub fn new() -> Self {
         Environment {
             scopes: vec![FxHashMap::default()],
+            scopes_types: vec![],
             scoped_returns: vec![],
         }
     }
@@ -49,20 +56,32 @@ impl Environment {
     }
 
     /// Begin a new scope.
-    pub fn begin_scope(&mut self, returns: ASTValue) {
+    pub fn begin_scope(&mut self, returns: ASTValue, func: bool) {
         self.scopes.push(FxHashMap::default());
+        if func {
+            self.scopes_types.push(ScopeTypes::Function);
+        } else {
+            self.scopes_types.push(ScopeTypes::Block);
+        }
         self.scoped_returns.push(returns);
     }
 
     /// End the current scope.
     pub fn end_scope(&mut self) {
         self.scopes.pop();
+        self.scopes_types.pop();
         self.scoped_returns.pop();
     }
 
     /// Returns the return value of the current scope.
     pub fn get_return(&self) -> Option<ASTValue> {
-        self.scoped_returns.last().cloned()
+        // Unwind until we find the last function return type
+        for (i, scope) in self.scopes_types.iter().enumerate().rev() {
+            if let ScopeTypes::Function = scope {
+                return self.scoped_returns.get(i).cloned();
+            }
+        }
+        None
     }
 
     /// Returns true if the current scope is the global scope.

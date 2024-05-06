@@ -223,6 +223,12 @@ impl Context {
                 pr = self.pr
             );
         }
+        if self.imports_hash.contains("$_rpu_clamp") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_clamp\" (func $_rpu_clamp (param f{pr}) (param f{pr}) (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
 
         output += "\n    (memory 1)\n";
 
@@ -1208,23 +1214,6 @@ impl Context {
         func_name
     }
 
-    // Operation on a vector (sin, cos, tan, )
-
-    pub fn gen_vec_operation_scalar(&mut self, dim: u32, op: &str) -> String {
-        let func_name = format!("_rpu_vec{}_{}_f{}", dim, op, self.pr);
-
-        if self.math_funcs_included.contains(&func_name) {
-            return func_name.clone();
-        }
-
-        let func = self.generate_wat_vec_op_scalar(dim, op);
-
-        self.math_funcs_included.insert(func_name.clone());
-        self.math_funcs.push_str(&func);
-
-        func_name
-    }
-
     fn generate_wat_vec_op(&mut self, dim: u32, op: &str) -> String {
         let full_precision = format!("f{}", self.pr);
 
@@ -1300,6 +1289,20 @@ impl Context {
 
     // Operation on a vector and as scalar (max, min, powf etc.)
 
+    pub fn gen_vec_operation_scalar(&mut self, dim: u32, op: &str) -> String {
+        let func_name = format!("_rpu_vec{}_{}_f{}", dim, op, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_vec_op_scalar(dim, op);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
     pub fn generate_wat_vec_op_scalar(&mut self, dim: u32, op: &str) -> String {
         let full_precision = format!("f{}", self.pr);
 
@@ -1366,6 +1369,95 @@ impl Context {
 
         format!(
             "\n    ;; vec{dim} {op}\n    (func $_rpu_vec{dim}_{op}_{precision} {params} (result{result_type})\n{body})\n",
+            dim = dim,
+            op = op,
+            precision = full_precision,
+            result_type = result_type,
+            params = params,
+            body = body
+        )
+    }
+
+    // Operation on a vector and as scalar, scalar (clamp )
+
+    pub fn gen_vec_operation_scalar_scalar(&mut self, dim: u32, op: &str) -> String {
+        let func_name = format!("_rpu_vec{}_{}_f{}_f{}", dim, op, self.pr, self.pr);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return func_name.clone();
+        }
+
+        let func = self.generate_wat_vec_op_scalar_scalar(dim, op);
+
+        self.math_funcs_included.insert(func_name.clone());
+        self.math_funcs.push_str(&func);
+
+        func_name
+    }
+    pub fn generate_wat_vec_op_scalar_scalar(&mut self, dim: u32, op: &str) -> String {
+        let full_precision = format!("f{}", self.pr);
+
+        let mut params = String::new();
+        let mut body = String::new();
+        let mut result_type = String::new();
+
+        let rpu_call = match op {
+            "clamp" => Some("$_rpu_clamp"),
+            _ => None,
+        };
+
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            params.push_str(&format!(
+                " (param ${coord} {precision}) ",
+                coord = coord,
+                precision = full_precision
+            ));
+            result_type.push_str(&format!(" {precision}", precision = full_precision));
+        }
+
+        params.push_str(&format!(
+            " (param $scalar {precision}) (param $scalar2 {precision})",
+            precision = full_precision
+        ));
+
+        for i in 0..dim {
+            let coord = match i {
+                0 => "x",
+                1 => "y",
+                2 => "z",
+                3 => "w",
+                _ => unreachable!(),
+            };
+
+            if let Some(rpu_call) = rpu_call {
+                self.imports_hash.insert(rpu_call.to_string());
+                body.push_str(&format!(
+                    "        local.get ${coord}\n        local.get $scalar\n        local.get $scalar2\n        (call {rpu_call})\n",
+                    coord = coord,
+                    rpu_call = rpu_call
+                ));
+            } else {
+                body.push_str(&format!(
+                    "        local.get ${coord}\n        local.get $scalar\n        local.get $scalar2\n        {full_precision}.{op}\n",
+                    coord = coord,
+                    full_precision = full_precision,
+                    op = op
+                ));
+            }
+        }
+
+        body.pop();
+
+        format!(
+            "\n    ;; vec{dim} {op}\n    (func $_rpu_vec{dim}_{op}_{precision}_{precision} {params} (result{result_type})\n{body})\n",
             dim = dim,
             op = op,
             precision = full_precision,
