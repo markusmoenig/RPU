@@ -1403,7 +1403,7 @@ dependencies = [
 
 [[package]]
 name = "rpu"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "image",
  "num_cpus",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "rpuc"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "clap",
  "rpu",
