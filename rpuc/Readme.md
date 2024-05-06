@@ -66,17 +66,17 @@ A simple shader example using raymarching:
 
 float sdBox(vec3 p, vec3 s) {
     p = abs(p)-s;
-	return length(max(p, 0.0))+min(max(p.x, max(p.y, p.z)), 0.0);
+	return length(max(p, 0.))+min(max(p.x, max(p.y, p.z)), 0.);
 }
 
 float GetDist(vec3 p) {
-    float d = sdBox(p, vec3(0.5));
+    float d = sdBox(p, vec3(.5));
     return d;
 }
 
 vec3 GetRayDir(vec2 uv, vec3 p, vec3 l, float z) {
     vec3 f = normalize(l-p);
-    vec3 r = normalize(cross(vec3(0.0,1.0,0.0), f));
+    vec3 r = normalize(cross(vec3(0,1,0), f));
     vec3 u = cross(f,r);
     vec3 c = f*z;
     vec3 i = c + uv.x*r + uv.y*u;
@@ -84,7 +84,7 @@ vec3 GetRayDir(vec2 uv, vec3 p, vec3 l, float z) {
 }
 
 vec3 GetNormal(vec3 p) {
-    vec2 e = vec2(0.001, 0.0);
+    vec2 e = vec2(0.001, 0.);
     vec3 n = GetDist(p) - vec3(GetDist(p-e.xyy), GetDist(p-e.yxy), GetDist(p-e.yyx));
     return normalize(n);
 }
@@ -92,21 +92,21 @@ vec3 GetNormal(vec3 p) {
 export vec4 shader(vec2 coord, vec2 resolution) {
     vec2 uv = (2.0 * coord - resolution.xy) / resolution.y;
 
-    vec3 ro = vec3(0.7, 0.8, -1.0);
-    vec3 rd = GetRayDir(uv, ro, vec3(0.0), 1.0);
+    vec3 ro = vec3(.7, .8, -1.);
+    vec3 rd = GetRayDir(uv, ro, vec3(0), 1.);
 
-    float t = 0.0;
-    float max_t = 10.0;
+    float t = 0.;
+    float max_t = 10.;
 
-    vec4 col = vec4(uv.x, uv.y, 0.0, 1.0);
+    vec4 col = vec4(uv.x, uv.y, 0., 1.);
 
     while (t < max_t) {
         vec3 p = ro + rd * t;
         float d = GetDist(p);
         if (abs(d) < 0.001) {
             vec3 n = GetNormal(p);
-            float dif = dot(n, normalize(vec3(1.0, 2.0, 3.0))) * 0.5 + 0.5;
-            col.xyz = pow(vec3(dif), 0.4545);
+            float dif = dot(n, normalize(vec3(1, 2, 3))) * 0.5 + 0.5;
+            col.xyz = pow(vec3(dif), .4545);
 
             break;
         }

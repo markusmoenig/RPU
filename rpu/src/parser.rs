@@ -5,6 +5,8 @@ pub struct Parser {
     current: usize,
     current_line: usize,
 
+    force_floats: bool,
+
     high_precision: bool,
 }
 
@@ -20,6 +22,8 @@ impl Parser {
             tokens: Vec::new(),
             current: 0,
             current_line: 0,
+
+            force_floats: false,
 
             high_precision: true,
         }
@@ -542,11 +546,19 @@ impl Parser {
             TokenType::IntegerNumber => {
                 self.advance();
                 if let Ok(number) = token.lexeme.parse::<i32>() {
-                    Ok(Expr::Value(
-                        ASTValue::Int(None, number),
-                        vec![],
-                        self.create_loc(token.line),
-                    ))
+                    if self.force_floats {
+                        Ok(Expr::Value(
+                            ASTValue::Float(None, number as f32),
+                            vec![],
+                            self.create_loc(token.line),
+                        ))
+                    } else {
+                        Ok(Expr::Value(
+                            ASTValue::Int(None, number),
+                            vec![],
+                            self.create_loc(token.line),
+                        ))
+                    }
                 } else {
                     Err(format!("Invalid integer number at line {}.", token.line))
                 }
@@ -554,7 +566,7 @@ impl Parser {
             TokenType::Int2 => {
                 self.advance();
                 if self.match_token(vec![TokenType::LeftParen]) {
-                    let comps = self.read_vec_components(2, token.line)?;
+                    let comps = self.read_vec_components(2, token.line, false)?;
                     let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     Ok(Expr::Value(
@@ -581,7 +593,7 @@ impl Parser {
             TokenType::Int3 => {
                 self.advance();
                 if self.match_token(vec![TokenType::LeftParen]) {
-                    let comps = self.read_vec_components(3, token.line)?;
+                    let comps = self.read_vec_components(3, token.line, false)?;
                     let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     Ok(Expr::Value(
@@ -613,7 +625,7 @@ impl Parser {
             TokenType::Int4 => {
                 self.advance();
                 if self.match_token(vec![TokenType::LeftParen]) {
-                    let comps = self.read_vec_components(4, token.line)?;
+                    let comps = self.read_vec_components(4, token.line, false)?;
                     let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     Ok(Expr::Value(
@@ -662,7 +674,7 @@ impl Parser {
             TokenType::Float2 => {
                 self.advance();
                 if self.match_token(vec![TokenType::LeftParen]) {
-                    let comps = self.read_vec_components(2, token.line)?;
+                    let comps = self.read_vec_components(2, token.line, true)?;
                     let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     Ok(Expr::Value(
@@ -689,7 +701,7 @@ impl Parser {
             TokenType::Float3 => {
                 self.advance();
                 if self.match_token(vec![TokenType::LeftParen]) {
-                    let comps = self.read_vec_components(3, token.line)?;
+                    let comps = self.read_vec_components(3, token.line, true)?;
                     let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     Ok(Expr::Value(
@@ -721,7 +733,7 @@ impl Parser {
             TokenType::Float4 => {
                 self.advance();
                 if self.match_token(vec![TokenType::LeftParen]) {
-                    let comps = self.read_vec_components(4, token.line)?;
+                    let comps = self.read_vec_components(4, token.line, true)?;
                     let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     Ok(Expr::Value(
@@ -783,7 +795,12 @@ impl Parser {
 
     /// Reads the components of a vector up to `max_comps` components. Can terminate early if closing parenthesis is found.
     /// Check for component validity is done in the compiler.
-    fn read_vec_components(&mut self, max_comps: usize, line: usize) -> Result<Vec<Expr>, String> {
+    fn read_vec_components(
+        &mut self,
+        max_comps: usize,
+        line: usize,
+        force_floats: bool,
+    ) -> Result<Vec<Expr>, String> {
         let mut components = vec![];
         let mut count = 0;
 
@@ -792,7 +809,14 @@ impl Parser {
         }
 
         while count < max_comps {
+            // Make sure constants are read as floats if needed
+            let ff = self.force_floats;
+            self.force_floats = force_floats;
+
             let expr = self.expression()?;
+
+            self.force_floats = ff;
+
             components.push(expr);
             count += 1;
 

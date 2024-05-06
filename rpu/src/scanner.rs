@@ -158,7 +158,6 @@ impl Scanner {
             b'$' => self.make_token(TokenType::Dollar),
             b';' => self.make_token(TokenType::Semicolon),
             b',' => self.make_token(TokenType::Comma),
-            b'.' => self.make_token(TokenType::Dot),
             b'-' => self.make_token(TokenType::Minus),
             b'+' => self.make_token(TokenType::Plus),
             b'#' => self.single_line_comment(),
@@ -175,7 +174,9 @@ impl Scanner {
             b'>' => self.make_token(TokenType::Greater),
             b'"' => self.string(),
             b'`' => self.string2(),
+            b'.' if is_digit(self.peek()) => self.float_with_starting_dot(),
             c if is_digit(c) => self.number(),
+            b'.' => self.make_token(TokenType::Dot),
             c if is_alpha(c) => self.identifier(),
             _ => self.make_token(TokenType::Unknown), //self.error_token("Unexpected character."),
         }
@@ -303,23 +304,59 @@ impl Scanner {
     }
 
     fn number(&mut self) -> Token {
+        let mut lexeme: Vec<u8> = Vec::new();
+
+        let code = self.lexeme();
+        if let Some(last) = code.chars().last() {
+            lexeme.push(last as u8);
+        }
+
         while is_digit(self.peek()) {
-            self.advance();
+            lexeme.push(self.advance());
         }
 
         let mut is_float = false;
         if self.peek() == b'.' && is_digit(self.peek_next()) {
             is_float = true;
-            self.advance();
+            lexeme.push(self.advance());
             while is_digit(self.peek()) {
-                self.advance();
+                lexeme.push(self.advance());
             }
+        } else if self.peek() == b'.' && !is_digit(self.peek_next()) {
+            is_float = true;
+            lexeme.push(self.advance());
+            lexeme.push(b'0');
         }
 
         if is_float {
-            self.make_token(TokenType::FloatNumber)
+            Token {
+                kind: TokenType::FloatNumber,
+                lexeme: lexeme.iter().map(|&c| c as char).collect(),
+                line: self.line,
+            }
         } else {
-            self.make_token(TokenType::IntegerNumber)
+            Token {
+                kind: TokenType::IntegerNumber,
+                lexeme: lexeme.iter().map(|&c| c as char).collect(),
+                line: self.line,
+            }
+        }
+    }
+
+    fn float_with_starting_dot(&mut self) -> Token {
+        let mut lexeme: Vec<u8> = Vec::new();
+
+        lexeme.push(b'0');
+        lexeme.push(b'.');
+
+        while is_digit(self.peek()) {
+            lexeme.push(self.advance());
+        }
+
+        Token {
+            kind: TokenType::FloatNumber,
+            lexeme: lexeme.iter().map(|&c| c as char).collect(),
+            line: self.line,
         }
     }
 
