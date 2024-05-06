@@ -1,6 +1,9 @@
+vec2 opU(vec2 o1, vec2 o2) {
+    return (o1.x < o2.x) ? o1 : o2;
+}
 
 export vec2  main() {
     float result = rand();//fract(vec3(3.32, 4.3, 4));
 
-    return (result < 0.5) ? vec2(0.0) : vec2(1.0);
+    return (result < 0.5) ? vec2(0.0, 0.1) : vec2(1.0, 1.1);
 }

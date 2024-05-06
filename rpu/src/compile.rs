@@ -2260,6 +2260,9 @@ impl Visitor for CompileVisitor {
         ctx.add_line();
         let _rc = cond.accept(self, ctx)?;
 
+        let param_name = format!("_rpu_ternary_{}", ctx.ternary_counter);
+        ctx.ternary_counter += 1;
+
         let instr = "(if".to_string();
         ctx.add_wat(&instr);
         ctx.add_indention();
@@ -2274,9 +2277,15 @@ impl Visitor for CompileVisitor {
 
         let then_returns = then_expr.accept(self, ctx)?;
 
-        for _ in 0..then_returns.components() {
-            let instr = "(local.set $result)".to_string();
-            ctx.add_wat(&instr);
+        let def_array = then_returns.write_definition("local", &param_name, &ctx.pr);
+        for d in def_array {
+            let c = format!("        {}\n", d);
+            ctx.wat_locals.push_str(&c);
+        }
+
+        let a_set = then_returns.write_access("local.set", &param_name);
+        for a in a_set.iter().rev() {
+            ctx.add_wat(a);
         }
 
         ctx.remove_indention();
@@ -2294,10 +2303,9 @@ impl Visitor for CompileVisitor {
         ctx.add_indention();
 
         let else_returns = else_expr.accept(self, ctx)?;
-
-        for _ in 0..else_returns.components() {
-            let instr = "(local.set $result)".to_string();
-            ctx.add_wat(&instr);
+        let b_set = else_returns.write_access("local.set", &param_name);
+        for b in b_set.iter().rev() {
+            ctx.add_wat(b);
         }
 
         ctx.remove_indention();
@@ -2310,9 +2318,9 @@ impl Visitor for CompileVisitor {
         ctx.add_wat(")");
         //ctx.add_line();
 
-        for _ in 0..then_returns.components() {
-            let instr = "(local.get $result)".to_string();
-            ctx.add_wat(&instr);
+        let a_get = then_returns.write_access("local.get", &param_name);
+        for a in a_get {
+            ctx.add_wat(&a);
         }
 
         Ok(then_returns)

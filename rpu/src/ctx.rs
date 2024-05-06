@@ -47,6 +47,9 @@ pub struct Context {
     /// The generated WAT code
     pub wat: String,
 
+    /// Counter for ternary operations
+    pub ternary_counter: i32,
+
     /// Which rush globals we need to import.
     pub imports_hash: FxHashSet<String>,
 }
@@ -72,6 +75,8 @@ impl Context {
 
             wat_locals: String::new(),
             wat: String::new(),
+
+            ternary_counter: 0,
 
             imports_hash: FxHashSet::default(),
         }

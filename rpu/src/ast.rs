@@ -47,6 +47,65 @@ pub enum ASTValue {
 }
 
 impl ASTValue {
+    pub fn write_definition(&self, instr: &str, name: &str, precision: &str) -> Vec<String> {
+        match self {
+            ASTValue::Int(_, _) => vec![format!("({} {} f{})", instr, name, precision)],
+            ASTValue::Int2(_, _, _) => vec![
+                format!("({} ${}_x i{})", instr, name, precision),
+                format!("({} ${}_y i{})", instr, name, precision),
+            ],
+            ASTValue::Int3(_, _, _, _) => vec![
+                format!("({} ${}_x i{})", instr, name, precision),
+                format!("({} ${}_y i{})", instr, name, precision),
+                format!("({} ${}_z i{})", instr, name, precision),
+            ],
+            ASTValue::Int4(_, _, _, _, _) => vec![
+                format!("({} ${}_x i{})", instr, name, precision),
+                format!("({} ${}_y i{})", instr, name, precision),
+                format!("({} ${}_z i{})", instr, name, precision),
+                format!("({} ${}_w i{})", instr, name, precision),
+            ],
+            ASTValue::Float(_, _) => vec![format!("({} {} f{})", instr, name, precision)],
+            ASTValue::Float2(_, _, _) => vec![
+                format!("({} ${}_x f{})", instr, name, precision),
+                format!("({} ${}_y f{})", instr, name, precision),
+            ],
+            ASTValue::Float3(_, _, _, _) => vec![
+                format!("({} ${}_x f{})", instr, name, precision),
+                format!("({} ${}_y f{})", instr, name, precision),
+                format!("({} ${}_z f{})", instr, name, precision),
+            ],
+            ASTValue::Float4(_, _, _, _, _) => vec![
+                format!("({} ${}_x f{})", instr, name, precision),
+                format!("({} ${}_y f{})", instr, name, precision),
+                format!("({} ${}_z f{})", instr, name, precision),
+                format!("({} ${}_w f{})", instr, name, precision),
+            ],
+            _ => vec![],
+        }
+    }
+    pub fn write_access(&self, instr: &str, name: &str) -> Vec<String> {
+        match self {
+            ASTValue::Float(_, _) | ASTValue::Int(_, _) => vec![format!("({} {})", instr, name)],
+            ASTValue::Float2(_, _, _) | ASTValue::Int2(_, _, _) => vec![
+                format!("({} ${}_x)", instr, name),
+                format!("({} ${}_y)", instr, name),
+            ],
+            ASTValue::Float3(_, _, _, _) | ASTValue::Int3(_, _, _, _) => vec![
+                format!("({} ${}_x)", instr, name),
+                format!("({} ${}_y)", instr, name),
+                format!("({} ${}_z)", instr, name),
+            ],
+            ASTValue::Float4(_, _, _, _, _) | ASTValue::Int4(_, _, _, _, _) => vec![
+                format!("({} ${}_x)", instr, name),
+                format!("({} ${}_y)", instr, name),
+                format!("({} ${}_z)", instr, name),
+                format!("({} ${}_w)", instr, name),
+            ],
+            _ => vec![],
+        }
+    }
+
     /// Returns the value as a float if it is one.
     pub fn to_float(&self) -> Option<f32> {
         match self {
