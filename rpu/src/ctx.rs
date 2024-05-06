@@ -1,3 +1,5 @@
+use rustc_hash::FxHashSet;
+
 use crate::empty_expr;
 use crate::prelude::*;
 
@@ -44,6 +46,9 @@ pub struct Context {
 
     /// The generated WAT code
     pub wat: String,
+
+    /// Which rush globals we need to import.
+    pub imports_hash: FxHashSet<String>,
 }
 
 impl Default for Context {
@@ -67,6 +72,8 @@ impl Context {
 
             wat_locals: String::new(),
             wat: String::new(),
+
+            imports_hash: FxHashSet::default(),
         }
     }
 
@@ -151,39 +158,54 @@ impl Context {
     pub fn gen_wat(&mut self) -> String {
         let mut output = "(module\n".to_string();
 
-        output += &format!(
-            "    (import \"env\" \"_rpu_sin\" (func $_rpu_sin (param f{pr}) (result f{pr})))\n",
-            pr = self.pr
-        );
-        output += &format!(
-            "    (import \"env\" \"_rpu_cos\" (func $_rpu_cos (param f{pr}) (result f{pr})))\n",
-            pr = self.pr
-        );
-        output += &format!(
-            "    (import \"env\" \"_rpu_tan\" (func $_rpu_tan (param f{pr}) (result f{pr})))\n",
-            pr = self.pr
-        );
-        output += &format!(
-            "    (import \"env\" \"_rpu_degrees\" (func $_rpu_degrees (param f{pr}) (result f{pr})))\n",
-            pr = self.pr
-        );
-        output += &format!(
-            "    (import \"env\" \"_rpu_radians\" (func $_rpu_radians (param f{pr}) (result f{pr})))\n",
-            pr = self.pr
-        );
-
-        output += &format!(
-            "    (import \"env\" \"_rpu_min\" (func $_rpu_min (param f{pr}) (param f{pr}) (result f{pr})))\n",
-            pr = self.pr
-        );
-        output += &format!(
-            "    (import \"env\" \"_rpu_max\" (func $_rpu_max (param f{pr}) (param f{pr}) (result f{pr})))\n",
-            pr = self.pr
-        );
-        output += &format!(
-            "    (import \"env\" \"_rpu_pow\" (func $_rpu_pow (param f{pr}) (param f{pr}) (result f{pr})))\n",
-            pr = self.pr
-        );
+        if self.imports_hash.contains("$_rpu_sin") {
+            output += &format!(
+                "    (import \"env\" \"_rpu_sin\" (func $_rpu_sin (param f{pr}) (result f{pr})))\n",
+                pr = self.pr
+            );
+        }
+        if self.imports_hash.contains("$_rpu_cos") {
+            output += &format!(
+                "    (import \"env\" \"_rpu_cos\" (func $_rpu_cos (param f{pr}) (result f{pr})))\n",
+                pr = self.pr
+            );
+        }
+        if self.imports_hash.contains("$_rpu_tan") {
+            output += &format!(
+                "    (import \"env\" \"_rpu_tan\" (func $_rpu_tan (param f{pr}) (result f{pr})))\n",
+                pr = self.pr
+            );
+        }
+        if self.imports_hash.contains("$_rpu_degrees") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_degrees\" (func $_rpu_degrees (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
+        if self.imports_hash.contains("$_rpu_radians") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_radians\" (func $_rpu_radians (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
+        if self.imports_hash.contains("$_rpu_min") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_min\" (func $_rpu_min (param f{pr}) (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
+        if self.imports_hash.contains("$_rpu_max") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_max\" (func $_rpu_max (param f{pr}) (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
+        if self.imports_hash.contains("$_rpu_pow") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_pow\" (func $_rpu_pow (param f{pr}) (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
 
         output += "\n    (memory 1)\n";
 
@@ -1121,7 +1143,7 @@ impl Context {
         func_name
     }
 
-    fn generate_wat_vec_op(&self, dim: u32, op: &str) -> String {
+    fn generate_wat_vec_op(&mut self, dim: u32, op: &str) -> String {
         let full_precision = format!("f{}", self.pr);
 
         let mut params = String::new();
@@ -1164,6 +1186,7 @@ impl Context {
             };
 
             if let Some(rpu_call) = rpu_call {
+                self.imports_hash.insert(rpu_call.to_string());
                 body.push_str(&format!(
                     "        local.get ${coord}\n        (call {rpu_call})\n",
                     coord = coord,
@@ -1194,7 +1217,7 @@ impl Context {
 
     // Operation on a vector and as scalar (max, min, powf etc.)
 
-    pub fn generate_wat_vec_op_scalar(&self, dim: u32, op: &str) -> String {
+    pub fn generate_wat_vec_op_scalar(&mut self, dim: u32, op: &str) -> String {
         let full_precision = format!("f{}", self.pr);
 
         let mut params = String::new();
@@ -1240,6 +1263,7 @@ impl Context {
             };
 
             if let Some(rpu_call) = rpu_call {
+                self.imports_hash.insert(rpu_call.to_string());
                 body.push_str(&format!(
                     "        local.get ${coord}\n        local.get $scalar\n        (call {rpu_call})\n",
                     coord = coord,
