@@ -5,6 +5,8 @@ pub struct ColorBuffer {
     pub height: usize,
     pub pixels: Vec<f64>,
     pub frames: usize,
+
+    pub file_path: Option<std::path::PathBuf>,
 }
 
 impl ColorBuffer {
@@ -14,6 +16,7 @@ impl ColorBuffer {
             height,
             pixels: vec![0.0; width * height * 4],
             frames: 0,
+            file_path: None,
         }
     }
 

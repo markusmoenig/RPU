@@ -271,6 +271,12 @@ impl RPU {
                                                 }
                                             }
                                         }
+                                        // Save thebuffer to disk after each completed block.
+                                        if let Ok(buffer) = buffer_mutex.lock() {
+                                            if let Some(path) = &buffer.file_path {
+                                                buffer.save(path.clone());
+                                            }
+                                        }
                                     } else {
                                         // No remaining tiles, exit loop
                                         break;

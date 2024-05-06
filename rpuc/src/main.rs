@@ -60,6 +60,15 @@ fn main() {
                 .value_name("STRING")
                 .value_parser(clap::builder::ValueParser::string()),
         )
+        .arg(
+            Arg::new("write")
+                .short('w')
+                .long("write")
+                .help("Writes the shader output image to disk after each completed block. Defaults to 'false'")
+                .action(ArgAction::Set)
+                .value_name("STRING")
+                .value_parser(clap::builder::ValueParser::string()),
+        )
         .get_matches();
 
     let mut path = std::path::PathBuf::new();
@@ -123,6 +132,13 @@ fn main() {
         }
     }
 
+    let mut write: bool = false;
+    if let Some(str) = matches.get_one::<String>("write") {
+        if str == "true" {
+            write = true;
+        }
+    }
+
     println!(
         "Input '{}'. Function '{}'. Precision: '{}'. Argument '{}'.",
         path.to_str().unwrap(),
@@ -158,6 +174,13 @@ fn main() {
                 }
             } else {
                 let mut buffer = Arc::new(Mutex::new(ColorBuffer::new(800, 600)));
+                if write {
+                    if let Ok(mut buffer) = buffer.lock() {
+                        path.set_extension("png");
+                        buffer.file_path = Some(path.clone());
+                    }
+                }
+
                 println!("Computing {} iteration(s) ...", iterations);
 
                 if let Some(tiled) = tiled {
