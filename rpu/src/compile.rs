@@ -485,7 +485,13 @@ impl Visitor for CompileVisitor {
                             ctx.add_wat(&instr);
                         }
                         _ => {
+                            let temp = ctx.add_temporary(&v);
+
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!("local.get ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}", temp);
                             ctx.add_wat(&instr);
 
                             let instr = format!(
@@ -496,10 +502,12 @@ impl Visitor for CompileVisitor {
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_y", name);
                             ctx.add_wat(&instr);
-
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!("local.get ${}_x", name);
                             ctx.add_wat(&instr);
-
+                            let instr = format!("local.get ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
@@ -545,7 +553,13 @@ impl Visitor for CompileVisitor {
                             ctx.add_wat(&instr);
                         }
                         _ => {
+                            let temp = ctx.add_temporary(&v);
+
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!("local.get ${}_z", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}", temp);
                             ctx.add_wat(&instr);
                             let instr = format!(
                                 "{}.{}",
@@ -556,7 +570,11 @@ impl Visitor for CompileVisitor {
                             let instr = format!("local.set ${}_z", name);
                             ctx.add_wat(&instr);
 
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!("local.get ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}", temp);
                             ctx.add_wat(&instr);
                             let instr = format!(
                                 "{}.{}",
@@ -567,7 +585,11 @@ impl Visitor for CompileVisitor {
                             let instr = format!("local.set ${}_y", name);
                             ctx.add_wat(&instr);
 
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!("local.get ${}_x", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}", temp);
                             ctx.add_wat(&instr);
                             let instr = format!(
                                 "{}.{}",
@@ -620,7 +642,13 @@ impl Visitor for CompileVisitor {
                             ctx.add_wat(&instr);
                         }
                         _ => {
+                            let temp = ctx.add_temporary(&v);
+
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!("local.get ${}_w", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}", temp);
                             ctx.add_wat(&instr);
                             let instr = format!(
                                 "{}.{}",
@@ -631,7 +659,11 @@ impl Visitor for CompileVisitor {
                             let instr = format!("local.set ${}_w", name);
                             ctx.add_wat(&instr);
 
-                            let instr = format!("local.get ${}_w", name);
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}_z", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}", temp);
                             ctx.add_wat(&instr);
                             let instr = format!(
                                 "{}.{}",
@@ -642,7 +674,11 @@ impl Visitor for CompileVisitor {
                             let instr = format!("local.set ${}_z", name);
                             ctx.add_wat(&instr);
 
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!("local.get ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}", temp);
                             ctx.add_wat(&instr);
                             let instr = format!(
                                 "{}.{}",
@@ -653,7 +689,11 @@ impl Visitor for CompileVisitor {
                             let instr = format!("local.set ${}_y", name);
                             ctx.add_wat(&instr);
 
+                            let instr = format!("local.set ${}", temp);
+                            ctx.add_wat(&instr);
                             let instr = format!("local.get ${}_x", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.get ${}", temp);
                             ctx.add_wat(&instr);
                             let instr = format!(
                                 "{}.{}",
@@ -2414,7 +2454,7 @@ impl Visitor for CompileVisitor {
 
         let mut params = String::new();
 
-        ctx.wat_locals = String::new();
+        ctx.clear_locals();
         self.environment.begin_scope(returns.clone(), true);
 
         for param in args {

@@ -52,6 +52,10 @@ pub struct Context {
 
     /// Which rush globals we need to import.
     pub imports_hash: FxHashSet<String>,
+
+    /// Temporary variables to swap stack content (assignment operator).
+    pub func_has_temp_float: bool,
+    pub func_has_temp_int: bool,
 }
 
 impl Default for Context {
@@ -79,6 +83,9 @@ impl Context {
             ternary_counter: 0,
 
             imports_hash: FxHashSet::default(),
+
+            func_has_temp_int: false,
+            func_has_temp_float: false,
         }
     }
 
@@ -123,6 +130,36 @@ impl Context {
             2 => "z".to_string(),
             3 => "w".to_string(),
             _ => panic!("Invalid swizzle component"),
+        }
+    }
+
+    /// Clears the local variables.
+    pub fn clear_locals(&mut self) {
+        self.func_has_temp_int = false;
+        self.func_has_temp_float = false;
+        self.wat_locals = String::new();
+    }
+
+    /// Adds a temporary variable to the function.
+    pub fn add_temporary(&mut self, value: &ASTValue) -> String {
+        if value.is_float_based() {
+            if !self.func_has_temp_float {
+                self.wat_locals.push_str(&format!(
+                    "        (local $_rpu_temp_f{pr} f{pr})\n",
+                    pr = self.pr
+                ));
+            }
+            self.func_has_temp_float = true;
+            format!("_rpu_temp_f{}", self.pr)
+        } else {
+            if !self.func_has_temp_int {
+                self.wat_locals.push_str(&format!(
+                    "        (local $_rpu_temp_i{pr} i{pr})\n",
+                    pr = self.pr
+                ));
+            }
+            self.func_has_temp_int = true;
+            format!("_rpu_temp_i{}", self.pr)
         }
     }
 
