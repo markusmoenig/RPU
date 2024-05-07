@@ -48,144 +48,6 @@
         )
     )
 
-    ;; vec3 normalize
-    (func $_rpu_normalize_vec3_f64 (param $x f64) (param $y f64) (param $z f64)  (result f64  f64  f64 )
-        (local $magn f64)
-         
-        local.get $x
-        local.get $x
-        f64.mul
-        local.get $y
-        local.get $y
-        f64.mul
-        f64.add
-        local.get $z
-        local.get $z
-        f64.mul
-        f64.add
-        f64.sqrt
-        (local.set $magn)
-        local.get $x
-        (local.get $magn)
-        f64.div
-        local.get $y
-        (local.get $magn)
-        f64.div
-        local.get $z
-        (local.get $magn)
-        f64.div)
-
-    ;; cross product
-    (func $_rpu_cross_product_f64 (param $a_x f64) (param $a_y f64) (param $a_z f64) (param $b_x f64) (param $b_y f64) (param $b_z f64) (result f64 f64 f64)
-        (local $c_x f64) (local $c_y f64) (local $c_z f64)
-        local.get $a_y
-        local.get $b_z
-        f64.mul
-        local.get $a_z
-        local.get $b_y
-        f64.mul
-        f64.sub
-        local.set $c_x
-        local.get $a_z
-        local.get $b_x
-        f64.mul
-        local.get $a_x
-        local.get $b_z
-        f64.mul
-        f64.sub
-        local.set $c_y
-        local.get $a_x
-        local.get $b_y
-        f64.mul
-        local.get $a_y
-        local.get $b_x
-        f64.mul
-        f64.sub
-        local.set $c_z
-        local.get $c_x
-        local.get $c_y
-        local.get $c_z)
-
-    ;; vec3 mul scalar (f64)
-    (func $_rpu_vec3_mul_scalar_f64
-        (param $vec3_x f64)    ;; x component of vec3
-        (param $vec3_y f64)    ;; y component of vec3
-        (param $vec3_z f64)    ;; z component of vec3
-        (param $scalar f64)    ;; Scalar
-        (result f64 f64 f64)       ;; Return three f64 results, the new x, y and z components
-
-        ;; Calculate the new x component and return it
-        (f64.mul
-            (local.get $vec3_x)  ;; Get the x component
-            (local.get $scalar)  ;; Get the scalar
-        )
-
-        ;; Calculate the new y component and return it
-        (f64.mul
-            (local.get $vec3_y)  ;; Get the y component
-            (local.get $scalar)  ;; Get the scalar
-        )
-
-        ;; Calculate the new z component and return it
-        (f64.mul
-            (local.get $vec3_z)  ;; Get the z component
-            (local.get $scalar)  ;; Get the scalar
-        )
-    )
-
-    ;; scalar mul vec3 (f64)
-    (func $_rpu_scalar_mul_vec3_f64
-        (param $scalar f64)  ;; Scalar
-        (param $vec3_x f64)  ;; x component of vec3
-        (param $vec3_y f64)  ;; y component of vec3
-        (param $vec3_z f64)  ;; y component of vec3
-        (result f64 f64 f64)  ;; Return three f64 results, the new x, y and z components
-
-        ;; Calculate the new x component and return it
-        (f64.mul
-            (local.get $scalar)  ;; Get the scalar
-            (local.get $vec3_x)  ;; Get the x component
-        )
-
-        ;; Calculate the new y component and return it
-        (f64.mul
-            (local.get $scalar)  ;; Get the scalar
-            (local.get $vec3_y)  ;; Get the y component
-        )
-
-        ;; Calculate the new z component and return it
-        (f64.mul
-            (local.get $scalar)  ;; Get the scalar
-            (local.get $vec3_z)  ;; Get the z component
-        )
-    )
-
-    ;; vec3 add vec3 (f64)
-    (func $_rpu_vec3_add_vec3_f64
-        (param $vec2l_x f64)
-        (param $vec2l_y f64)
-        (param $vec2l_z f64)
-        (param $vec2r_x f64)
-        (param $vec2r_y f64)
-        (param $vec2r_z f64)
-        (result f64 f64 f64)
-
-        (f64.add
-            (local.get $vec2l_x)
-            (local.get $vec2r_x)
-        )
-
-        (f64.add
-            (local.get $vec2l_y)
-            (local.get $vec2r_y)
-        )
-
-        (f64.add
-            (local.get $vec2l_z)
-            (local.get $vec2r_z)
-        )
-    )
-
     ;; vec3 dot product
     (func $_rpu_dot_product_vec3_f64  (param $a_x f64)  (param $a_y f64)  (param $a_z f64)  (param $b_x f64)  (param $b_y f64)  (param $b_z f64)  (result f64) (local $dot_product f64)
         local.get $a_x
@@ -348,6 +210,64 @@
         local.get $x
         (call $_rpu_sin))
 
+    ;; vec3 normalize
+    (func $_rpu_normalize_vec3_f64 (param $x f64) (param $y f64) (param $z f64)  (result f64  f64  f64 )
+        (local $magn f64)
+         
+        local.get $x
+        local.get $x
+        f64.mul
+        local.get $y
+        local.get $y
+        f64.mul
+        f64.add
+        local.get $z
+        local.get $z
+        f64.mul
+        f64.add
+        f64.sqrt
+        (local.set $magn)
+        local.get $x
+        (local.get $magn)
+        f64.div
+        local.get $y
+        (local.get $magn)
+        f64.div
+        local.get $z
+        (local.get $magn)
+        f64.div)
+
+    ;; cross product
+    (func $_rpu_cross_product_f64 (param $a_x f64) (param $a_y f64) (param $a_z f64) (param $b_x f64) (param $b_y f64) (param $b_z f64) (result f64 f64 f64)
+        (local $c_x f64) (local $c_y f64) (local $c_z f64)
+        local.get $a_y
+        local.get $b_z
+        f64.mul
+        local.get $a_z
+        local.get $b_y
+        f64.mul
+        f64.sub
+        local.set $c_x
+        local.get $a_z
+        local.get $b_x
+        f64.mul
+        local.get $a_x
+        local.get $b_z
+        f64.mul
+        f64.sub
+        local.set $c_y
+        local.get $a_x
+        local.get $b_y
+        f64.mul
+        local.get $a_y
+        local.get $b_x
+        f64.mul
+        f64.sub
+        local.set $c_z
+        local.get $c_x
+        local.get $c_y
+        local.get $c_z)
+
     ;; mat3 mul vec3 (f64)
     (func $_rpu_mat3_mul_vec3_f64
         (param $a f64)  ;; Matrix component a (row 1, col 1)
@@ -404,6 +324,59 @@
         f64.add
     )
 
+    ;; vec3 mul scalar (f64)
+    (func $_rpu_vec3_mul_scalar_f64
+        (param $vec3_x f64)    ;; x component of vec3
+        (param $vec3_y f64)    ;; y component of vec3
+        (param $vec3_z f64)    ;; z component of vec3
+        (param $scalar f64)    ;; Scalar
+        (result f64 f64 f64)       ;; Return three f64 results, the new x, y and z components
+
+        ;; Calculate the new x component and return it
+        (f64.mul
+            (local.get $vec3_x)  ;; Get the x component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new y component and return it
+        (f64.mul
+            (local.get $vec3_y)  ;; Get the y component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new z component and return it
+        (f64.mul
+            (local.get $vec3_z)  ;; Get the z component
+            (local.get $scalar)  ;; Get the scalar
+        )
+    )
+
+    ;; vec3 add vec3 (f64)
+    (func $_rpu_vec3_add_vec3_f64
+        (param $vec2l_x f64)
+        (param $vec2l_y f64)
+        (param $vec2l_z f64)
+        (param $vec2r_x f64)
+        (param $vec2r_y f64)
+        (param $vec2r_z f64)
+        (result f64 f64 f64)
+
+        (f64.add
+            (local.get $vec2l_x)
+            (local.get $vec2r_x)
+        )
+
+        (f64.add
+            (local.get $vec2l_y)
+            (local.get $vec2r_y)
+        )
+
+        (f64.add
+            (local.get $vec2l_z)
+            (local.get $vec2r_z)
+        )
+    )
+
     ;; vec1 clamp
     (func $_rpu_vec1_clamp_f64_f64  (param $x f64)  (param $scalar f64) (param $scalar2 f64) (result f64)
         local.get $x
@@ -426,6 +399,33 @@
         local.get $scalar
         (call $_rpu_pow))
 
+    ;; scalar mul vec3 (f64)
+    (func $_rpu_scalar_mul_vec3_f64
+        (param $scalar f64)  ;; Scalar
+        (param $vec3_x f64)  ;; x component of vec3
+        (param $vec3_y f64)  ;; y component of vec3
+        (param $vec3_z f64)  ;; y component of vec3
+        (result f64 f64 f64)  ;; Return three f64 results, the new x, y and z components
+
+        ;; Calculate the new x component and return it
+        (f64.mul
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec3_x)  ;; Get the x component
+        )
+
+        ;; Calculate the new y component and return it
+        (f64.mul
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec3_y)  ;; Get the y component
+        )
+
+        ;; Calculate the new z component and return it
+        (f64.mul
+            (local.get $scalar)  ;; Get the scalar
+            (local.get $vec3_z)  ;; Get the z component
+        )
+    )
+
     ;; vec3 pow
     (func $_rpu_vec3_pow_f64  (param $x f64)  (param $y f64)  (param $z f64)  (param $scalar f64)  (result f64 f64 f64)
         local.get $x
@@ -437,88 +437,6 @@
         local.get $z
         local.get $scalar
         (call $_rpu_pow))
-
-    ;; function 'GetRayDir'
-    (func $GetRayDir (param $uv_x f64) (param $uv_y f64)(param $p_x f64) (param $p_y f64) (param $p_z f64)(param $l_x f64) (param $l_y f64) (param $l_z f64)(param $z f64) (result f64 f64 f64)
-        (local $f_x f64)
-        (local $f_y f64)
-        (local $f_z f64)
-        (local $r_x f64)
-        (local $r_y f64)
-        (local $r_z f64)
-        (local $u_x f64)
-        (local $u_y f64)
-        (local $u_z f64)
-        (local $c_x f64)
-        (local $c_y f64)
-        (local $c_z f64)
-        (local $i_x f64)
-        (local $i_y f64)
-        (local $i_z f64)
-        local.get $l_x
-        local.get $l_y
-        local.get $l_z
-        local.get $p_x
-        local.get $p_y
-        local.get $p_z
-        (call $_rpu_vec3_sub_vec3_f64)
-        (call $_rpu_normalize_vec3_f64)
-        local.set $f_z
-        local.set $f_y
-        local.set $f_x
-        (f64.const 0)
-        (f64.const 1)
-        (f64.const 0)
-        local.get $f_x
-        local.get $f_y
-        local.get $f_z
-        (call $_rpu_cross_product_f64)
-        (call $_rpu_normalize_vec3_f64)
-        local.set $r_z
-        local.set $r_y
-        local.set $r_x
-        local.get $f_x
-        local.get $f_y
-        local.get $f_z
-        local.get $r_x
-        local.get $r_y
-        local.get $r_z
-        (call $_rpu_cross_product_f64)
-        local.set $u_z
-        local.set $u_y
-        local.set $u_x
-        local.get $f_x
-        local.get $f_y
-        local.get $f_z
-        local.get $z
-        (call $_rpu_vec3_mul_scalar_f64)
-        local.set $c_z
-        local.set $c_y
-        local.set $c_x
-        local.get $c_x
-        local.get $c_y
-        local.get $c_z
-        local.get $uv_x
-        local.get $r_x
-        local.get $r_y
-        local.get $r_z
-        (call $_rpu_scalar_mul_vec3_f64)
-        (call $_rpu_vec3_add_vec3_f64)
-        local.get $uv_y
-        local.get $u_x
-        local.get $u_y
-        local.get $u_z
-        (call $_rpu_scalar_mul_vec3_f64)
-        (call $_rpu_vec3_add_vec3_f64)
-        local.set $i_z
-        local.set $i_y
-        local.set $i_x
-        local.get $i_x
-        local.get $i_y
-        local.get $i_z
-        (call $_rpu_normalize_vec3_f64)
-        (return)
-    )
 
     ;; function 'raytraceSphere'
     (func $raytraceSphere (param $ro_x f64) (param $ro_y f64) (param $ro_z f64)(param $rd_x f64) (param $rd_y f64) (param $rd_z f64)(param $tmin f64)(param $tmax f64)(param $r f64) (result f64)
