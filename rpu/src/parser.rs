@@ -414,6 +414,27 @@ impl Parser {
                 "Invalid assignment target: {:?} at line {}.",
                 equals, equals.line
             ));
+        } else if self.check(TokenType::Minus)
+            && self.match_token(vec![TokenType::Minus])
+            && self.match_token(vec![TokenType::Equal])
+        {
+            let equals = self.previous().unwrap();
+            let value = self.assignment()?;
+
+            if let Expr::Variable(name, swizzle, _loc) = expr {
+                return Ok(Expr::VariableAssignment(
+                    name,
+                    AssignmentOperator::SubtractAssign,
+                    swizzle.clone(),
+                    Box::new(value),
+                    self.create_loc(equals.line),
+                ));
+            }
+
+            return Err(format!(
+                "Invalid assignment target: {:?} at line {}.",
+                equals, equals.line
+            ));
         } else if self.check(TokenType::Star)
             && self.match_token(vec![TokenType::Star])
             && self.match_token(vec![TokenType::Equal])
@@ -425,6 +446,27 @@ impl Parser {
                 return Ok(Expr::VariableAssignment(
                     name,
                     AssignmentOperator::MultiplyAssign,
+                    swizzle.clone(),
+                    Box::new(value),
+                    self.create_loc(equals.line),
+                ));
+            }
+
+            return Err(format!(
+                "Invalid assignment target: {:?} at line {}.",
+                equals, equals.line
+            ));
+        } else if self.check(TokenType::Slash)
+            && self.match_token(vec![TokenType::Slash])
+            && self.match_token(vec![TokenType::Equal])
+        {
+            let equals = self.previous().unwrap();
+            let value = self.assignment()?;
+
+            if let Expr::Variable(name, swizzle, _loc) = expr {
+                return Ok(Expr::VariableAssignment(
+                    name,
+                    AssignmentOperator::DivideAssign,
                     swizzle.clone(),
                     Box::new(value),
                     self.create_loc(equals.line),

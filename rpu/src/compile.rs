@@ -465,8 +465,11 @@ impl Visitor for CompileVisitor {
                 _ => {
                     let instr = format!("local.get ${}", name);
                     ctx.add_wat(&instr);
-                    let instr =
-                        format!("{}.{}", v.to_wat_component_type(&ctx.pr), op.to_wat_type());
+                    let instr = format!(
+                        "{}.{}",
+                        v.to_wat_component_type(&ctx.pr),
+                        op.to_wat_type(&v)
+                    );
                     ctx.add_wat(&instr);
                     let instr = format!("local.set ${}", name);
                     ctx.add_wat(&instr);
@@ -484,10 +487,11 @@ impl Visitor for CompileVisitor {
                         _ => {
                             let instr = format!("local.get ${}_y", name);
                             ctx.add_wat(&instr);
+
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_y", name);
@@ -495,10 +499,11 @@ impl Visitor for CompileVisitor {
 
                             let instr = format!("local.get ${}_x", name);
                             ctx.add_wat(&instr);
+
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_x", name);
@@ -545,7 +550,7 @@ impl Visitor for CompileVisitor {
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_z", name);
@@ -556,7 +561,7 @@ impl Visitor for CompileVisitor {
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_y", name);
@@ -567,7 +572,7 @@ impl Visitor for CompileVisitor {
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_x", name);
@@ -620,7 +625,7 @@ impl Visitor for CompileVisitor {
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_w", name);
@@ -631,7 +636,7 @@ impl Visitor for CompileVisitor {
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_z", name);
@@ -642,7 +647,7 @@ impl Visitor for CompileVisitor {
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_y", name);
@@ -653,7 +658,7 @@ impl Visitor for CompileVisitor {
                             let instr = format!(
                                 "{}.{}",
                                 v.to_wat_component_type(&ctx.pr),
-                                op.to_wat_type()
+                                op.to_wat_type(&v)
                             );
                             ctx.add_wat(&instr);
                             let instr = format!("local.set ${}_x", name);

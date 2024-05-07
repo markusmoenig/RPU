@@ -412,13 +412,19 @@ impl AssignmentOperator {
         }
     }
 
-    pub fn to_wat_type(&self) -> String {
+    pub fn to_wat_type(&self, for_value: &ASTValue) -> String {
         match self {
             AssignmentOperator::Assign => "".to_string(),
             AssignmentOperator::AddAssign => "add".to_string(),
             AssignmentOperator::SubtractAssign => "sub".to_string(),
             AssignmentOperator::MultiplyAssign => "mul".to_string(),
-            AssignmentOperator::DivideAssign => "div".to_string(),
+            AssignmentOperator::DivideAssign => {
+                if for_value.is_float_based() {
+                    "div".to_string()
+                } else {
+                    "div_s".to_string()
+                }
+            }
         }
     }
 }

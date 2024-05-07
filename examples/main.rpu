@@ -2,7 +2,7 @@
 export ivec2  main() {
     ivec2 test = ivec2(1, 2);
 
-    test += ivec2(3, 4);
+    test /= ivec2(4, 8);
 
     return test;
 }
