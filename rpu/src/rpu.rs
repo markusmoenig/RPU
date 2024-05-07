@@ -204,6 +204,7 @@ impl RPU {
                         let import_object = RPU::create_imports(&mut store, high_precision);
                         if let Ok(instance) = Instance::new(&mut store, &module, &import_object) {
                             if let Ok(func) = instance.exports.get_function(&fname) {
+                                let mut tile_buffer = ColorBuffer::new(tile_size.0, tile_size.1);
                                 loop {
                                     // Lock mutex to access tiles
                                     let mut tiles = tiles_mutex.lock().unwrap();
@@ -266,12 +267,19 @@ impl RPU {
                                                         Err(err) => println!("{}", err),
                                                     }
 
-                                                    // Set the final color
-                                                    buffer_mutex.lock().unwrap().set(x, y, fc);
+                                                    // Set the final color into the local buffer
+                                                    tile_buffer.set(w, h, fc);
                                                 }
                                             }
                                         }
-                                        // Save thebuffer to disk after each completed block.
+                                        // Save the tile buffer to the main buffer
+                                        buffer_mutex.lock().unwrap().copy_from(
+                                            tile.x,
+                                            tile.y,
+                                            &tile_buffer,
+                                        );
+
+                                        // Save thebuffer optionally to disk after each completed block.
                                         if let Ok(buffer) = buffer_mutex.lock() {
                                             if let Some(path) = &buffer.file_path {
                                                 buffer.save(path.clone());

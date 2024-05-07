@@ -5,10 +5,13 @@ pub struct Parser {
     current: usize,
     current_line: usize,
 
+    /// During the construction of Vecs and Mats, force numericals to be floats
     force_floats: bool,
 
+    /// High precision (64 bit) or low precision (32 bit)
     high_precision: bool,
 
+    /// We need to know if we are inside a ternary expression to avoid recursion
     inside_ternary: bool,
 }
 
@@ -83,6 +86,9 @@ impl Parser {
             TokenType::Float2,
             TokenType::Float3,
             TokenType::Float4,
+            TokenType::Mat2,
+            TokenType::Mat3,
+            TokenType::Mat4,
         ]) {
             // Decide between function or var declaration
 
@@ -260,6 +266,9 @@ impl Parser {
                     TokenType::Float2,
                     TokenType::Float3,
                     TokenType::Float4,
+                    TokenType::Mat2,
+                    TokenType::Mat3,
+                    TokenType::Mat4,
                 ]) {
                     let param_name = self
                         .consume(
@@ -384,13 +393,56 @@ impl Parser {
     fn assignment(&mut self) -> Result<Expr, String> {
         let expr = self.or()?;
 
-        if self.match_token(vec![TokenType::Equal]) {
+        if self.check(TokenType::Plus)
+            && self.match_token(vec![TokenType::Plus])
+            && self.match_token(vec![TokenType::Equal])
+        {
             let equals = self.previous().unwrap();
             let value = self.assignment()?;
 
             if let Expr::Variable(name, swizzle, _loc) = expr {
                 return Ok(Expr::VariableAssignment(
                     name,
+                    AssignmentOperator::AddAssign,
+                    swizzle.clone(),
+                    Box::new(value),
+                    self.create_loc(equals.line),
+                ));
+            }
+
+            return Err(format!(
+                "Invalid assignment target: {:?} at line {}.",
+                equals, equals.line
+            ));
+        } else if self.check(TokenType::Star)
+            && self.match_token(vec![TokenType::Star])
+            && self.match_token(vec![TokenType::Equal])
+        {
+            let equals = self.previous().unwrap();
+            let value = self.assignment()?;
+
+            if let Expr::Variable(name, swizzle, _loc) = expr {
+                return Ok(Expr::VariableAssignment(
+                    name,
+                    AssignmentOperator::MultiplyAssign,
+                    swizzle.clone(),
+                    Box::new(value),
+                    self.create_loc(equals.line),
+                ));
+            }
+
+            return Err(format!(
+                "Invalid assignment target: {:?} at line {}.",
+                equals, equals.line
+            ));
+        } else if self.match_token(vec![TokenType::Equal]) {
+            let equals = self.previous().unwrap();
+            let value = self.assignment()?;
+
+            if let Expr::Variable(name, swizzle, _loc) = expr {
+                return Ok(Expr::VariableAssignment(
+                    name,
+                    AssignmentOperator::Assign,
                     swizzle.clone(),
                     Box::new(value),
                     self.create_loc(equals.line),
@@ -482,15 +534,19 @@ impl Parser {
     fn term(&mut self) -> Result<Expr, String> {
         let mut expr = self.factor()?;
 
-        while self.match_token(vec![TokenType::Minus, TokenType::Plus]) {
-            let operator = self.previous().unwrap();
-            let right = self.factor()?;
-            expr = Expr::Binary(
-                Box::new(expr),
-                Self::operator_to_binary(operator.kind),
-                Box::new(right),
-                self.create_loc(operator.line),
-            );
+        if (self.check(TokenType::Minus) || self.check(TokenType::Plus))
+            && !self.check_next(TokenType::Equal)
+        {
+            while self.match_token(vec![TokenType::Minus, TokenType::Plus]) {
+                let operator = self.previous().unwrap();
+                let right = self.factor()?;
+                expr = Expr::Binary(
+                    Box::new(expr),
+                    Self::operator_to_binary(operator.kind),
+                    Box::new(right),
+                    self.create_loc(operator.line),
+                );
+            }
         }
 
         Ok(expr)
@@ -499,15 +555,19 @@ impl Parser {
     fn factor(&mut self) -> Result<Expr, String> {
         let mut expr = self.unary()?;
 
-        while self.match_token(vec![TokenType::Slash, TokenType::Star]) {
-            let operator = self.previous().unwrap();
-            let right = self.unary()?;
-            expr = Expr::Binary(
-                Box::new(expr),
-                Self::operator_to_binary(operator.kind),
-                Box::new(right),
-                self.create_loc(operator.line),
-            );
+        if (self.check(TokenType::Slash) || self.check(TokenType::Star))
+            && !self.check_next(TokenType::Equal)
+        {
+            while self.match_token(vec![TokenType::Slash, TokenType::Star]) {
+                let operator = self.previous().unwrap();
+                let right = self.unary()?;
+                expr = Expr::Binary(
+                    Box::new(expr),
+                    Self::operator_to_binary(operator.kind),
+                    Box::new(right),
+                    self.create_loc(operator.line),
+                );
+            }
         }
 
         Ok(expr)
@@ -826,6 +886,87 @@ impl Parser {
                     Err(format!("Expected '(' after vec4 at line {}.", token.line))
                 }
             }
+            TokenType::Mat2 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let comps = self.read_vec_components(4, token.line, true)?;
+                    //let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    if comps.len() != 4 {
+                        return Err(format!(
+                            "Expected 4 components for mat2 at line {}.",
+                            token.line
+                        ));
+                    }
+
+                    let mut c = vec![];
+                    for comp in &comps {
+                        c.push(Box::new(comp.clone()));
+                    }
+
+                    Ok(Expr::Value(
+                        ASTValue::Mat2(Some(format!("{}", comps.len())), c),
+                        vec![],
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Expected '(' after mat2 at line {}.", token.line))
+                }
+            }
+            TokenType::Mat3 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let comps = self.read_vec_components(9, token.line, true)?;
+                    //let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    if comps.len() != 9 && comps.len() != 3 {
+                        return Err(format!(
+                            "Expected 9 or 3 components for mat3 at line {}.",
+                            token.line
+                        ));
+                    }
+
+                    let mut c = vec![];
+                    for comp in &comps {
+                        c.push(Box::new(comp.clone()));
+                    }
+
+                    Ok(Expr::Value(
+                        ASTValue::Mat3(Some(format!("{}", comps.len())), c),
+                        vec![],
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Expected '(' after mat3 at line {}.", token.line))
+                }
+            }
+            TokenType::Mat4 => {
+                self.advance();
+                if self.match_token(vec![TokenType::LeftParen]) {
+                    let comps = self.read_vec_components(16, token.line, true)?;
+                    //let swizzle: Vec<u8> = self.get_swizzle_at_current();
+
+                    if comps.len() != 16 {
+                        return Err(format!(
+                            "Expected 16 components for mat4 at line {}.",
+                            token.line
+                        ));
+                    }
+
+                    let mut c = vec![];
+                    for comp in &comps {
+                        c.push(Box::new(comp.clone()));
+                    }
+
+                    Ok(Expr::Value(
+                        ASTValue::Mat4(Some(format!("{}", comps.len())), c),
+                        vec![],
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    Err(format!("Expected '(' after mat2 at line {}.", token.line))
+                }
+            }
             TokenType::LeftParen => {
                 self.advance();
                 let expr = self.expression()?;
@@ -993,6 +1134,10 @@ impl Parser {
 
     fn check(&self, kind: TokenType) -> bool {
         self.current < self.tokens.len() && self.tokens[self.current].kind == kind
+    }
+
+    fn check_next(&self, kind: TokenType) -> bool {
+        self.current + 1 < self.tokens.len() && self.tokens[self.current + 1].kind == kind
     }
 
     fn advance(&mut self) -> Option<Token> {

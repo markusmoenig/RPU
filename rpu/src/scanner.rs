@@ -42,7 +42,6 @@ pub enum TokenType {
 
     // Keywords.
     And,
-    Class,
     Else,
     False,
     For,
@@ -52,8 +51,6 @@ pub enum TokenType {
     Or,
     Print,
     Return,
-    Super,
-    This,
     True,
     While,
     Break,
@@ -69,6 +66,10 @@ pub enum TokenType {
     Float2,
     Float3,
     Float4,
+
+    Mat2,
+    Mat3,
+    Mat4,
 
     Error,
     Eof,
@@ -105,7 +106,6 @@ pub struct Scanner {
 impl Scanner {
     pub fn new(code: String) -> Scanner {
         let mut keywords = FxHashMap::default();
-        keywords.insert("class", TokenType::Class);
         keywords.insert("else", TokenType::Else);
         keywords.insert("false", TokenType::False);
         keywords.insert("for", TokenType::For);
@@ -114,8 +114,6 @@ impl Scanner {
         keywords.insert("void", TokenType::Void);
         keywords.insert("print", TokenType::Print);
         keywords.insert("return", TokenType::Return);
-        keywords.insert("super", TokenType::Super);
-        keywords.insert("this", TokenType::This);
         keywords.insert("true", TokenType::True);
         keywords.insert("while", TokenType::While);
         keywords.insert("break", TokenType::Break);
@@ -129,6 +127,10 @@ impl Scanner {
         keywords.insert("vec2", TokenType::Float2);
         keywords.insert("vec3", TokenType::Float3);
         keywords.insert("vec4", TokenType::Float4);
+
+        keywords.insert("mat2", TokenType::Mat2);
+        keywords.insert("mat3", TokenType::Mat3);
+        keywords.insert("mat4", TokenType::Mat4);
 
         keywords.insert("export", TokenType::Export);
         keywords.insert("const", TokenType::Const);

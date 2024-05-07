@@ -1,12 +1,8 @@
 
-export float  main() {
-    float result = 0.0;
+export ivec2  main() {
+    ivec2 test = ivec2(1, 2);
 
-    float a = 2.0;
-    float b = 4.0;
+    test += ivec2(3, 4);
 
-    if (b > 4)
-        result = 1.0;
-    else result = 2.0;
-    return result;
+    return test;
 }

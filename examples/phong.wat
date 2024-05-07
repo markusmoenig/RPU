@@ -1,4 +1,6 @@
 (module
+    (import "env" "_rpu_sin" (func $_rpu_sin (param f64) (result f64)))
+    (import "env" "_rpu_cos" (func $_rpu_cos (param f64) (result f64)))
     (import "env" "_rpu_pow" (func $_rpu_pow (param f64) (param f64) (result f64)))
     (import "env" "_rpu_rand" (func $_rpu_rand (result f64)))
     (import "env" "_rpu_clamp" (func $_rpu_clamp (param f64) (param f64) (param f64) (result f64)))
@@ -212,6 +214,13 @@
         local.get $x
         f64.sqrt)
 
+    ;; vec2 neg
+    (func $_rpu_vec2_neg_f64  (param $x f64)  (param $y f64)  (result f64 f64)
+        local.get $x
+        f64.neg
+        local.get $y
+        f64.neg)
+
     ;; vec2 add vec2 (f64)
     (func $_rpu_vec2_add_vec2_f64
         (param $vec2l_x f64)
@@ -251,6 +260,46 @@
         )
     )
 
+    ;; vec2 div scalar (f64)
+    (func $_rpu_vec2_div_scalar_f64
+        (param $vec2_x f64)    ;; x component of vec2
+        (param $vec2_y f64)    ;; y component of vec2
+        (param $scalar f64)    ;; Scalar
+        (result f64 f64)       ;; Return two f64 results, the new x and y components
+
+        ;; Calculate the new x component and return it
+        (f64.div
+            (local.get $vec2_x)  ;; Get the x component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new y component and return it
+        (f64.div
+            (local.get $vec2_y)  ;; Get the y component
+            (local.get $scalar)  ;; Get the scalar
+        )
+    )
+
+    ;; vec2 mul scalar (f64)
+    (func $_rpu_vec2_mul_scalar_f64
+        (param $vec2_x f64)    ;; x component of vec2
+        (param $vec2_y f64)    ;; y component of vec2
+        (param $scalar f64)    ;; Scalar
+        (result f64 f64)       ;; Return two f64 results, the new x and y components
+
+        ;; Calculate the new x component and return it
+        (f64.mul
+            (local.get $vec2_x)  ;; Get the x component
+            (local.get $scalar)  ;; Get the scalar
+        )
+
+        ;; Calculate the new y component and return it
+        (f64.mul
+            (local.get $vec2_y)  ;; Get the y component
+            (local.get $scalar)  ;; Get the scalar
+        )
+    )
+
     ;; vec2 sub vec2 (f64)
     (func $_rpu_vec2_sub_vec2_f64
         (param $vec2l_x f64)
@@ -270,24 +319,89 @@
         )
     )
 
-    ;; vec2 div scalar (f64)
-    (func $_rpu_vec2_div_scalar_f64
-        (param $vec2_x f64)    ;; x component of vec2
-        (param $vec2_y f64)    ;; y component of vec2
-        (param $scalar f64)    ;; Scalar
-        (result f64 f64)       ;; Return two f64 results, the new x and y components
+    ;; vec2 mul vec2 (f64)
+    (func $_rpu_vec2_mul_vec2_f64
+        (param $vec2l_x f64)
+        (param $vec2l_y f64)
+        (param $vec2r_x f64)
+        (param $vec2r_y f64)
+        (result f64 f64)
 
-        ;; Calculate the new x component and return it
-        (f64.div
-            (local.get $vec2_x)  ;; Get the x component
-            (local.get $scalar)  ;; Get the scalar
+        (f64.mul
+            (local.get $vec2l_x)
+            (local.get $vec2r_x)
         )
 
-        ;; Calculate the new y component and return it
-        (f64.div
-            (local.get $vec2_y)  ;; Get the y component
-            (local.get $scalar)  ;; Get the scalar
+        (f64.mul
+            (local.get $vec2l_y)
+            (local.get $vec2r_y)
         )
+    )
+
+    ;; vec1 cos
+    (func $_rpu_vec1_cos_f64  (param $x f64)  (result f64)
+        local.get $x
+        (call $_rpu_cos))
+
+    ;; vec1 sin
+    (func $_rpu_vec1_sin_f64  (param $x f64)  (result f64)
+        local.get $x
+        (call $_rpu_sin))
+
+    ;; mat3 mul vec3 (f64)
+    (func $_rpu_mat3_mul_vec3_f64
+        (param $a f64)  ;; Matrix component a (row 1, col 1)
+        (param $b f64)  ;; Matrix component b (row 1, col 2)
+        (param $c f64)  ;; Matrix component c (row 1, col 3)
+        (param $d f64)  ;; Matrix component d (row 2, col 1)
+        (param $e f64)  ;; Matrix component e (row 2, col 2)
+        (param $f f64)  ;; Matrix component f (row 2, col 3)
+        (param $g f64)  ;; Matrix component g (row 3, col 1)
+        (param $h f64)  ;; Matrix component h (row 3, col 2)
+        (param $i f64)  ;; Matrix component i (row 3, col 3)
+        (param $x f64)  ;; Vector component x
+        (param $y f64)  ;; Vector component y
+        (param $z f64)  ;; Vector component z
+        (result f64 f64 f64) ;; Resulting vector components
+
+        ;; Compute the first component of the resulting vector: a*x + b*y + c*z
+        local.get $a
+        local.get $x
+        f64.mul
+        local.get $b
+        local.get $y
+        f64.mul
+        f64.add
+        local.get $c
+        local.get $z
+        f64.mul
+        f64.add
+
+        ;; Compute the second component of the resulting vector: d*x + e*y + f*z
+        local.get $d
+        local.get $x
+        f64.mul
+        local.get $e
+        local.get $y
+        f64.mul
+        f64.add
+        local.get $f
+        local.get $z
+        f64.mul
+        f64.add
+
+        ;; Compute the third component of the resulting vector: g*x + h*y + i*z
+        local.get $g
+        local.get $x
+        f64.mul
+        local.get $h
+        local.get $y
+        f64.mul
+        f64.add
+        local.get $i
+        local.get $z
+        f64.mul
+        f64.add
     )
 
     ;; vec1 clamp
@@ -483,11 +597,37 @@
 
     ;; function 'shader'
     (func $shader (export "shader") (param $coord_x f64) (param $coord_y f64)(param $resolution_x f64) (param $resolution_y f64) (result f64 f64 f64 f64)
-        (local $uv_x f64)
-        (local $uv_y f64)
+        (local $p_x f64)
+        (local $p_y f64)
+        (local $eye_x f64)
+        (local $eye_y f64)
+        (local $eye_z f64)
+        (local $rot_x f64)
+        (local $rot_y f64)
         (local $ro_x f64)
         (local $ro_y f64)
         (local $ro_z f64)
+        (local $ta_x f64)
+        (local $ta_y f64)
+        (local $ta_z f64)
+        (local $cw_x f64)
+        (local $cw_y f64)
+        (local $cw_z f64)
+        (local $cu_x f64)
+        (local $cu_y f64)
+        (local $cu_z f64)
+        (local $cv_x f64)
+        (local $cv_y f64)
+        (local $cv_z f64)
+        (local $cam_1 f64)
+        (local $cam_2 f64)
+        (local $cam_3 f64)
+        (local $cam_4 f64)
+        (local $cam_5 f64)
+        (local $cam_6 f64)
+        (local $cam_7 f64)
+        (local $cam_8 f64)
+        (local $cam_9 f64)
         (local $rd_x f64)
         (local $rd_y f64)
         (local $rd_z f64)
@@ -510,9 +650,9 @@
         (local $h_y f64)
         (local $h_z f64)
         (local $spe f64)
-        (local $c_x f64)
-        (local $c_y f64)
-        (local $c_z f64)
+        local.get $resolution_x
+        local.get $resolution_y
+        (call $_rpu_vec2_neg_f64)
         (f64.const 2)
         local.get $coord_x
         local.get $coord_y
@@ -520,29 +660,134 @@
         (call $_rpu_rand)
         (call $_rpu_vec2_add_vec2_f64)
         (call $_rpu_scalar_mul_vec2_f64)
-        local.get $resolution_x
-        local.get $resolution_y
-        (call $_rpu_vec2_sub_vec2_f64)
+        (call $_rpu_vec2_add_vec2_f64)
         local.get $resolution_y
         (call $_rpu_vec2_div_scalar_f64)
-        local.set $uv_y
-        local.set $uv_x
-        (f64.const 0.5)
-        (f64.const 0.8)
-        (f64.const 3)
+        local.set $p_y
+        local.set $p_x
+        (f64.const 0)
+        (f64.const 1)
+        (f64.const 2)
+        local.set $eye_z
+        local.set $eye_y
+        local.set $eye_x
+        (f64.const 6.2831)
+        (f64.const 0.1)
+        (f64.const 150)
+        (f64.const 0.25)
+        (f64.mul)
+        (f64.add)
+        (f64.const 0)
+        (f64.const 1)
+        (f64.const 0)
+        (f64.const 0)
+        (f64.const 0)
+        local.get $resolution_x
+        local.get $resolution_y
+        (f64.const 0.25)
+        (call $_rpu_vec2_mul_scalar_f64)
+        (call $_rpu_vec2_sub_vec2_f64)
+        (call $_rpu_vec2_mul_vec2_f64)
+        local.get $resolution_x
+        (call $_rpu_vec2_div_scalar_f64)
+        (call $_rpu_vec2_add_vec2_f64)
+        (call $_rpu_scalar_mul_vec2_f64)
+        local.set $rot_y
+        local.set $rot_x
+        local.get $rot_y
+        (call $_rpu_vec1_cos_f64)
+        local.get $eye_y
+        local.get $eye_z
+        (call $_rpu_scalar_mul_vec2_f64)
+        local.get $rot_y
+        (call $_rpu_vec1_sin_f64)
+        local.get $eye_z
+        local.get $eye_y
+        (call $_rpu_scalar_mul_vec2_f64)
+        (f64.const 1)
+        (call $_rpu_vec1_neg_f64)
+        (f64.const 1)
+        (call $_rpu_vec2_mul_vec2_f64)
+        (call $_rpu_vec2_add_vec2_f64)
+        local.set $eye_z
+        local.set $eye_y
+        local.get $eye_x
+        local.get $eye_y
+        local.get $eye_z
         local.set $ro_z
         local.set $ro_y
         local.set $ro_x
-        local.get $uv_x
-        local.get $uv_y
-        local.get $ro_x
-        local.get $ro_y
-        local.get $ro_z
         (f64.const 0)
+        (f64.const 0.5)
         (f64.const 0)
+        local.set $ta_z
+        local.set $ta_y
+        local.set $ta_x
+        local.get $ta_x
+        local.get $ta_y
+        local.get $ta_z
+        local.get $eye_x
+        local.get $eye_y
+        local.get $eye_z
+        (call $_rpu_vec3_sub_vec3_f64)
+        (call $_rpu_normalize_vec3_f64)
+        local.set $cw_z
+        local.set $cw_y
+        local.set $cw_x
         (f64.const 0)
         (f64.const 1)
-        (call $GetRayDir)
+        (f64.const 0)
+        local.get $cw_x
+        local.get $cw_y
+        local.get $cw_z
+        (call $_rpu_cross_product_f64)
+        (call $_rpu_normalize_vec3_f64)
+        local.set $cu_z
+        local.set $cu_y
+        local.set $cu_x
+        local.get $cw_x
+        local.get $cw_y
+        local.get $cw_z
+        local.get $cu_x
+        local.get $cu_y
+        local.get $cu_z
+        (call $_rpu_cross_product_f64)
+        (call $_rpu_normalize_vec3_f64)
+        local.set $cv_z
+        local.set $cv_y
+        local.set $cv_x
+        local.get $cu_x
+        local.get $cu_y
+        local.get $cu_z
+        local.get $cv_x
+        local.get $cv_y
+        local.get $cv_z
+        local.get $cw_x
+        local.get $cw_y
+        local.get $cw_z
+        (local.set $cam_9)
+        (local.set $cam_8)
+        (local.set $cam_7)
+        (local.set $cam_6)
+        (local.set $cam_5)
+        (local.set $cam_4)
+        (local.set $cam_3)
+        (local.set $cam_2)
+        (local.set $cam_1)
+        (local.get $cam_1)
+        (local.get $cam_2)
+        (local.get $cam_3)
+        (local.get $cam_4)
+        (local.get $cam_5)
+        (local.get $cam_6)
+        (local.get $cam_7)
+        (local.get $cam_8)
+        (local.get $cam_9)
+        local.get $p_x
+        local.get $p_y
+        (f64.const 1.5)
+        (call $_rpu_normalize_vec3_f64)
+        (call $_rpu_mat3_mul_vec3_f64)
         local.set $rd_z
         local.set $rd_y
         local.set $rd_x
@@ -662,9 +907,6 @@
                     local.set $color_z
                     local.set $color_y
                     local.set $color_x
-                    local.get $color_x
-                    local.get $color_y
-                    local.get $color_z
                     local.get $dif
                     global.get $diffuseColor_x
                     global.get $diffuseColor_y
@@ -672,13 +914,15 @@
                     (call $_rpu_scalar_mul_vec3_f64)
                     local.get $occ
                     (call $_rpu_vec3_mul_scalar_f64)
-                    (call $_rpu_vec3_add_vec3_f64)
-                    local.set $color_z
-                    local.set $color_y
-                    local.set $color_x
-                    local.get $color_x
-                    local.get $color_y
                     local.get $color_z
+                    f64.add
+                    local.set $color_z
+                    local.get $color_y
+                    f64.add
+                    local.set $color_y
+                    local.get $color_x
+                    f64.add
+                    local.set $color_x
                     local.get $dif
                     local.get $spe
                     (f64.mul)
@@ -688,9 +932,14 @@
                     (call $_rpu_scalar_mul_vec3_f64)
                     local.get $occ
                     (call $_rpu_vec3_mul_scalar_f64)
-                    (call $_rpu_vec3_add_vec3_f64)
+                    local.get $color_z
+                    f64.add
                     local.set $color_z
+                    local.get $color_y
+                    f64.add
                     local.set $color_y
+                    local.get $color_x
+                    f64.add
                     local.set $color_x
                 )
             )
@@ -702,12 +951,6 @@
         (f64.const 2.2)
         (f64.div)
         (call $_rpu_vec3_pow_f64)
-        local.set $c_z
-        local.set $c_y
-        local.set $c_x
-        local.get $c_x
-        local.get $c_y
-        local.get $c_z
         (f64.const 1)
         (return)
     )

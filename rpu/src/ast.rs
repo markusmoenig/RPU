@@ -42,6 +42,9 @@ pub enum ASTValue {
     Float2(Option<String>, Box<Expr>, Box<Expr>),
     Float3(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>),
     Float4(Option<String>, Box<Expr>, Box<Expr>, Box<Expr>, Box<Expr>),
+    Mat2(Option<String>, Vec<Box<Expr>>),
+    Mat3(Option<String>, Vec<Box<Expr>>),
+    Mat4(Option<String>, Vec<Box<Expr>>),
     String(Option<String>, String),
     Function(String, Vec<ASTValue>, Box<ASTValue>),
 }
@@ -81,6 +84,23 @@ impl ASTValue {
                 format!("({} ${}_z f{})", instr, name, precision),
                 format!("({} ${}_w f{})", instr, name, precision),
             ],
+            ASTValue::Mat2(_, _) => vec![
+                format!("({} ${}_x f{})", instr, name, precision),
+                format!("({} ${}_y f{})", instr, name, precision),
+                format!("({} ${}_z f{})", instr, name, precision),
+                format!("({} ${}_w f{})", instr, name, precision),
+            ],
+            ASTValue::Mat3(_, _) => vec![
+                format!("({} ${}_1 f{})", instr, name, precision),
+                format!("({} ${}_2 f{})", instr, name, precision),
+                format!("({} ${}_3 f{})", instr, name, precision),
+                format!("({} ${}_4 f{})", instr, name, precision),
+                format!("({} ${}_5 f{})", instr, name, precision),
+                format!("({} ${}_6 f{})", instr, name, precision),
+                format!("({} ${}_7 f{})", instr, name, precision),
+                format!("({} ${}_8 f{})", instr, name, precision),
+                format!("({} ${}_9 f{})", instr, name, precision),
+            ],
             _ => vec![],
         }
     }
@@ -101,6 +121,23 @@ impl ASTValue {
                 format!("({} ${}_y)", instr, name),
                 format!("({} ${}_z)", instr, name),
                 format!("({} ${}_w)", instr, name),
+            ],
+            ASTValue::Mat2(_, _) => vec![
+                format!("({} ${}_x)", instr, name),
+                format!("({} ${}_y)", instr, name),
+                format!("({} ${}_z)", instr, name),
+                format!("({} ${}_w)", instr, name),
+            ],
+            ASTValue::Mat3(_, _) => vec![
+                format!("({} ${}_1)", instr, name),
+                format!("({} ${}_2)", instr, name),
+                format!("({} ${}_3)", instr, name),
+                format!("({} ${}_4)", instr, name),
+                format!("({} ${}_5)", instr, name),
+                format!("({} ${}_6)", instr, name),
+                format!("({} ${}_7)", instr, name),
+                format!("({} ${}_8)", instr, name),
+                format!("({} ${}_9)", instr, name),
             ],
             _ => vec![],
         }
@@ -147,7 +184,7 @@ impl ASTValue {
             ASTValue::Float4(_, _, _, _, _) => true,
             ASTValue::String(_, s) => !s.is_empty(),
             ASTValue::Function(_, _, _) => true,
-            ASTValue::None => false,
+            _ => false,
         }
     }
 
@@ -162,6 +199,9 @@ impl ASTValue {
             ASTValue::Float2(_, _, _) => 2,
             ASTValue::Float3(_, _, _, _) => 3,
             ASTValue::Float4(_, _, _, _, _) => 4,
+            ASTValue::Mat2(_, _) => 4,
+            ASTValue::Mat3(_, _) => 9,
+            ASTValue::Mat4(_, _) => 16,
             _ => 0,
         }
     }
@@ -181,6 +221,9 @@ impl ASTValue {
             ASTValue::Float4(_, _, _, _, _) => "vec4".to_string(),
             ASTValue::String(_, _) => "string".to_string(),
             ASTValue::Function(_, _, _) => "fn".to_string(),
+            ASTValue::Mat2(_, _) => "mat2".to_string(),
+            ASTValue::Mat3(_, _) => "mat3".to_string(),
+            ASTValue::Mat4(_, _) => "mat4".to_string(),
         }
     }
 
@@ -196,7 +239,25 @@ impl ASTValue {
             ASTValue::Float2(_, _, _) => Some(format!("f{} f{}", pr, pr)),
             ASTValue::Float3(_, _, _, _) => Some(format!("f{} f{} f{}", pr, pr, pr)),
             ASTValue::Float4(_, _, _, _, _) => Some(format!("f{} f{} f{} f{}", pr, pr, pr, pr)),
+            ASTValue::Mat2(_, _) => Some(format!("f{} f{} f{} f{}", pr, pr, pr, pr)),
+            ASTValue::Mat3(_, _) => Some(format!(
+                "f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr}",
+                pr = pr
+            )),
+            ASTValue::Mat4(_, _) => Some(format!(
+                "f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr}",
+                pr = pr
+            )),
             _ => None,
+        }
+    }
+
+    /// Returns the WAT type of the given value component.
+    pub fn to_wat_component_type(&self, pr: &str) -> String {
+        if self.is_float_based() {
+            format!("f{}", pr)
+        } else {
+            format!("i{}", pr)
         }
     }
 
@@ -228,6 +289,45 @@ impl ASTValue {
                 empty_expr!(),
                 empty_expr!(),
             ),
+            TokenType::Mat2 => ASTValue::Mat2(
+                name,
+                vec![empty_expr!(), empty_expr!(), empty_expr!(), empty_expr!()],
+            ),
+            TokenType::Mat3 => ASTValue::Mat3(
+                name,
+                vec![
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                ],
+            ),
+            TokenType::Mat4 => ASTValue::Mat4(
+                name,
+                vec![
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                ],
+            ),
             TokenType::String => ASTValue::String(name, "".to_string()),
             _ => ASTValue::None,
         }
@@ -246,6 +346,9 @@ impl ASTValue {
             ASTValue::Float4(name, _, _, _, _) => name.clone(),
             ASTValue::String(name, _) => name.clone(),
             ASTValue::Function(name, _, _) => Some(name.clone()),
+            ASTValue::Mat2(name, _) => name.clone(),
+            ASTValue::Mat3(name, _) => name.clone(),
+            ASTValue::Mat4(name, _) => name.clone(),
             ASTValue::None => None,
         }
     }
@@ -283,9 +386,41 @@ pub enum Expr {
     Binary(Box<Expr>, BinaryOperator, Box<Expr>, Location),
     Grouping(Box<Expr>, Location),
     Variable(String, Vec<u8>, Location),
-    VariableAssignment(String, Vec<u8>, Box<Expr>, Location),
+    VariableAssignment(String, AssignmentOperator, Vec<u8>, Box<Expr>, Location),
     FunctionCall(Box<Expr>, Vec<Box<Expr>>, Location),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>, Location),
+}
+
+/// Assignment operators in the AST
+#[derive(Clone, PartialEq, Debug)]
+pub enum AssignmentOperator {
+    Assign,
+    AddAssign,
+    SubtractAssign,
+    MultiplyAssign,
+    DivideAssign,
+}
+
+impl AssignmentOperator {
+    pub fn describe(&self) -> &str {
+        match self {
+            AssignmentOperator::Assign => "=",
+            AssignmentOperator::AddAssign => "+=",
+            AssignmentOperator::SubtractAssign => "-=",
+            AssignmentOperator::MultiplyAssign => "*=",
+            AssignmentOperator::DivideAssign => "/=",
+        }
+    }
+
+    pub fn to_wat_type(&self) -> String {
+        match self {
+            AssignmentOperator::Assign => "".to_string(),
+            AssignmentOperator::AddAssign => "add".to_string(),
+            AssignmentOperator::SubtractAssign => "sub".to_string(),
+            AssignmentOperator::MultiplyAssign => "mul".to_string(),
+            AssignmentOperator::DivideAssign => "div".to_string(),
+        }
+    }
 }
 
 /// Logical operators in the AST
@@ -464,6 +599,7 @@ pub trait Visitor {
     fn variable_assignment(
         &mut self,
         name: String,
+        op: &AssignmentOperator,
         swizzle: &[u8],
         expression: &Expr,
         loc: &Location,
@@ -568,8 +704,8 @@ impl Expr {
             Expr::Binary(left, op, right, loc) => visitor.binary(left, op, right, loc, ctx),
             Expr::Grouping(expr, loc) => visitor.grouping(expr, loc, ctx),
             Expr::Variable(name, swizzle, loc) => visitor.variable(name.clone(), swizzle, loc, ctx),
-            Expr::VariableAssignment(name, swizzle, expr, loc) => {
-                visitor.variable_assignment(name.clone(), swizzle, expr, loc, ctx)
+            Expr::VariableAssignment(name, op, swizzle, expr, loc) => {
+                visitor.variable_assignment(name.clone(), op, swizzle, expr, loc, ctx)
             }
             Expr::FunctionCall(callee, args, loc) => visitor.function_call(callee, args, loc, ctx),
             Expr::Ternary(cond, then_expr, else_expr, loc) => {

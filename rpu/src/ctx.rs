@@ -1466,4 +1466,487 @@ impl Context {
             body = body
         )
     }
+
+    /// mat2 op vec2
+    pub fn gen_mat2_vec2(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_mat2_{}_vec2_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let precision = format!("f{}", self.pr);
+
+        let str = format!(
+            r#"
+    ;; mat2 {op} vec2 ({data_type})
+    (func ${func_name}
+        (param $a {precision})  ;; Matrix component a (row 1, col 1)
+        (param $b {precision})  ;; Matrix component b (row 1, col 2)
+        (param $c {precision})  ;; Matrix component c (row 2, col 1)
+        (param $d {precision})  ;; Matrix component d (row 2, col 2)
+        (param $x {precision})  ;; Vector component x
+        (param $y {precision})  ;; Vector component y
+        (result {precision} {precision}) ;; Resulting vector components
+
+        ;; Compute the first component of the resulting vector: a*x + b*y
+        local.get $a
+        local.get $x
+        {precision}.mul
+        local.get $b
+        local.get $y
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the second component of the resulting vector: c*x + d*y
+        local.get $c
+        local.get $x
+        {precision}.mul
+        local.get $d
+        local.get $y
+        {precision}.mul
+        {precision}.add
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    /// vec2 op mat2
+    pub fn gen_vec2_mat2(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_vec2_{}_mat2_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let precision = format!("f{}", self.pr);
+
+        let str = format!(
+            r#"
+    ;; vec2 {op} mat2 ({data_type})
+    (func ${func_name}
+        (param $v1 {precision})  ;; Vector component 1
+        (param $v2 {precision})  ;; Vector component 2
+        (param $a {precision})  ;; Matrix row 1, col 1
+        (param $b {precision})  ;; Matrix row 1, col 2
+        (param $c {precision})  ;; Matrix row 2, col 1
+        (param $d {precision})  ;; Matrix row 2, col 2
+        (result {precision} {precision}) ;; Resulting vector components
+
+        ;; Compute the first component of the resulting vector: v1*a + v2*c
+        local.get $v1
+        local.get $a
+        {precision}.mul
+        local.get $v2
+        local.get $c
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the second component of the resulting vector: v1*b + v2*d
+        local.get $v1
+        local.get $b
+        {precision}.mul
+        local.get $v2
+        local.get $d
+        {precision}.mul
+        {precision}.add
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    /// mat3 op vec3
+    pub fn gen_mat3_vec3(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_mat3_{}_vec3_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let precision = format!("f{}", self.pr);
+
+        let str = format!(
+            r#"
+    ;; mat3 {op} vec3 ({data_type})
+    (func ${func_name}
+        (param $a {precision})  ;; Matrix component a (row 1, col 1)
+        (param $b {precision})  ;; Matrix component b (row 1, col 2)
+        (param $c {precision})  ;; Matrix component c (row 1, col 3)
+        (param $d {precision})  ;; Matrix component d (row 2, col 1)
+        (param $e {precision})  ;; Matrix component e (row 2, col 2)
+        (param $f {precision})  ;; Matrix component f (row 2, col 3)
+        (param $g {precision})  ;; Matrix component g (row 3, col 1)
+        (param $h {precision})  ;; Matrix component h (row 3, col 2)
+        (param $i {precision})  ;; Matrix component i (row 3, col 3)
+        (param $x {precision})  ;; Vector component x
+        (param $y {precision})  ;; Vector component y
+        (param $z {precision})  ;; Vector component z
+        (result {precision} {precision} {precision}) ;; Resulting vector components
+
+        ;; Compute the first component of the resulting vector: a*x + b*y + c*z
+        local.get $a
+        local.get $x
+        {precision}.mul
+        local.get $b
+        local.get $y
+        {precision}.mul
+        {precision}.add
+        local.get $c
+        local.get $z
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the second component of the resulting vector: d*x + e*y + f*z
+        local.get $d
+        local.get $x
+        {precision}.mul
+        local.get $e
+        local.get $y
+        {precision}.mul
+        {precision}.add
+        local.get $f
+        local.get $z
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the third component of the resulting vector: g*x + h*y + i*z
+        local.get $g
+        local.get $x
+        {precision}.mul
+        local.get $h
+        local.get $y
+        {precision}.mul
+        {precision}.add
+        local.get $i
+        local.get $z
+        {precision}.mul
+        {precision}.add
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    /// vec3 op mat3
+    pub fn gen_vec3_mat3(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_vec3_{}_mat3_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let precision = format!("f{}", self.pr);
+
+        let str = format!(
+            r#"
+    ;; vec3 {op} mat3 ({data_type})
+    (func ${func_name}
+        (param $v1 {precision})  ;; Vector component 1
+        (param $v2 {precision})  ;; Vector component 2
+        (param $v3 {precision})  ;; Vector component 3
+        (param $a {precision})  ;; Matrix row 1, col 1
+        (param $b {precision})  ;; Matrix row 1, col 2
+        (param $c {precision})  ;; Matrix row 1, col 3
+        (param $d {precision})  ;; Matrix row 2, col 1
+        (param $e {precision})  ;; Matrix row 2, col 2
+        (param $f {precision})  ;; Matrix row 2, col 3
+        (param $g {precision})  ;; Matrix row 3, col 1
+        (param $h {precision})  ;; Matrix row 3, col 2
+        (param $i {precision})  ;; Matrix row 3, col 3
+        (result {precision} {precision} {precision}) ;; Resulting vector components
+
+        ;; Compute the first component of the resulting vector: v1*a + v2*b + v3*c
+        local.get $v1
+        local.get $a
+        {precision}.mul
+        local.get $v2
+        local.get $b
+        {precision}.mul
+        {precision}.add
+        local.get $v3
+        local.get $c
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the second component of the resulting vector: v1*d + v2*e + v3*f
+        local.get $v1
+        local.get $d
+        {precision}.mul
+        local.get $v2
+        local.get $e
+        {precision}.mul
+        {precision}.add
+        local.get $v3
+        local.get $f
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the third component of the resulting vector: v1*g + v2*h + v3*i
+        local.get $v1
+        local.get $g
+        {precision}.mul
+        local.get $v2
+        local.get $h
+        {precision}.mul
+        {precision}.add
+        local.get $v3
+        local.get $i
+        {precision}.mul
+        {precision}.add
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    /// mat4 op vec4
+    pub fn gen_mat4_vec4(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_mat4_{}_vec4_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let precision = format!("f{}", self.pr);
+
+        let str = format!(
+            r#"
+    ;; mat4 {op} vec4 ({data_type})
+    (func ${func_name}
+        (param $a {precision})  ;; Matrix component a (row 1, col 1)
+        (param $b {precision})  ;; Matrix component b (row 1, col 2)
+        (param $c {precision})  ;; Matrix component c (row 1, col 3)
+        (param $d {precision})  ;; Matrix component d (row 1, col 4)
+        (param $e {precision})  ;; Matrix component e (row 2, col 1)
+        (param $f {precision})  ;; Matrix component f (row 2, col 2)
+        (param $g {precision})  ;; Matrix component g (row 2, col 3)
+        (param $h {precision})  ;; Matrix component h (row 2, col 4)
+        (param $i {precision})  ;; Matrix component i (row 3, col 1)
+        (param $j {precision})  ;; Matrix component j (row 3, col 2)
+        (param $k {precision})  ;; Matrix component k (row 3, col 3)
+        (param $l {precision})  ;; Matrix component l (row 3, col 4)
+        (param $m {precision})  ;; Matrix component m (row 4, col 1)
+        (param $n {precision})  ;; Matrix component n (row 4, col 2)
+        (param $o {precision})  ;; Matrix component o (row 4, col 3)
+        (param $p {precision})  ;; Matrix component p (row 4, col 4)
+        (param $x {precision})  ;; Vector component x
+        (param $y {precision})  ;; Vector component y
+        (param $z {precision})  ;; Vector component z
+        (param $w {precision})  ;; Vector component w
+        (result {precision} {precision} {precision} {precision}) ;; Resulting vector components
+
+        ;; Compute the first component of the resulting vector: a*x + b*y + c*z + d*w
+        local.get $a
+        local.get $x
+        {precision}.mul
+        local.get $b
+        local.get $y
+        {precision}.mul
+        {precision}.add
+        local.get $c
+        local.get $z
+        {precision}.mul
+        {precision}.add
+        local.get $d
+        local.get $w
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the second component of the resulting vector: e*x + f*y + g*z + h*w
+        local.get $e
+        local.get $x
+        {precision}.mul
+        local.get $f
+        local.get $y
+        {precision}.mul
+        {precision}.add
+        local.get $g
+        local.get $z
+        {precision}.mul
+        {precision}.add
+        local.get $h
+        local.get $w
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the third component of the resulting vector: i*x + j*y + k*z + l*w
+        local.get $i
+        local.get $x
+        {precision}.mul
+        local.get $j
+        local.get $y
+        {precision}.mul
+        {precision}.add
+        local.get $k
+        local.get $z
+        {precision}.mul
+        {precision}.add
+        local.get $l
+        local.get $w
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the fourth component of the resulting vector: m*x + n*y + o*z + p*w
+        local.get $m
+        local.get $x
+        {precision}.mul
+        local.get $n
+        local.get $y
+        {precision}.mul
+        {precision}.add
+        local.get $o
+        local.get $z
+        {precision}.mul
+        {precision}.add
+        local.get $p
+        local.get $w
+        {precision}.mul
+        {precision}.add
+
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
+
+    /// vec4 op mat4
+    pub fn gen_vec4_mat4(&mut self, data_type: &str, op: &str) {
+        let func_name = format!("_rpu_vec4_{}_mat4_{}", op, data_type);
+
+        if self.math_funcs_included.contains(&func_name) {
+            return;
+        }
+
+        let precision = format!("f{}", self.pr);
+
+        let str = format!(
+            r#"
+    ;; vec4 {op} mat4 ({data_type})
+    (func ${func_name}
+        (param $v1 {precision})  ;; Vector component 1
+        (param $v2 {precision})  ;; Vector component 2
+        (param $v3 {precision})  ;; Vector component 3
+        (param $v4 {precision})  ;; Vector component 4
+        (param $a {precision})  ;; Matrix column 1, row 1
+        (param $e {precision})  ;; Matrix column 1, row 2
+        (param $i {precision})  ;; Matrix column 1, row 3
+        (param $m {precision})  ;; Matrix column 1, row 4
+        (param $b {precision})  ;; Matrix column 2, row 1
+        (param $f {precision})  ;; Matrix column 2, row 2
+        (param $j {precision})  ;; Matrix column 2, row 3
+        (param $n {precision})  ;; Matrix column 2, row 4
+        (param $c {precision})  ;; Matrix column 3, row 1
+        (param $g {precision})  ;; Matrix column 3, row 2
+        (param $k {precision})  ;; Matrix column 3, row 3
+        (param $o {precision})  ;; Matrix column 3, row 4
+        (param $d {precision})  ;; Matrix column 4, row 1
+        (param $h {precision})  ;; Matrix column 4, row 2
+        (param $l {precision})  ;; Matrix column 4, row 3
+        (param $p {precision})  ;; Matrix column 4, row 4
+        (result {precision} {precision} {precision} {precision}) ;; Resulting vector components
+
+        ;; Compute the first component of the resulting vector
+        local.get $v1
+        local.get $a
+        {precision}.mul
+        local.get $v2
+        local.get $e
+        {precision}.mul
+        {precision}.add
+        local.get $v3
+        local.get $i
+        {precision}.mul
+        {precision}.add
+        local.get $v4
+        local.get $m
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the second component of the resulting vector
+        local.get $v1
+        local.get $b
+        {precision}.mul
+        local.get $v2
+        local.get $f
+        {precision}.mul
+        {precision}.add
+        local.get $v3
+        local.get $j
+        {precision}.mul
+        {precision}.add
+        local.get $v4
+        local.get $n
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the third component of the resulting vector
+        local.get $v1
+        local.get $c
+        {precision}.mul
+        local.get $v2
+        local.get $g
+        {precision}.mul
+        {precision}.add
+        local.get $v3
+        local.get $k
+        {precision}.mul
+        {precision}.add
+        local.get $v4
+        local.get $o
+        {precision}.mul
+        {precision}.add
+
+        ;; Compute the fourth component of the resulting vector
+        local.get $v1
+        local.get $d
+        {precision}.mul
+        local.get $v2
+        local.get $h
+        {precision}.mul
+        {precision}.add
+        local.get $v3
+        local.get $l
+        {precision}.mul
+        {precision}.add
+        local.get $v4
+        local.get $p
+        {precision}.mul
+        {precision}.add
+    )
+"#,
+            func_name = func_name,
+            data_type = data_type,
+            op = op
+        );
+
+        self.math_funcs_included.insert(func_name);
+        self.math_funcs.push_str(&str);
+    }
 }

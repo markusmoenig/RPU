@@ -20,6 +20,7 @@ impl ColorBuffer {
         }
     }
 
+    /// Get the color of a pixel
     #[inline(always)]
     pub fn at(&self, x: usize, y: usize) -> [f64; 4] {
         let i = y * self.width * 4 + x * 4;
@@ -31,14 +32,16 @@ impl ColorBuffer {
         ]
     }
 
+    /// Set the color of a pixel
     pub fn set(&mut self, x: usize, y: usize, color: [f64; 4]) {
         let i = y * self.width * 4 + x * 4;
         self.pixels[i..i + 4].copy_from_slice(&color);
     }
 
-    pub fn set_pixels(&mut self, x: usize, y: usize, width: usize, height: usize, pixels: &[f64]) {
-        for local_y in 0..height {
-            for local_x in 0..width {
+    /// Copy the pixels from another buffer to this buffer
+    pub fn copy_from(&mut self, x: usize, y: usize, other: &ColorBuffer) {
+        for local_y in 0..other.height {
+            for local_x in 0..other.width {
                 let global_x = x + local_x;
                 let global_y = y + local_y;
 
@@ -47,9 +50,9 @@ impl ColorBuffer {
                 }
 
                 let index = (global_y * self.width + global_x) * 4;
-                let local_index = (local_y * width + local_x) * 4;
+                let local_index = (local_y * other.width + local_x) * 4;
                 self.pixels[index..index + 4]
-                    .copy_from_slice(&pixels[local_index..local_index + 4]);
+                    .copy_from_slice(&other.pixels[local_index..local_index + 4]);
             }
         }
     }
@@ -97,6 +100,7 @@ impl ColorBuffer {
         out
     }
 
+    /// Save the buffer to a file as PNG
     pub fn save(&self, path: std::path::PathBuf) {
         let mut image = image::ImageBuffer::new(self.width as u32, self.height as u32);
 

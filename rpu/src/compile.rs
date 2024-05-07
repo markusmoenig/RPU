@@ -391,6 +391,17 @@ impl Visitor for CompileVisitor {
                 let instr = format!("local.set ${}_x", name);
                 ctx.add_wat(&instr);
             }
+            ASTValue::Mat2(_, _) | ASTValue::Mat3(_, _) | ASTValue::Mat4(_, _) => {
+                let comps = v.write_definition("local", name, &ctx.pr);
+                for c in comps {
+                    ctx.wat_locals.push_str(&format!("        {}\n", c));
+                }
+                let comps = v.write_access("local.set", name);
+                for c in comps.iter().rev() {
+                    ctx.add_wat(c);
+                }
+            }
+
             _ => {}
         }
 
@@ -402,6 +413,7 @@ impl Visitor for CompileVisitor {
     fn variable_assignment(
         &mut self,
         name: String,
+        op: &AssignmentOperator,
         swizzle: &[u8],
         expression: &Expr,
         loc: &Location,
@@ -445,16 +457,54 @@ impl Visitor for CompileVisitor {
         }
 
         match &v {
-            ASTValue::Int(_, _) | ASTValue::Float(_, _) => {
-                let instr = format!("local.set ${}", name);
-                ctx.add_wat(&instr);
-            }
+            ASTValue::Int(_, _) | ASTValue::Float(_, _) => match op {
+                AssignmentOperator::Assign => {
+                    let instr = format!("local.set ${}", name);
+                    ctx.add_wat(&instr);
+                }
+                _ => {
+                    let instr = format!("local.get ${}", name);
+                    ctx.add_wat(&instr);
+                    let instr =
+                        format!("{}.{}", v.to_wat_component_type(&ctx.pr), op.to_wat_type());
+                    ctx.add_wat(&instr);
+                    let instr = format!("local.set ${}", name);
+                    ctx.add_wat(&instr);
+                }
+            },
             ASTValue::Int2(_, _, _) | ASTValue::Float2(_, _, _) => {
                 if swizzle.is_empty() {
-                    let instr = format!("local.set ${}_y", name);
-                    ctx.add_wat(&instr);
-                    let instr = format!("local.set ${}_x", name);
-                    ctx.add_wat(&instr);
+                    match op {
+                        AssignmentOperator::Assign => {
+                            let instr = format!("local.set ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_x", name);
+                            ctx.add_wat(&instr);
+                        }
+                        _ => {
+                            let instr = format!("local.get ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_y", name);
+                            ctx.add_wat(&instr);
+
+                            let instr = format!("local.get ${}_x", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_x", name);
+                            ctx.add_wat(&instr);
+                        }
+                    }
                 } else {
                     for s in swizzle.iter().rev() {
                         match s {
@@ -480,12 +530,50 @@ impl Visitor for CompileVisitor {
             }
             ASTValue::Int3(_, _, _, _) | ASTValue::Float3(_, _, _, _) => {
                 if swizzle.is_empty() {
-                    let instr = format!("local.set ${}_z", name);
-                    ctx.add_wat(&instr);
-                    let instr = format!("local.set ${}_y", name);
-                    ctx.add_wat(&instr);
-                    let instr = format!("local.set ${}_x", name);
-                    ctx.add_wat(&instr);
+                    match op {
+                        AssignmentOperator::Assign => {
+                            let instr = format!("local.set ${}_z", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_x", name);
+                            ctx.add_wat(&instr);
+                        }
+                        _ => {
+                            let instr = format!("local.get ${}_z", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_z", name);
+                            ctx.add_wat(&instr);
+
+                            let instr = format!("local.get ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_y", name);
+                            ctx.add_wat(&instr);
+
+                            let instr = format!("local.get ${}_x", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_x", name);
+                            ctx.add_wat(&instr);
+                        }
+                    }
                 } else {
                     for s in swizzle.iter().rev() {
                         match s {
@@ -515,14 +603,63 @@ impl Visitor for CompileVisitor {
             }
             ASTValue::Int4(_, _, _, _, _) | ASTValue::Float4(_, _, _, _, _) => {
                 if swizzle.is_empty() {
-                    let instr = format!("local.set ${}_w", name);
-                    ctx.add_wat(&instr);
-                    let instr = format!("local.set ${}_z", name);
-                    ctx.add_wat(&instr);
-                    let instr = format!("local.set ${}_y", name);
-                    ctx.add_wat(&instr);
-                    let instr = format!("local.set ${}_x", name);
-                    ctx.add_wat(&instr);
+                    match op {
+                        AssignmentOperator::Assign => {
+                            let instr = format!("local.set ${}_w", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_z", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_x", name);
+                            ctx.add_wat(&instr);
+                        }
+                        _ => {
+                            let instr = format!("local.get ${}_w", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_w", name);
+                            ctx.add_wat(&instr);
+
+                            let instr = format!("local.get ${}_w", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_z", name);
+                            ctx.add_wat(&instr);
+
+                            let instr = format!("local.get ${}_y", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_y", name);
+                            ctx.add_wat(&instr);
+
+                            let instr = format!("local.get ${}_x", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!(
+                                "{}.{}",
+                                v.to_wat_component_type(&ctx.pr),
+                                op.to_wat_type()
+                            );
+                            ctx.add_wat(&instr);
+                            let instr = format!("local.set ${}_x", name);
+                            ctx.add_wat(&instr);
+                        }
+                    }
                 } else {
                     for s in swizzle.iter().rev() {
                         match s {
@@ -795,11 +932,23 @@ impl Visitor for CompileVisitor {
                         }
                     }
                 }
+                ASTValue::Mat2(_, _) | ASTValue::Mat3(_, _) | ASTValue::Mat4(_, _) => {
+                    let instr = format!("{}.get", scope);
+                    let comps = v.write_access(&instr, &name);
+
+                    for c in comps {
+                        ctx.add_wat(&c);
+                    }
+
+                    rc = v;
+                }
 
                 _ => {}
             }
         } else if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
             rc = ASTValue::Function(name.clone(), args.clone(), body.clone());
+        } else {
+            return Err(format!("Unknown identifier {}", loc.describe()));
         }
 
         if !instr.is_empty() {
@@ -1007,17 +1156,24 @@ impl Visitor for CompileVisitor {
                 instr = "".to_string();
                 let comps: i32 = comps_txt.unwrap().parse().unwrap();
                 if swizzle.is_empty() {
+                    let mut to_go = 2;
                     let _x = x.accept(self, ctx)?;
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
+                    to_go -= _x.components();
+                    if to_go > 0 && comps > 1 {
+                        let _y = y.accept(self, ctx)?;
+                        to_go -= _y.components();
+                    }
+
+                    // If only one float, fill with x
+                    if to_go > 0 && comps == 1 && _x.components() == 1 {
+                        for _ in 0..to_go {
                             _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = y.accept(self, ctx)?;
                         }
-                    } else {
-                        _ = y.accept(self, ctx)?;
+                        to_go = 0;
+                    }
+
+                    if to_go != 0 {
+                        return Err(format!("Not enough components for vec2 {}", loc.describe()));
                     }
                     rc = ASTValue::Float2(None, x, y);
                 } else {
@@ -1042,28 +1198,28 @@ impl Visitor for CompileVisitor {
                 instr = "".to_string();
                 let comps: i32 = comps_txt.unwrap().parse().unwrap();
                 if swizzle.is_empty() {
+                    let mut to_go = 3;
                     let _x = x.accept(self, ctx)?;
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = y.accept(self, ctx)?;
+                    to_go -= _x.components();
+                    if to_go > 0 && comps > 1 {
+                        let _y = y.accept(self, ctx)?;
+                        to_go -= _y.components();
+                        if to_go > 0 && comps > 2 {
+                            let _z = z.accept(self, ctx)?;
+                            to_go -= _z.components();
                         }
-                    } else {
-                        _ = y.accept(self, ctx)?;
                     }
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
+
+                    // If only one float, fill with x
+                    if to_go > 0 && comps == 1 && _x.components() == 1 {
+                        for _ in 0..to_go {
                             _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = z.accept(self, ctx)?;
                         }
-                    } else {
-                        _ = z.accept(self, ctx)?;
+                        to_go = 0;
+                    }
+
+                    if to_go != 0 {
+                        return Err(format!("Not enough components for vec3 {}", loc.describe()));
                     }
                     rc = ASTValue::Float3(None, x, y, z);
                 } else {
@@ -1094,40 +1250,34 @@ impl Visitor for CompileVisitor {
             ASTValue::Float4(comps_txt, x, y, z, w) => {
                 instr = "".to_string();
                 let comps: i32 = comps_txt.unwrap().parse().unwrap();
+
                 if swizzle.is_empty() {
+                    let mut to_go = 4;
                     let _x = x.accept(self, ctx)?;
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = y.accept(self, ctx)?;
+                    to_go -= _x.components();
+                    if to_go > 0 && comps > 1 {
+                        let _y = y.accept(self, ctx)?;
+                        to_go -= _y.components();
+                        if to_go > 0 && comps > 2 {
+                            let _z = z.accept(self, ctx)?;
+                            to_go -= _z.components();
+                            if to_go > 0 && comps > 3 {
+                                let _w = w.accept(self, ctx)?;
+                                to_go -= _w.components();
+                            }
                         }
-                    } else {
-                        _ = y.accept(self, ctx)?;
                     }
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
+
+                    // If only one float, fill with x
+                    if to_go > 0 && comps == 1 && _x.components() == 1 {
+                        for _ in 0..to_go {
                             _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = z.accept(self, ctx)?;
                         }
-                    } else {
-                        _ = z.accept(self, ctx)?;
+                        to_go = 0;
                     }
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = w.accept(self, ctx)?;
-                        }
-                    } else {
-                        _ = w.accept(self, ctx)?;
+
+                    if to_go != 0 {
+                        return Err(format!("Not enough components for vec4 {}", loc.describe()));
                     }
                     rc = ASTValue::Float4(None, x, y, z, w);
                 } else {
@@ -1162,9 +1312,30 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
+            ASTValue::Mat2(comps_txt, comps) => {
+                instr = "".to_string();
+                for comp in &comps {
+                    let _ = comp.accept(self, ctx)?;
+                }
+                rc = ASTValue::Mat2(comps_txt, comps);
+            }
+            ASTValue::Mat3(comps_txt, comps) => {
+                instr = "".to_string();
+                for comp in &comps {
+                    let _ = comp.accept(self, ctx)?;
+                }
+                rc = ASTValue::Mat3(comps_txt, comps);
+            }
+            ASTValue::Mat4(comps_txt, comps) => {
+                instr = "".to_string();
+                for comp in &comps {
+                    let _ = comp.accept(self, ctx)?;
+                }
+                rc = ASTValue::Mat4(comps_txt, comps);
+            }
 
             _ => {
-                instr = "".to_string();
+                return Err(format!("Unknown value at {}", loc.describe()));
             }
         };
 
@@ -1737,6 +1908,132 @@ impl Visitor for CompileVisitor {
                     BinaryOperator::Divide => {
                         ctx.gen_vec4_vec4(&format!("f{}", ctx.pr), "div");
                         format!("(call $_rpu_vec4_div_vec4_f{})", ctx.pr)
+                    }
+                }
+            }
+            // Mat2 x Float2
+            (ASTValue::Mat2(_, _), ASTValue::Float2(_, _, _)) => {
+                rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Multiply => {
+                        ctx.gen_mat2_vec2(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_mat2_mul_vec2_f{})", ctx.pr)
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Invalid operator '{}' for types '{}' '{}' {}",
+                            op.describe(),
+                            left_type.to_type(),
+                            right_type.to_type(),
+                            loc.describe()
+                        ))
+                    }
+                }
+            }
+            // Float2 x Mat2
+            (ASTValue::Float2(_, _, _), ASTValue::Mat2(_, _)) => {
+                rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec2_mat2(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec2_mul_mat2_f{})", ctx.pr)
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Invalid operator '{}' for types '{}' '{}' {}",
+                            op.describe(),
+                            left_type.to_type(),
+                            right_type.to_type(),
+                            loc.describe()
+                        ))
+                    }
+                }
+            }
+            // Mat3 x Float3
+            (ASTValue::Mat3(_, _), ASTValue::Float3(_, _, _, _)) => {
+                rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Multiply => {
+                        ctx.gen_mat3_vec3(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_mat3_mul_vec3_f{})", ctx.pr)
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Invalid operator '{}' for types '{}' '{}' {}",
+                            op.describe(),
+                            left_type.to_type(),
+                            right_type.to_type(),
+                            loc.describe()
+                        ))
+                    }
+                }
+            }
+            // Float3 x Mat3
+            (ASTValue::Float3(_, _, _, _), ASTValue::Mat3(_, _)) => {
+                rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                match op {
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec3_mat3(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec3_mul_mat3_f{})", ctx.pr)
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Invalid operator '{}' for types '{}' '{}' {}",
+                            op.describe(),
+                            left_type.to_type(),
+                            right_type.to_type(),
+                            loc.describe()
+                        ))
+                    }
+                }
+            }
+            // Mat4 x Float4
+            (ASTValue::Mat4(_, _), ASTValue::Float4(_, _, _, _, _)) => {
+                rc = ASTValue::Float4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                );
+                match op {
+                    BinaryOperator::Multiply => {
+                        ctx.gen_mat4_vec4(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_mat4_mul_vec4_f{})", ctx.pr)
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Invalid operator '{}' for types '{}' '{}' {}",
+                            op.describe(),
+                            left_type.to_type(),
+                            right_type.to_type(),
+                            loc.describe()
+                        ))
+                    }
+                }
+            }
+            // Float4 x Mat4
+            (ASTValue::Float4(_, _, _, _, _), ASTValue::Mat4(_, _)) => {
+                rc = ASTValue::Float4(
+                    None,
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                    empty_expr!(),
+                );
+                match op {
+                    BinaryOperator::Multiply => {
+                        ctx.gen_vec4_mat4(&format!("f{}", ctx.pr), "mul");
+                        format!("(call $_rpu_vec4_mul_mat4_f{})", ctx.pr)
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Invalid operator '{}' for types '{}' '{}' {}",
+                            op.describe(),
+                            left_type.to_type(),
+                            right_type.to_type(),
+                            loc.describe()
+                        ))
                     }
                 }
             }
