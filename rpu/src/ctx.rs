@@ -163,6 +163,57 @@ impl Context {
         }
     }
 
+    /// Reads the components for stack_value into memory and than swizzles back onto the stack.
+    pub fn swizzle_it(
+        &mut self,
+        stack_value: &ASTValue,
+        swizzle: &[u8],
+        _loc: &Location,
+    ) -> Result<ASTValue, String> {
+        let components = stack_value.components();
+        let component_size = self.precision.size();
+        let type_str = if stack_value.is_float_based() {
+            "f"
+        } else {
+            "i"
+        };
+
+        let temp = self.add_temporary(stack_value);
+
+        // Read the components into memory
+        for i in (0..components).rev() {
+            let instr = format!("local.set ${}", temp);
+            self.add_wat(&instr);
+
+            let instr = format!("(i32.const {})", i * component_size);
+            self.add_wat(&instr);
+
+            let instr = format!("local.get ${}", temp);
+            self.add_wat(&instr);
+
+            let instr = format!("({}{}.store)", type_str, self.pr);
+            self.add_wat(&instr);
+        }
+
+        // Swizzle the components back onto the stack
+        for s in swizzle.iter() {
+            let instr = format!("(i32.const {})", *s as usize * component_size);
+            self.add_wat(&instr);
+            let instr = format!("({}{}.load)", type_str, self.pr,);
+            self.add_wat(&instr);
+
+            /*
+            return Err(format!(
+                "Invalid swizzle component '{}' {}",
+                self.deswizzle(*i),
+                loc.describe()
+            ));
+            }*/
+        }
+
+        Ok(ASTValue::None)
+    }
+
     /// Create the return value from a swizzle.
     pub fn create_value_from_swizzle(&self, base: &ASTValue, components: usize) -> ASTValue {
         if base.is_float_based() {

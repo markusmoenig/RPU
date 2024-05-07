@@ -776,40 +776,46 @@ impl Visitor for CompileVisitor {
             }
         }
 
+        fn process_swizzle(
+            v: &ASTValue,
+            swizzle: &[u8],
+            scope: &str,
+            name: &str,
+            ctx: &mut Context,
+        ) {
+            if !swizzle.is_empty() {
+                let components = v.components();
+                for s in swizzle {
+                    if *s < components as u8 {
+                        let instr = format!("{}.get ${}_{}", scope, name, ctx.deswizzle(*s));
+                        ctx.add_wat(&instr);
+                    }
+                }
+            }
+        }
+
         if let Some(v) = vv {
             if !swizzle.is_empty() {
                 rc = ctx.create_value_from_swizzle(&v, swizzle.len());
             }
             match &v {
-                ASTValue::Int(_, _) => {
+                ASTValue::Int(_, _) | ASTValue::Float(_, _) => {
                     let instr = format!("{}.get ${}", scope, name);
                     ctx.add_wat(&instr);
-                    rc = ASTValue::Int(None, 0);
+                    rc = v.clone();
                 }
-                ASTValue::Int2(_, _, _) => {
+                ASTValue::Int2(_, _, _) | ASTValue::Float2(_, _, _) => {
                     if swizzle.is_empty() {
                         let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
                         let instr = format!("{}.get ${}_y", scope, name);
                         ctx.add_wat(&instr);
-                        rc = ASTValue::Int2(None, empty_expr!(), empty_expr!());
+                        rc = v.clone();
                     } else {
-                        for s in swizzle {
-                            match s {
-                                0 => {
-                                    let instr = format!("{}.get ${}_x", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                1 => {
-                                    let instr = format!("{}.get ${}_y", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                _ => {}
-                            }
-                        }
+                        process_swizzle(&v, swizzle, scope, &name, ctx);
                     }
                 }
-                ASTValue::Int3(_, _, _, _) => {
+                ASTValue::Int3(_, _, _, _) | ASTValue::Float3(_, _, _, _) => {
                     if swizzle.is_empty() {
                         let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
@@ -817,28 +823,12 @@ impl Visitor for CompileVisitor {
                         ctx.add_wat(&instr);
                         let instr = format!("{}.get ${}_z", scope, name);
                         ctx.add_wat(&instr);
-                        rc = ASTValue::Int3(None, empty_expr!(), empty_expr!(), empty_expr!());
+                        rc = v.clone();
                     } else {
-                        for s in swizzle {
-                            match s {
-                                0 => {
-                                    let instr = format!("{}.get ${}_x", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                1 => {
-                                    let instr = format!("{}.get ${}_y", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                2 => {
-                                    let instr = format!("{}.get ${}_z", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                _ => {}
-                            }
-                        }
+                        process_swizzle(&v, swizzle, scope, &name, ctx);
                     }
                 }
-                ASTValue::Int4(_, _, _, _, _) => {
+                ASTValue::Int4(_, _, _, _, _) | ASTValue::Float4(_, _, _, _, _) => {
                     if swizzle.is_empty() {
                         let instr = format!("{}.get ${}_x", scope, name);
                         ctx.add_wat(&instr);
@@ -848,133 +838,9 @@ impl Visitor for CompileVisitor {
                         ctx.add_wat(&instr);
                         let instr = format!("{}.get ${}_w", scope, name);
                         ctx.add_wat(&instr);
-                        rc = ASTValue::Int4(
-                            None,
-                            empty_expr!(),
-                            empty_expr!(),
-                            empty_expr!(),
-                            empty_expr!(),
-                        );
+                        rc = v.clone();
                     } else {
-                        for s in swizzle {
-                            match s {
-                                0 => {
-                                    let instr = format!("{}.get ${}_x", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                1 => {
-                                    let instr = format!("{}.get ${}_y", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                2 => {
-                                    let instr = format!("{}.get ${}_z", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                3 => {
-                                    let instr = format!("{}.get ${}_w", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                ASTValue::Float(_, _) => {
-                    let instr = format!("{}.get ${}", scope, name);
-                    ctx.add_wat(&instr);
-                    rc = ASTValue::Float(None, 0.0);
-                }
-                ASTValue::Float2(_, _, _) => {
-                    if swizzle.is_empty() {
-                        let instr = format!("{}.get ${}_x", scope, name);
-                        ctx.add_wat(&instr);
-                        let instr = format!("{}.get ${}_y", scope, name);
-                        ctx.add_wat(&instr);
-                        rc = ASTValue::Float2(None, empty_expr!(), empty_expr!());
-                    } else {
-                        for s in swizzle {
-                            match s {
-                                0 => {
-                                    let instr = format!("{}.get ${}_x", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                1 => {
-                                    let instr = format!("{}.get ${}_y", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                ASTValue::Float3(_, _, _, _) => {
-                    if swizzle.is_empty() {
-                        let instr = format!("{}.get ${}_x", scope, name);
-                        ctx.add_wat(&instr);
-                        let instr = format!("{}.get ${}_y", scope, name);
-                        ctx.add_wat(&instr);
-                        let instr = format!("{}.get ${}_z", scope, name);
-                        ctx.add_wat(&instr);
-                        rc = ASTValue::Float3(None, empty_expr!(), empty_expr!(), empty_expr!());
-                    } else {
-                        for s in swizzle {
-                            match s {
-                                0 => {
-                                    let instr = format!("{}.get ${}_x", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                1 => {
-                                    let instr = format!("{}.get ${}_y", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                2 => {
-                                    let instr = format!("{}.get ${}_z", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                ASTValue::Float4(_, _, _, _, _) => {
-                    if swizzle.is_empty() {
-                        let instr = format!("{}.get ${}_x", scope, name);
-                        ctx.add_wat(&instr);
-                        let instr = format!("{}.get ${}_y", scope, name);
-                        ctx.add_wat(&instr);
-                        let instr = format!("{}.get ${}_z", scope, name);
-                        ctx.add_wat(&instr);
-                        let instr = format!("{}.get ${}_w", scope, name);
-                        ctx.add_wat(&instr);
-                        rc = ASTValue::Float4(
-                            None,
-                            empty_expr!(),
-                            empty_expr!(),
-                            empty_expr!(),
-                            empty_expr!(),
-                        );
-                    } else {
-                        for s in swizzle {
-                            match s {
-                                0 => {
-                                    let instr = format!("{}.get ${}_x", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                1 => {
-                                    let instr = format!("{}.get ${}_y", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                2 => {
-                                    let instr = format!("{}.get ${}_z", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                3 => {
-                                    let instr = format!("{}.get ${}_w", scope, name);
-                                    ctx.add_wat(&instr);
-                                }
-                                _ => {}
-                            }
-                        }
+                        process_swizzle(&v, swizzle, scope, &name, ctx);
                     }
                 }
                 ASTValue::Mat2(_, _) | ASTValue::Mat3(_, _) | ASTValue::Mat4(_, _) => {
@@ -1010,7 +876,7 @@ impl Visitor for CompileVisitor {
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
-        let mut rc = ASTValue::None;
+        let rc;
         let instr;
 
         if swizzle.len() > 4 {
@@ -1021,362 +887,151 @@ impl Visitor for CompileVisitor {
             ));
         }
 
-        if !swizzle.is_empty() {
-            rc = ctx.create_value_from_swizzle(&value, swizzle.len());
-        }
-
-        match value {
+        match &value {
             ASTValue::Boolean(_, f) => {
                 instr = format!("(f{}.const {})", ctx.pr, f);
-                rc = ASTValue::Boolean(None, f);
+                rc = ASTValue::Boolean(None, *f);
             }
             ASTValue::Int(_, i) => {
                 instr = format!("(i{}.const {})", ctx.pr, i);
-                rc = ASTValue::Int(None, i);
-            }
-            ASTValue::Int2(comps_txt, x, y) => {
-                instr = "".to_string();
-                let comps: i32 = comps_txt.unwrap().parse().unwrap();
-                if swizzle.is_empty() {
-                    let _x = x.accept(self, ctx)?;
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = y.accept(self, ctx)?;
-                        }
-                    } else {
-                        _ = y.accept(self, ctx)?;
-                    }
-                    rc = ASTValue::Int2(None, x, y);
-                } else {
-                    for s in swizzle {
-                        match s {
-                            0 => {
-                                _ = x.accept(self, ctx)?;
-                            }
-                            1 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = y.accept(self, ctx)?;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            ASTValue::Int3(comps_txt, x, y, z) => {
-                instr = "".to_string();
-                let comps: i32 = comps_txt.unwrap().parse().unwrap();
-                if swizzle.is_empty() {
-                    let _x = x.accept(self, ctx)?;
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = y.accept(self, ctx)?;
-                        }
-                    } else {
-                        _ = y.accept(self, ctx)?;
-                    }
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = z.accept(self, ctx)?;
-                        }
-                    } else {
-                        _ = z.accept(self, ctx)?;
-                    }
-                    rc = ASTValue::Int3(None, x, y, z);
-                } else {
-                    for s in swizzle {
-                        match s {
-                            0 => {
-                                _ = x.accept(self, ctx)?;
-                            }
-                            1 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = y.accept(self, ctx)?;
-                                }
-                            }
-                            2 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = z.accept(self, ctx)?;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            ASTValue::Int4(comps_txt, x, y, z, w) => {
-                instr = "".to_string();
-                let comps: i32 = comps_txt.unwrap().parse().unwrap();
-                if swizzle.is_empty() {
-                    let _x = x.accept(self, ctx)?;
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = y.accept(self, ctx)?;
-                        }
-                    } else {
-                        _ = y.accept(self, ctx)?;
-                    }
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = z.accept(self, ctx)?;
-                        }
-                    } else {
-                        _ = z.accept(self, ctx)?;
-                    }
-                    if comps == 1 {
-                        if _x.components() == 1 {
-                            // Fill with x
-                            _ = x.accept(self, ctx)?;
-                        } else {
-                            // Fill with zero
-                            _ = w.accept(self, ctx)?;
-                        }
-                    } else {
-                        _ = w.accept(self, ctx)?;
-                    }
-                    rc = ASTValue::Int4(None, x, y, z, w);
-                } else {
-                    for s in swizzle {
-                        match s {
-                            0 => {
-                                _ = x.accept(self, ctx)?;
-                            }
-                            1 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = y.accept(self, ctx)?;
-                                }
-                            }
-                            2 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = z.accept(self, ctx)?;
-                                }
-                            }
-                            3 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = w.accept(self, ctx)?;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+                rc = ASTValue::Int(None, *i);
             }
             ASTValue::Float(_, i) => {
                 instr = format!("(f{}.const {})", ctx.pr, i);
-                rc = ASTValue::Float(None, i);
+                rc = ASTValue::Float(None, *i);
             }
-            ASTValue::Float2(comps_txt, x, y) => {
+            ASTValue::Float2(comps_txt, x, y) | ASTValue::Int2(comps_txt, x, y) => {
                 instr = "".to_string();
-                let comps: i32 = comps_txt.unwrap().parse().unwrap();
-                if swizzle.is_empty() {
-                    let mut to_go = 2;
-                    let _x = x.accept(self, ctx)?;
-                    to_go -= _x.components();
-                    if to_go > 0 && comps > 1 {
-                        let _y = y.accept(self, ctx)?;
-                        to_go -= _y.components();
-                    }
+                let comps: i32 = comps_txt.clone().unwrap().parse().unwrap();
+                let mut to_go = 2;
+                let _x = x.accept(self, ctx)?;
+                to_go -= _x.components();
+                if to_go > 0 && comps > 1 {
+                    let _y = y.accept(self, ctx)?;
+                    to_go -= _y.components();
+                }
 
-                    // If only one float, fill with x
-                    if to_go > 0 && comps == 1 && _x.components() == 1 {
-                        for _ in 0..to_go {
-                            _ = x.accept(self, ctx)?;
-                        }
-                        to_go = 0;
+                // If only one float, fill with x
+                if to_go > 0 && comps == 1 && _x.components() == 1 {
+                    for _ in 0..to_go {
+                        _ = x.accept(self, ctx)?;
                     }
+                    to_go = 0;
+                }
 
-                    if to_go != 0 {
-                        return Err(format!("Not enough components for vec2 {}", loc.describe()));
-                    }
-                    rc = ASTValue::Float2(None, x, y);
+                if to_go != 0 {
+                    return Err(format!(
+                        "Not enough components for '{}' {}",
+                        &value.to_type(),
+                        loc.describe()
+                    ));
+                }
+                if !swizzle.is_empty() {
+                    ctx.swizzle_it(&value, swizzle, loc)?;
+                    rc = ctx.create_value_from_swizzle(&value, swizzle.len());
                 } else {
-                    for s in swizzle {
-                        match s {
-                            0 => {
-                                _ = x.accept(self, ctx)?;
-                            }
-                            1 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = y.accept(self, ctx)?;
-                                }
-                            }
-                            _ => {}
+                    rc = value.clone();
+                }
+            }
+            ASTValue::Float3(comps_txt, x, y, z) | ASTValue::Int3(comps_txt, x, y, z) => {
+                instr = "".to_string();
+                let comps: i32 = comps_txt.clone().unwrap().parse().unwrap();
+                let mut to_go = 3;
+                let _x = x.accept(self, ctx)?;
+                to_go -= _x.components();
+                if to_go > 0 && comps > 1 {
+                    let _y = y.accept(self, ctx)?;
+                    to_go -= _y.components();
+                    if to_go > 0 && comps > 2 {
+                        let _z = z.accept(self, ctx)?;
+                        to_go -= _z.components();
+                    }
+                }
+
+                // If only one float, fill with x
+                if to_go > 0 && comps == 1 && _x.components() == 1 {
+                    for _ in 0..to_go {
+                        _ = x.accept(self, ctx)?;
+                    }
+                    to_go = 0;
+                }
+
+                if to_go != 0 {
+                    return Err(format!(
+                        "Not enough components for '{}' {}",
+                        &value.to_type(),
+                        loc.describe()
+                    ));
+                }
+                if !swizzle.is_empty() {
+                    ctx.swizzle_it(&value, swizzle, loc)?;
+                    rc = ctx.create_value_from_swizzle(&value, swizzle.len());
+                } else {
+                    rc = value.clone();
+                }
+            }
+            ASTValue::Float4(comps_txt, x, y, z, w) | ASTValue::Int4(comps_txt, x, y, z, w) => {
+                instr = "".to_string();
+                let comps: i32 = comps_txt.clone().unwrap().parse().unwrap();
+
+                let mut to_go = 4;
+                let _x = x.accept(self, ctx)?;
+                to_go -= _x.components();
+                if to_go > 0 && comps > 1 {
+                    let _y = y.accept(self, ctx)?;
+                    to_go -= _y.components();
+                    if to_go > 0 && comps > 2 {
+                        let _z = z.accept(self, ctx)?;
+                        to_go -= _z.components();
+                        if to_go > 0 && comps > 3 {
+                            let _w = w.accept(self, ctx)?;
+                            to_go -= _w.components();
                         }
                     }
                 }
-            }
-            ASTValue::Float3(comps_txt, x, y, z) => {
-                instr = "".to_string();
-                let comps: i32 = comps_txt.unwrap().parse().unwrap();
-                if swizzle.is_empty() {
-                    let mut to_go = 3;
-                    let _x = x.accept(self, ctx)?;
-                    to_go -= _x.components();
-                    if to_go > 0 && comps > 1 {
-                        let _y = y.accept(self, ctx)?;
-                        to_go -= _y.components();
-                        if to_go > 0 && comps > 2 {
-                            let _z = z.accept(self, ctx)?;
-                            to_go -= _z.components();
-                        }
-                    }
 
-                    // If only one float, fill with x
-                    if to_go > 0 && comps == 1 && _x.components() == 1 {
-                        for _ in 0..to_go {
-                            _ = x.accept(self, ctx)?;
-                        }
-                        to_go = 0;
+                // If only one float, fill with x
+                if to_go > 0 && comps == 1 && _x.components() == 1 {
+                    for _ in 0..to_go {
+                        _ = x.accept(self, ctx)?;
                     }
+                    to_go = 0;
+                }
 
-                    if to_go != 0 {
-                        return Err(format!("Not enough components for vec3 {}", loc.describe()));
-                    }
-                    rc = ASTValue::Float3(None, x, y, z);
+                if to_go != 0 {
+                    return Err(format!(
+                        "Not enough components for '{}' {}",
+                        &value.to_type(),
+                        loc.describe()
+                    ));
+                }
+                if !swizzle.is_empty() {
+                    ctx.swizzle_it(&value, swizzle, loc)?;
+                    rc = ctx.create_value_from_swizzle(&value, swizzle.len());
                 } else {
-                    for s in swizzle {
-                        match s {
-                            0 => {
-                                _ = x.accept(self, ctx)?;
-                            }
-                            1 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = y.accept(self, ctx)?;
-                                }
-                            }
-                            2 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = z.accept(self, ctx)?;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    rc = value.clone();
                 }
             }
-            ASTValue::Float4(comps_txt, x, y, z, w) => {
+            ASTValue::Mat2(_, comps) => {
                 instr = "".to_string();
-                let comps: i32 = comps_txt.unwrap().parse().unwrap();
-
-                if swizzle.is_empty() {
-                    let mut to_go = 4;
-                    let _x = x.accept(self, ctx)?;
-                    to_go -= _x.components();
-                    if to_go > 0 && comps > 1 {
-                        let _y = y.accept(self, ctx)?;
-                        to_go -= _y.components();
-                        if to_go > 0 && comps > 2 {
-                            let _z = z.accept(self, ctx)?;
-                            to_go -= _z.components();
-                            if to_go > 0 && comps > 3 {
-                                let _w = w.accept(self, ctx)?;
-                                to_go -= _w.components();
-                            }
-                        }
-                    }
-
-                    // If only one float, fill with x
-                    if to_go > 0 && comps == 1 && _x.components() == 1 {
-                        for _ in 0..to_go {
-                            _ = x.accept(self, ctx)?;
-                        }
-                        to_go = 0;
-                    }
-
-                    if to_go != 0 {
-                        return Err(format!("Not enough components for vec4 {}", loc.describe()));
-                    }
-                    rc = ASTValue::Float4(None, x, y, z, w);
-                } else {
-                    for s in swizzle {
-                        match s {
-                            0 => {
-                                _ = x.accept(self, ctx)?;
-                            }
-                            1 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = y.accept(self, ctx)?;
-                                }
-                            }
-                            2 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = z.accept(self, ctx)?;
-                                }
-                            }
-                            3 => {
-                                if comps == 1 {
-                                    _ = x.accept(self, ctx)?;
-                                } else {
-                                    _ = w.accept(self, ctx)?;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            ASTValue::Mat2(comps_txt, comps) => {
-                instr = "".to_string();
-                for comp in &comps {
+                for comp in comps {
                     let _ = comp.accept(self, ctx)?;
                 }
-                rc = ASTValue::Mat2(comps_txt, comps);
+                rc = value.clone();
             }
-            ASTValue::Mat3(comps_txt, comps) => {
+            ASTValue::Mat3(_, comps) => {
                 instr = "".to_string();
-                for comp in &comps {
+                for comp in comps {
                     let _ = comp.accept(self, ctx)?;
                 }
-                rc = ASTValue::Mat3(comps_txt, comps);
+                rc = value.clone();
             }
-            ASTValue::Mat4(comps_txt, comps) => {
+            ASTValue::Mat4(_, comps) => {
                 instr = "".to_string();
-                for comp in &comps {
+                for comp in comps {
                     let _ = comp.accept(self, ctx)?;
                 }
-                rc = ASTValue::Mat4(comps_txt, comps);
+                rc = value.clone();
             }
 
             _ => {
@@ -2110,6 +1765,7 @@ impl Visitor for CompileVisitor {
     fn function_call(
         &mut self,
         callee: &Expr,
+        swizzle: &[u8],
         args: &[Box<Expr>],
         loc: &Location,
         ctx: &mut Context,
@@ -2431,6 +2087,11 @@ impl Visitor for CompileVisitor {
                 let instr = format!("(call ${})", name);
                 ctx.add_wat(&instr);
                 rc = *returns;
+            }
+
+            if !swizzle.is_empty() {
+                ctx.swizzle_it(&rc, swizzle, loc)?;
+                rc = ctx.create_value_from_swizzle(&rc, swizzle.len());
             }
         }
 

@@ -62,12 +62,6 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Result<Stmt, String> {
-        // if self.match_token(vec![TokenType::Fn]) {
-        //     self.function()
-        // } else if self.match_token(vec![TokenType::Int]) {
-        //     self.var_declaration()
-        // }
-
         let mut export = false;
 
         if self.match_token(vec![TokenType::Export]) {
@@ -120,7 +114,11 @@ impl Parser {
 
         self.consume(
             TokenType::Semicolon,
-            "Expect ';' after variable declaration.",
+            &format!(
+                "Expect ';' after variable declaration, found '{}' at line {}.",
+                self.lexeme(),
+                line
+            ),
         )?;
 
         let init = if let Some(i) = initializer {
@@ -665,8 +663,10 @@ impl Parser {
             TokenType::RightParen,
             &format!("Expect ')' after function arguments at line {}.", line),
         )?;
+        let swizzle = self.get_swizzle_at_current();
         Ok(Expr::FunctionCall(
             Box::new(callee),
+            swizzle,
             arguments,
             self.create_loc(paren.line),
         ))
@@ -1172,6 +1172,14 @@ impl Parser {
             }
         }
         None
+    }
+
+    fn lexeme(&self) -> String {
+        if self.current < self.tokens.len() {
+            self.tokens[self.current].lexeme.clone()
+        } else {
+            "".to_string()
+        }
     }
 
     fn check(&self, kind: TokenType) -> bool {

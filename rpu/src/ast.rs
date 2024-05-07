@@ -387,7 +387,7 @@ pub enum Expr {
     Grouping(Box<Expr>, Location),
     Variable(String, Vec<u8>, Location),
     VariableAssignment(String, AssignmentOperator, Vec<u8>, Box<Expr>, Location),
-    FunctionCall(Box<Expr>, Vec<Box<Expr>>, Location),
+    FunctionCall(Box<Expr>, Vec<u8>, Vec<Box<Expr>>, Location),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>, Location),
 }
 
@@ -615,6 +615,7 @@ pub trait Visitor {
     fn function_call(
         &mut self,
         callee: &Expr,
+        swizzle: &[u8],
         args: &[Box<Expr>],
         loc: &Location,
         ctx: &mut Context,
@@ -713,7 +714,9 @@ impl Expr {
             Expr::VariableAssignment(name, op, swizzle, expr, loc) => {
                 visitor.variable_assignment(name.clone(), op, swizzle, expr, loc, ctx)
             }
-            Expr::FunctionCall(callee, args, loc) => visitor.function_call(callee, args, loc, ctx),
+            Expr::FunctionCall(callee, args, swizzle, loc) => {
+                visitor.function_call(callee, args, swizzle, loc, ctx)
+            }
             Expr::Ternary(cond, then_expr, else_expr, loc) => {
                 visitor.ternary(cond, then_expr, else_expr, loc, ctx)
             }

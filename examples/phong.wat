@@ -568,6 +568,7 @@
         (local $h_y f64)
         (local $h_z f64)
         (local $spe f64)
+        (local $_rpu_temp_f64 f64)
         local.get $resolution_x
         local.get $resolution_y
         (call $_rpu_vec2_neg_f64)
@@ -832,13 +833,19 @@
                     (call $_rpu_scalar_mul_vec3_f64)
                     local.get $occ
                     (call $_rpu_vec3_mul_scalar_f64)
+                    local.set $_rpu_temp_f64
                     local.get $color_z
+                    local.get $_rpu_temp_f64
                     f64.add
                     local.set $color_z
+                    local.set $_rpu_temp_f64
                     local.get $color_y
+                    local.get $_rpu_temp_f64
                     f64.add
                     local.set $color_y
+                    local.set $_rpu_temp_f64
                     local.get $color_x
+                    local.get $_rpu_temp_f64
                     f64.add
                     local.set $color_x
                     local.get $dif
@@ -850,13 +857,19 @@
                     (call $_rpu_scalar_mul_vec3_f64)
                     local.get $occ
                     (call $_rpu_vec3_mul_scalar_f64)
+                    local.set $_rpu_temp_f64
                     local.get $color_z
+                    local.get $_rpu_temp_f64
                     f64.add
                     local.set $color_z
+                    local.set $_rpu_temp_f64
                     local.get $color_y
+                    local.get $_rpu_temp_f64
                     f64.add
                     local.set $color_y
+                    local.set $_rpu_temp_f64
                     local.get $color_x
+                    local.get $_rpu_temp_f64
                     f64.add
                     local.set $color_x
                 )
