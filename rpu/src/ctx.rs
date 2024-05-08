@@ -318,7 +318,17 @@ impl Context {
                     );
         }
 
-        output += "\n    (memory 1)\n";
+        output += "\n    (memory 1)\n\n";
+
+        output += "    (global $mem_ptr (mut i32) (i32.const 32)) ;; We keep the first 32 bytes to shuffle stack content\n\n";
+        output += "    ;; Allocate memory and move the memory ptr\n";
+        output += "    (func $alloc (param $size i32) (result i32)\n";
+        output += "      (local $current_ptr i32)\n";
+        output += "      (set_local $current_ptr (global.get $mem_ptr))\n";
+        output += "      (global.set $mem_ptr\n";
+        output += "        (i32.add (get_local $current_ptr) (get_local $size)))\n";
+        output += "      (get_local $current_ptr)\n";
+        output += "    )\n";
 
         // Write out globals
 
@@ -370,7 +380,7 @@ impl Context {
 
         output += &self.math_funcs;
         output += &self.wat;
-        output += &")\n";
+        output += ")\n";
 
         output
     }

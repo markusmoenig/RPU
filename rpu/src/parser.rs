@@ -13,6 +13,9 @@ pub struct Parser {
 
     /// We need to know if we are inside a ternary expression to avoid recursion
     inside_ternary: bool,
+
+    /// Structs
+    structs: FxHashMap<String, Vec<(String, ASTValue)>>,
 }
 
 impl Default for Parser {
@@ -32,6 +35,8 @@ impl Parser {
 
             high_precision: true,
             inside_ternary: false,
+
+            structs: FxHashMap::default(),
         }
     }
 
@@ -64,13 +69,20 @@ impl Parser {
     fn declaration(&mut self) -> Result<Stmt, String> {
         let mut export = false;
 
+        if self.match_token(vec![TokenType::Struct]) {
+            return self.struct_declaration();
+        }
+
         if self.match_token(vec![TokenType::Export]) {
             export = true;
         }
 
         _ = self.match_token(vec![TokenType::Const]);
 
-        if let Some(token_type) = self.match_token_and_return(vec![
+        let mut token_type: Option<ASTValue> = None;
+
+        // Is it a base type ?
+        if let Some(token) = self.match_token_and_return(vec![
             TokenType::Void,
             TokenType::Int,
             TokenType::Int2,
@@ -84,23 +96,113 @@ impl Parser {
             TokenType::Mat3,
             TokenType::Mat4,
         ]) {
-            // Decide between function or var declaration
+            token_type = Some(ASTValue::from_token_type(None, &token));
+        }
 
+        // Is it a struct ?
+        if token_type.is_none() && self.structs.contains_key(&self.tokens[self.current].lexeme) {
+            token_type = Some(ASTValue::Struct(
+                self.tokens[self.current].lexeme.clone(),
+                None,
+                vec![],
+            ));
+            self.current += 1;
+        }
+
+        if let Some(value) = token_type {
+            // Decide between function or var declaration
             if !self.is_at_end() && self.tokens[self.current].kind == TokenType::LeftParen {
                 self.current -= 1;
                 self.statement()
             } else if self.current + 1 < self.tokens.len() {
                 if self.tokens[self.current + 1].kind == TokenType::LeftParen {
-                    self.function(export, ASTValue::from_token_type(None, &token_type))
+                    self.function(export, value)
                 } else {
-                    self.var_declaration(ASTValue::from_token_type(None, &token_type))
+                    self.var_declaration(value)
                 }
             } else {
-                self.var_declaration(ASTValue::from_token_type(None, &token_type))
+                self.var_declaration(value)
             }
         } else {
             self.statement()
         }
+    }
+
+    fn struct_declaration(&mut self) -> Result<Stmt, String> {
+        let line = self.current_line;
+        let name = self.consume(
+            TokenType::Identifier,
+            &format!("Expect struct name at line {}.", line),
+        )?;
+
+        self.consume(
+            TokenType::LeftBrace,
+            &format!("Expect '{{' after struct name at line {}.", line),
+        )?;
+
+        let mut fields = vec![];
+
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            let mut field_type: Option<ASTValue> = None;
+
+            if let Some(token_type) = self.match_token_and_return(vec![
+                TokenType::Int,
+                TokenType::Int2,
+                TokenType::Int3,
+                TokenType::Int4,
+                TokenType::Float,
+                TokenType::Float2,
+                TokenType::Float3,
+                TokenType::Float4,
+                TokenType::Mat2,
+                TokenType::Mat3,
+                TokenType::Mat4,
+            ]) {
+                field_type = Some(ASTValue::from_token_type(None, &token_type));
+            }
+
+            if let Some(field_type) = field_type {
+                let field_name = self.consume(
+                    TokenType::Identifier,
+                    &format!("Expect field name at line  {}.", line),
+                )?;
+
+                fields.push((field_name.lexeme, field_type));
+
+                _ = self.consume(
+                    TokenType::Semicolon,
+                    &format!(
+                        "Expect ';' after field name at line {}, found '{}' instead.",
+                        line,
+                        self.lexeme()
+                    ),
+                )?;
+            } else {
+                return Err(format!(
+                    "Expect field type at line {}, found '{}' instead.",
+                    line,
+                    self.lexeme()
+                ));
+            }
+        }
+
+        self.consume(
+            TokenType::RightBrace,
+            &format!("Expect '}}' after struct declaration at line {}.", line),
+        )?;
+
+        self.consume(
+            TokenType::Semicolon,
+            &format!("Expect ';' after struct declaration at line {}.", line),
+        )?;
+
+        self.structs.insert(name.lexeme.clone(), fields.clone());
+
+        Ok(Stmt::StructDeclaration(
+            name.lexeme,
+            fields,
+            self.create_loc(line),
+        ))
     }
 
     fn var_declaration(&mut self, static_type: ASTValue) -> Result<Stmt, String> {
@@ -126,7 +228,32 @@ impl Parser {
         } else {
             // TODO If variable is empty, provide the default value for each type (0)
             // The empty expr is just to prevent crashing the compiler
-            empty_expr!()
+
+            if let ASTValue::Struct(name, _, _) = &static_type {
+                if let Some(stuct_static) = self.structs.get(name) {
+                    let mut fields = vec![];
+
+                    for (_, field_type) in stuct_static {
+                        fields.push(Box::new(field_type.as_empty_expression()));
+                    }
+
+                    Box::new(Expr::Value(
+                        ASTValue::Struct(name.clone(), None, fields),
+                        vec![],
+                        Location::default(),
+                    ))
+                } else {
+                    // Unreachable
+                    empty_expr!()
+                }
+            } else {
+                //empty_expr!()
+                Box::new(Expr::Value(
+                    static_type.clone(),
+                    vec![],
+                    Location::default(),
+                ))
+            }
         };
 
         Ok(Stmt::VarDeclaration(
@@ -235,7 +362,10 @@ impl Parser {
     fn expression_statement(&mut self) -> Result<Stmt, String> {
         let value = self.expression()?;
         let line = self.current_line;
-        self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
+        self.consume(
+            TokenType::Semicolon,
+            &format!("Expect ';' after expression at line {}.", line),
+        )?;
         Ok(Stmt::Expression(Box::new(value), self.create_loc(line)))
     }
 
@@ -1019,14 +1149,54 @@ impl Parser {
                 }
             }
             TokenType::Identifier => {
-                self.advance();
+                if let Some(strct) = self.structs.get(&token.lexeme).cloned() {
+                    self.advance();
 
-                let swizzle: Vec<u8> = self.get_swizzle_at_current();
-                Ok(Expr::Variable(
-                    token.lexeme,
-                    swizzle,
-                    self.create_loc(token.line),
-                ))
+                    if !self.match_token(vec![TokenType::LeftParen]) {
+                        return Err(format!(
+                            "Expected '(' after '{}' at line {}.",
+                            token.lexeme, token.line
+                        ));
+                    }
+
+                    let mut fields = vec![];
+
+                    for (i, (name, value)) in strct.iter().enumerate() {
+                        let expr = self.expression()?;
+                        fields.push(Box::new(expr));
+
+                        if i < strct.len() - 1 && !self.match_token(vec![TokenType::Comma]) {
+                            return Err(format!(
+                                "Expected ',' after struct field at line {}.",
+                                token.line
+                            ));
+                        }
+
+                        println!("name {}", name);
+                    }
+
+                    if !self.match_token(vec![TokenType::RightParen]) {
+                        return Err(format!(
+                            "Expected ')' after struct definition at line {}.",
+                            token.line
+                        ));
+                    }
+
+                    Ok(Expr::Value(
+                        ASTValue::Struct(token.lexeme, None, fields),
+                        vec![],
+                        self.create_loc(token.line),
+                    ))
+                } else {
+                    self.advance();
+
+                    let swizzle: Vec<u8> = self.get_swizzle_at_current();
+                    Ok(Expr::Variable(
+                        token.lexeme,
+                        swizzle,
+                        self.create_loc(token.line),
+                    ))
+                }
             }
             _ => Err(format!(
                 "Unknown identifier {:?} at line {}.",
@@ -1145,6 +1315,10 @@ impl Parser {
             tokens.push(token);
         }
         self.tokens = tokens;
+    }
+
+    fn print_current(&self) {
+        println!("Current: {:?}", self.tokens[self.current]);
     }
 
     fn consume(&mut self, kind: TokenType, message: &str) -> Result<Token, String> {

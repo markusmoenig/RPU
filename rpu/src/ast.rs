@@ -46,6 +46,7 @@ pub enum ASTValue {
     Mat3(Option<String>, Vec<Box<Expr>>),
     Mat4(Option<String>, Vec<Box<Expr>>),
     String(Option<String>, String),
+    Struct(String, Option<String>, Vec<Box<Expr>>),
     Function(String, Vec<ASTValue>, Box<ASTValue>),
 }
 
@@ -151,7 +152,7 @@ impl ASTValue {
         }
     }
 
-    ///
+    /// Returns the value as an integer if it is one.
     pub fn to_int(&self) -> Option<i32> {
         match self {
             ASTValue::Int(_, i) => Some(*i),
@@ -224,6 +225,7 @@ impl ASTValue {
             ASTValue::Mat2(_, _) => "mat2".to_string(),
             ASTValue::Mat3(_, _) => "mat3".to_string(),
             ASTValue::Mat4(_, _) => "mat4".to_string(),
+            ASTValue::Struct(_, _, _) => "struct".to_string(),
         }
     }
 
@@ -349,7 +351,35 @@ impl ASTValue {
             ASTValue::Mat2(name, _) => name.clone(),
             ASTValue::Mat3(name, _) => name.clone(),
             ASTValue::Mat4(name, _) => name.clone(),
+            ASTValue::Struct(_, instance_name, _) => instance_name.clone(),
             ASTValue::None => None,
+        }
+    }
+
+    /// Returns an expression for each value with 0 content.
+    pub fn as_empty_expression(&self) -> Expr {
+        match self {
+            ASTValue::Int(_, _) => Expr::Value(
+                ASTValue::Int(Some("1".to_string()), 0),
+                vec![],
+                Location::default(),
+            ),
+            ASTValue::Float(_, _) => Expr::Value(
+                ASTValue::Float(Some("1".to_string()), 0.0),
+                vec![],
+                Location::default(),
+            ),
+            ASTValue::Float3(_, _, _, _) => Expr::Value(
+                ASTValue::Float3(
+                    Some("3".to_string()),
+                    zero_expr_float!(),
+                    zero_expr_float!(),
+                    zero_expr_float!(),
+                ),
+                vec![],
+                Location::default(),
+            ),
+            _ => Expr::Value(self.clone(), vec![], Location::default()),
         }
     }
 }
@@ -363,6 +393,7 @@ pub enum Stmt {
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
     VarDeclaration(String, ASTValue, Box<Expr>, Location),
+    StructDeclaration(String, Vec<(String, ASTValue)>, Location),
     FunctionDeclaration(
         String,
         Vec<ASTValue>,
@@ -612,7 +643,7 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
-    fn function_call(
+    fn func_call(
         &mut self,
         callee: &Expr,
         swizzle: &[u8],
@@ -621,8 +652,16 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
+    fn struct_declaration(
+        &mut self,
+        name: &str,
+        field: &[(String, ASTValue)],
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
+
     #[allow(clippy::too_many_arguments)]
-    fn function_declaration(
+    fn func_declaration(
         &mut self,
         name: &str,
         args: &[ASTValue],
@@ -691,8 +730,11 @@ impl Stmt {
             Stmt::VarDeclaration(name, static_type, initializer, loc) => {
                 visitor.var_declaration(name, static_type, initializer, loc, ctx)
             }
+            Stmt::StructDeclaration(name, fields, loc) => {
+                visitor.struct_declaration(name, fields, loc, ctx)
+            }
             Stmt::FunctionDeclaration(name, args, body, returns, export, loc) => {
-                visitor.function_declaration(name, args, body, returns, export, loc, ctx)
+                visitor.func_declaration(name, args, body, returns, export, loc, ctx)
             }
             Stmt::Break(loc) => visitor.break_stmt(loc, ctx),
             Stmt::Return(expr, loc) => visitor.return_stmt(expr, loc, ctx),
@@ -715,7 +757,7 @@ impl Expr {
                 visitor.variable_assignment(name.clone(), op, swizzle, expr, loc, ctx)
             }
             Expr::FunctionCall(callee, args, swizzle, loc) => {
-                visitor.function_call(callee, args, swizzle, loc, ctx)
+                visitor.func_call(callee, args, swizzle, loc, ctx)
             }
             Expr::Ternary(cond, then_expr, else_expr, loc) => {
                 visitor.ternary(cond, then_expr, else_expr, loc, ctx)

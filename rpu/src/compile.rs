@@ -6,6 +6,8 @@ pub struct CompileVisitor {
     environment: Environment,
     functions: FxHashMap<String, ASTValue>,
     break_depth: Vec<i32>,
+
+    structs: FxHashMap<String, Vec<(String, ASTValue)>>,
 }
 
 impl Visitor for CompileVisitor {
@@ -204,6 +206,8 @@ impl Visitor for CompileVisitor {
             environment: Environment::default(),
             functions,
             break_depth: vec![],
+
+            structs: FxHashMap::default(),
         }
     }
 
@@ -401,7 +405,10 @@ impl Visitor for CompileVisitor {
                     ctx.add_wat(c);
                 }
             }
-
+            ASTValue::Struct(name, _, _) => {
+                // Todo allocate memory for struct and move stack content into it
+                println!("Struct declaration: {}", name);
+            }
             _ => {}
         }
 
@@ -736,6 +743,9 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
+            ASTValue::Struct(name, _, _) => {
+                println!("Struct var assignment: {}", name);
+            }
             _ => {}
         }
 
@@ -859,6 +869,7 @@ impl Visitor for CompileVisitor {
         } else if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
             rc = ASTValue::Function(name.clone(), args.clone(), body.clone());
         } else {
+            println!("{:?}", vv);
             return Err(format!("Unknown identifier {}", loc.describe()));
         }
 
@@ -1033,9 +1044,24 @@ impl Visitor for CompileVisitor {
                 }
                 rc = value.clone();
             }
+            ASTValue::Struct(_name, _, fields) => {
+                instr = "".to_string();
+
+                // Write all fields onto the stack
+                for field in fields {
+                    let _ = field.accept(self, ctx)?;
+                }
+
+                rc = value.clone();
+            }
+            ASTValue::None => {
+                instr = "".to_string();
+                rc = value.clone();
+            }
 
             _ => {
-                return Err(format!("Unknown value at {}", loc.describe()));
+                println!("{:?}", value);
+                return Err(format!("Unknown value {}", loc.describe()));
             }
         };
 
@@ -1762,7 +1788,7 @@ impl Visitor for CompileVisitor {
         expression.accept(self, ctx)
     }
 
-    fn function_call(
+    fn func_call(
         &mut self,
         callee: &Expr,
         swizzle: &[u8],
@@ -2098,7 +2124,20 @@ impl Visitor for CompileVisitor {
         Ok(rc)
     }
 
-    fn function_declaration(
+    fn struct_declaration(
+        &mut self,
+        name: &str,
+        fields: &[(String, ASTValue)],
+        _loc: &Location,
+        _ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        self.structs
+            .insert(name.to_string(), fields.to_vec().clone());
+
+        Ok(ASTValue::Struct(name.to_string(), None, vec![]))
+    }
+
+    fn func_declaration(
         &mut self,
         name: &str,
         args: &[ASTValue],
