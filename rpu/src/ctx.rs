@@ -56,6 +56,9 @@ pub struct Context {
     /// Temporary variables to swap stack content (assignment operator).
     pub func_has_temp_float: bool,
     pub func_has_temp_int: bool,
+
+    /// If the code uses memory, i.e. uses structs
+    pub uses_memory: bool,
 }
 
 impl Default for Context {
@@ -86,6 +89,8 @@ impl Context {
 
             func_has_temp_int: false,
             func_has_temp_float: false,
+
+            uses_memory: false,
         }
     }
 
@@ -161,6 +166,26 @@ impl Context {
             self.func_has_temp_int = true;
             format!("_rpu_temp_i{}", self.pr)
         }
+    }
+
+    pub fn alloc_mem_struct(&mut self, name: &str, size: usize) {
+        let instr = format!("(i32.const {})", size);
+        self.add_wat(&instr);
+
+        self.add_wat("(call $malloc)");
+
+        let instr = format!("local.set ${}", name);
+        self.add_wat(&instr);
+
+        self.uses_memory = true;
+
+        //format!("${}", name)
+    }
+
+    /// Get the component type for the given value, currently i32, i64, f32, f64.
+    pub fn get_component_type(&self, comp: &ASTValue) -> String {
+        let type_str = if comp.is_float_based() { "f" } else { "i" };
+        format!("({}{}", type_str, self.pr)
     }
 
     /// Reads the components for stack_value into memory and than swizzles back onto the stack.
@@ -320,15 +345,17 @@ impl Context {
 
         output += "\n    (memory 1)\n\n";
 
-        output += "    (global $mem_ptr (mut i32) (i32.const 32)) ;; We keep the first 32 bytes to shuffle stack content\n\n";
-        output += "    ;; Allocate memory and move the memory ptr\n";
-        output += "    (func $alloc (param $size i32) (result i32)\n";
-        output += "      (local $current_ptr i32)\n";
-        output += "      (set_local $current_ptr (global.get $mem_ptr))\n";
-        output += "      (global.set $mem_ptr\n";
-        output += "        (i32.add (get_local $current_ptr) (get_local $size)))\n";
-        output += "      (get_local $current_ptr)\n";
-        output += "    )\n";
+        if self.uses_memory {
+            output += "    (global $mem_ptr (mut i32) (i32.const 32)) ;; We keep the first 32 bytes to shuffle stack content\n\n";
+            output += "    ;; Allocate memory and move the memory ptr\n";
+            output += "    (func $malloc (param $size i32) (result i32)\n";
+            output += "      (local $current_ptr i32)\n";
+            output += "      (set_local $current_ptr (global.get $mem_ptr))\n";
+            output += "      (global.set $mem_ptr\n";
+            output += "        (i32.add (get_local $current_ptr) (get_local $size)))\n";
+            output += "      (get_local $current_ptr)\n";
+            output += "    )\n";
+        }
 
         // Write out globals
 

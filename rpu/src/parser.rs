@@ -1161,7 +1161,7 @@ impl Parser {
 
                     let mut fields = vec![];
 
-                    for (i, (name, value)) in strct.iter().enumerate() {
+                    for (i, (_name, _value)) in strct.iter().enumerate() {
                         let expr = self.expression()?;
                         fields.push(Box::new(expr));
 
@@ -1171,8 +1171,6 @@ impl Parser {
                                 token.line
                             ));
                         }
-
-                        println!("name {}", name);
                     }
 
                     if !self.match_token(vec![TokenType::RightParen]) {
@@ -1317,7 +1315,8 @@ impl Parser {
         self.tokens = tokens;
     }
 
-    fn print_current(&self) {
+    /// For debugging only
+    fn _print_current(&self) {
         println!("Current: {:?}", self.tokens[self.current]);
     }
 

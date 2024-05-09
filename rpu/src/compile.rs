@@ -8,6 +8,7 @@ pub struct CompileVisitor {
     break_depth: Vec<i32>,
 
     structs: FxHashMap<String, Vec<(String, ASTValue)>>,
+    struct_sizes: FxHashMap<String, usize>,
 }
 
 impl Visitor for CompileVisitor {
@@ -208,6 +209,7 @@ impl Visitor for CompileVisitor {
             break_depth: vec![],
 
             structs: FxHashMap::default(),
+            struct_sizes: FxHashMap::default(),
         }
     }
 
@@ -405,9 +407,45 @@ impl Visitor for CompileVisitor {
                     ctx.add_wat(c);
                 }
             }
-            ASTValue::Struct(name, _, _) => {
-                // Todo allocate memory for struct and move stack content into it
-                println!("Struct declaration: {}", name);
+            ASTValue::Struct(struct_name, _, _) => {
+                // Define the i32 memory ptr for the struct
+                let comps = v.write_definition("local", name, &ctx.pr);
+                for c in comps {
+                    ctx.wat_locals.push_str(&format!("        {}\n", c));
+                }
+                // Allocate memory for the struct and set the offset to the variable
+                let size = self.struct_sizes.get(struct_name).unwrap();
+                ctx.alloc_mem_struct(name, *size);
+                let component_size = ctx.precision.size();
+                let mut struct_offset = size - component_size;
+                // Iterate over all fields and move the fields from the stack to the memory
+                if let Some(struct_def) = self.structs.get(struct_name) {
+                    for (_, field_type) in struct_def.iter().rev() {
+                        let temp_name = ctx.add_temporary(field_type);
+
+                        let com_type = ctx.get_component_type(field_type);
+                        let components = field_type.components();
+                        for _ in 0..components {
+                            // Move the field component to a temp local variable
+                            let instr = format!("local.set ${}", temp_name);
+                            ctx.add_wat(&instr);
+                            // Get the memory ptr for the strucy and add the current field.component offset
+                            let instr = format!("local.get ${}", name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("i32.const {}", struct_offset);
+                            ctx.add_wat(&instr);
+                            ctx.add_wat("i32.add");
+                            // Get the field component back from temp
+                            let instr = format!("local.get ${}", temp_name);
+                            ctx.add_wat(&instr);
+                            // Store the field component in the struct memory
+                            let instr = format!("{}.store)", com_type);
+                            ctx.add_wat(&instr);
+                            struct_offset -= component_size;
+                        }
+                    }
+                }
+                println!("Struct declaration: {}", struct_name);
             }
             _ => {}
         }
@@ -2129,10 +2167,18 @@ impl Visitor for CompileVisitor {
         name: &str,
         fields: &[(String, ASTValue)],
         _loc: &Location,
-        _ctx: &mut Context,
+        ctx: &mut Context,
     ) -> Result<ASTValue, String> {
+        let mut size: usize = 0;
+
+        for (_, field) in fields {
+            size += field.components() * ctx.precision.size();
+        }
+
         self.structs
             .insert(name.to_string(), fields.to_vec().clone());
+
+        self.struct_sizes.insert(name.to_string(), size);
 
         Ok(ASTValue::Struct(name.to_string(), None, vec![]))
     }

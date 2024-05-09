@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod ast_value;
 pub mod buffer;
 pub mod compile;
 pub mod ctx;
@@ -10,6 +11,7 @@ pub mod tests;
 
 pub mod prelude {
     pub use crate::ast::*;
+    pub use crate::ast_value::*;
     pub use crate::buffer::ColorBuffer;
     pub use crate::compile::CompileVisitor;
     pub use crate::ctx::*;

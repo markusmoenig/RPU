@@ -2,6 +2,7 @@ use clap::{Arg, ArgAction, Command};
 pub use rpu::prelude::*;
 use std::sync::{Arc, Mutex};
 
+#[allow(clippy::assigning_clones)]
 fn main() {
     let matches = Command::new("RPU Compiler")
         .version("0.1.0")
