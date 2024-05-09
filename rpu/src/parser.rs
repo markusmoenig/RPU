@@ -240,6 +240,7 @@ impl Parser {
                     Box::new(Expr::Value(
                         ASTValue::Struct(name.clone(), None, fields),
                         vec![],
+                        vec![],
                         Location::default(),
                     ))
                 } else {
@@ -250,6 +251,7 @@ impl Parser {
                 //empty_expr!()
                 Box::new(Expr::Value(
                     static_type.clone(),
+                    vec![],
                     vec![],
                     Location::default(),
                 ))
@@ -528,11 +530,12 @@ impl Parser {
             let equals = self.previous().unwrap();
             let value = self.assignment()?;
 
-            if let Expr::Variable(name, swizzle, _loc) = expr {
+            if let Expr::Variable(name, swizzle, field_path, _loc) = expr {
                 return Ok(Expr::VariableAssignment(
                     name,
                     AssignmentOperator::AddAssign,
                     swizzle.clone(),
+                    field_path.clone(),
                     Box::new(value),
                     self.create_loc(equals.line),
                 ));
@@ -549,11 +552,12 @@ impl Parser {
             let equals = self.previous().unwrap();
             let value = self.assignment()?;
 
-            if let Expr::Variable(name, swizzle, _loc) = expr {
+            if let Expr::Variable(name, swizzle, field_path, _loc) = expr {
                 return Ok(Expr::VariableAssignment(
                     name,
                     AssignmentOperator::SubtractAssign,
                     swizzle.clone(),
+                    field_path.clone(),
                     Box::new(value),
                     self.create_loc(equals.line),
                 ));
@@ -570,11 +574,12 @@ impl Parser {
             let equals = self.previous().unwrap();
             let value = self.assignment()?;
 
-            if let Expr::Variable(name, swizzle, _loc) = expr {
+            if let Expr::Variable(name, swizzle, field_path, _loc) = expr {
                 return Ok(Expr::VariableAssignment(
                     name,
                     AssignmentOperator::MultiplyAssign,
                     swizzle.clone(),
+                    field_path.clone(),
                     Box::new(value),
                     self.create_loc(equals.line),
                 ));
@@ -591,11 +596,12 @@ impl Parser {
             let equals = self.previous().unwrap();
             let value = self.assignment()?;
 
-            if let Expr::Variable(name, swizzle, _loc) = expr {
+            if let Expr::Variable(name, swizzle, field_path, _loc) = expr {
                 return Ok(Expr::VariableAssignment(
                     name,
                     AssignmentOperator::DivideAssign,
                     swizzle.clone(),
+                    field_path.clone(),
                     Box::new(value),
                     self.create_loc(equals.line),
                 ));
@@ -609,11 +615,12 @@ impl Parser {
             let equals = self.previous().unwrap();
             let value = self.assignment()?;
 
-            if let Expr::Variable(name, swizzle, _loc) = expr {
+            if let Expr::Variable(name, swizzle, field_path, _loc) = expr {
                 return Ok(Expr::VariableAssignment(
                     name,
                     AssignmentOperator::Assign,
                     swizzle.clone(),
+                    field_path.clone(),
                     Box::new(value),
                     self.create_loc(equals.line),
                 ));
@@ -793,10 +800,19 @@ impl Parser {
             TokenType::RightParen,
             &format!("Expect ')' after function arguments at line {}.", line),
         )?;
-        let swizzle = self.get_swizzle_at_current();
+        let mut swizzle = vec![];
+        let mut field_path = vec![];
+        if self.check(TokenType::Dot) {
+            if self.is_swizzle_valid_at_current() {
+                swizzle = self.get_swizzle_at_current();
+            } else {
+                field_path = self.get_field_path_at_current();
+            }
+        }
         Ok(Expr::FunctionCall(
             Box::new(callee),
             swizzle,
+            field_path,
             arguments,
             self.create_loc(paren.line),
         ))
@@ -810,6 +826,7 @@ impl Parser {
                 Ok(Expr::Value(
                     ASTValue::Boolean(None, false),
                     vec![],
+                    vec![],
                     self.create_loc(token.line),
                 ))
             }
@@ -817,6 +834,7 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Value(
                     ASTValue::Boolean(None, true),
+                    vec![],
                     vec![],
                     self.create_loc(token.line),
                 ))
@@ -826,11 +844,13 @@ impl Parser {
                 Ok(Expr::Value(
                     ASTValue::None,
                     vec![],
+                    vec![],
                     self.create_loc(token.line),
                 ))
             }
             TokenType::Semicolon => Ok(Expr::Value(
                 ASTValue::None,
+                vec![],
                 vec![],
                 self.create_loc(token.line),
             )),
@@ -841,11 +861,13 @@ impl Parser {
                         Ok(Expr::Value(
                             ASTValue::Float(None, number as f32),
                             vec![],
+                            vec![],
                             self.create_loc(token.line),
                         ))
                     } else {
                         Ok(Expr::Value(
                             ASTValue::Int(None, number),
+                            vec![],
                             vec![],
                             self.create_loc(token.line),
                         ))
@@ -875,6 +897,7 @@ impl Parser {
                             },
                         ),
                         swizzle,
+                        vec![],
                         self.create_loc(token.line),
                     ))
                 } else {
@@ -907,6 +930,7 @@ impl Parser {
                             },
                         ),
                         swizzle,
+                        vec![],
                         self.create_loc(token.line),
                     ))
                 } else {
@@ -944,6 +968,7 @@ impl Parser {
                             },
                         ),
                         swizzle,
+                        vec![],
                         self.create_loc(token.line),
                     ))
                 } else {
@@ -955,6 +980,7 @@ impl Parser {
                 if let Ok(number) = token.lexeme.parse::<f32>() {
                     Ok(Expr::Value(
                         ASTValue::Float(None, number),
+                        vec![],
                         vec![],
                         self.create_loc(token.line),
                     ))
@@ -983,6 +1009,7 @@ impl Parser {
                             },
                         ),
                         swizzle,
+                        vec![],
                         self.create_loc(token.line),
                     ))
                 } else {
@@ -1015,6 +1042,7 @@ impl Parser {
                             },
                         ),
                         swizzle,
+                        vec![],
                         self.create_loc(token.line),
                     ))
                 } else {
@@ -1052,6 +1080,7 @@ impl Parser {
                             },
                         ),
                         swizzle,
+                        vec![],
                         self.create_loc(token.line),
                     ))
                 } else {
@@ -1078,6 +1107,7 @@ impl Parser {
 
                     Ok(Expr::Value(
                         ASTValue::Mat2(Some(format!("{}", comps.len())), c),
+                        vec![],
                         vec![],
                         self.create_loc(token.line),
                     ))
@@ -1106,6 +1136,7 @@ impl Parser {
                     Ok(Expr::Value(
                         ASTValue::Mat3(Some(format!("{}", comps.len())), c),
                         vec![],
+                        vec![],
                         self.create_loc(token.line),
                     ))
                 } else {
@@ -1132,6 +1163,7 @@ impl Parser {
 
                     Ok(Expr::Value(
                         ASTValue::Mat4(Some(format!("{}", comps.len())), c),
+                        vec![],
                         vec![],
                         self.create_loc(token.line),
                     ))
@@ -1180,18 +1212,30 @@ impl Parser {
                         ));
                     }
 
+                    let field_path = self.get_field_path_at_current();
+
                     Ok(Expr::Value(
                         ASTValue::Struct(token.lexeme, None, fields),
                         vec![],
+                        field_path,
                         self.create_loc(token.line),
                     ))
                 } else {
                     self.advance();
 
-                    let swizzle: Vec<u8> = self.get_swizzle_at_current();
+                    let mut swizzle = vec![];
+                    let mut field_path = vec![];
+                    if self.check(TokenType::Dot) {
+                        if self.is_swizzle_valid_at_current() {
+                            swizzle = self.get_swizzle_at_current();
+                        } else {
+                            field_path = self.get_field_path_at_current();
+                        }
+                    }
                     Ok(Expr::Variable(
                         token.lexeme,
                         swizzle,
+                        field_path,
                         self.create_loc(token.line),
                     ))
                 }
@@ -1248,9 +1292,10 @@ impl Parser {
     pub fn get_swizzle_at_current(&mut self) -> Vec<u8> {
         let mut swizzle: Vec<u8> = vec![];
 
-        if self.current + 1 < self.tokens.len()
+        if self.current + 2 < self.tokens.len()
             && self.tokens[self.current].kind == TokenType::Dot
             && self.tokens[self.current + 1].kind == TokenType::Identifier
+            && self.tokens[self.current + 2].kind != TokenType::Dot
         {
             let swizzle_token = self.tokens[self.current + 1].lexeme.clone();
             if swizzle_token
@@ -1272,6 +1317,37 @@ impl Parser {
         }
 
         swizzle
+    }
+
+    /// Returns the field path at the current token if any.
+    pub fn get_field_path_at_current(&mut self) -> Vec<String> {
+        let mut swizzle: Vec<String> = vec![];
+
+        // Collect all strings conconated by '.'
+        while self.match_token(vec![TokenType::Dot]) {
+            if self.match_token(vec![TokenType::Identifier]) {
+                swizzle.push(self.previous().unwrap().lexeme.clone());
+            } else {
+                break;
+            }
+        }
+
+        swizzle
+    }
+
+    /// Returns true if a swizzle is valid at the current token.
+    pub fn is_swizzle_valid_at_current(&self) -> bool {
+        if self.current + 1 < self.tokens.len()
+            && self.tokens[self.current].kind == TokenType::Dot
+            && self.tokens[self.current + 1].kind == TokenType::Identifier
+        {
+            let swizzle_token = &self.tokens[self.current + 1].lexeme;
+            swizzle_token
+                .chars()
+                .all(|c| matches!(c, 'x' | 'y' | 'z' | 'w'))
+        } else {
+            false
+        }
     }
 
     /// Extract a potential swizzle from the variable name.

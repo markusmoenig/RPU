@@ -337,10 +337,12 @@ impl ASTValue {
             ASTValue::Int(_, _) => Expr::Value(
                 ASTValue::Int(Some("1".to_string()), 0),
                 vec![],
+                vec![],
                 Location::default(),
             ),
             ASTValue::Float(_, _) => Expr::Value(
                 ASTValue::Float(Some("1".to_string()), 0.0),
+                vec![],
                 vec![],
                 Location::default(),
             ),
@@ -352,9 +354,10 @@ impl ASTValue {
                     zero_expr_float!(),
                 ),
                 vec![],
+                vec![],
                 Location::default(),
             ),
-            _ => Expr::Value(self.clone(), vec![], Location::default()),
+            _ => Expr::Value(self.clone(), vec![], vec![], Location::default()),
         }
     }
 }

@@ -6,9 +6,6 @@ pub struct CompileVisitor {
     environment: Environment,
     functions: FxHashMap<String, ASTValue>,
     break_depth: Vec<i32>,
-
-    structs: FxHashMap<String, Vec<(String, ASTValue)>>,
-    struct_sizes: FxHashMap<String, usize>,
 }
 
 impl Visitor for CompileVisitor {
@@ -207,9 +204,6 @@ impl Visitor for CompileVisitor {
             environment: Environment::default(),
             functions,
             break_depth: vec![],
-
-            structs: FxHashMap::default(),
-            struct_sizes: FxHashMap::default(),
         }
     }
 
@@ -414,12 +408,12 @@ impl Visitor for CompileVisitor {
                     ctx.wat_locals.push_str(&format!("        {}\n", c));
                 }
                 // Allocate memory for the struct and set the offset to the variable
-                let size = self.struct_sizes.get(struct_name).unwrap();
-                ctx.alloc_mem_struct(name, *size);
+                let size = *ctx.struct_sizes.get(struct_name).unwrap();
+                ctx.alloc_mem_struct(name, size);
                 let component_size = ctx.precision.size();
                 let mut struct_offset = size - component_size;
                 // Iterate over all fields and move the fields from the stack to the memory
-                if let Some(struct_def) = self.structs.get(struct_name) {
+                if let Some(struct_def) = ctx.structs.get(struct_name).cloned() {
                     for (_, field_type) in struct_def.iter().rev() {
                         let temp_name = ctx.add_temporary(field_type);
 
@@ -439,13 +433,12 @@ impl Visitor for CompileVisitor {
                             let instr = format!("local.get ${}", temp_name);
                             ctx.add_wat(&instr);
                             // Store the field component in the struct memory
-                            let instr = format!("{}.store)", com_type);
+                            let instr = format!("({}.store)", com_type);
                             ctx.add_wat(&instr);
                             struct_offset -= component_size;
                         }
                     }
                 }
-                println!("Struct declaration: {}", struct_name);
             }
             _ => {}
         }
@@ -460,6 +453,7 @@ impl Visitor for CompileVisitor {
         name: String,
         op: &AssignmentOperator,
         swizzle: &[u8],
+        field_path: &[String],
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
@@ -796,6 +790,7 @@ impl Visitor for CompileVisitor {
         &mut self,
         name: String,
         swizzle: &[u8],
+        field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
@@ -901,13 +896,15 @@ impl Visitor for CompileVisitor {
 
                     rc = v;
                 }
+                ASTValue::Struct(struct_name, _, _) => {
+                    rc = ctx.access_struct_(&name, struct_name, field_path, false, loc)?;
+                }
 
                 _ => {}
             }
         } else if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
             rc = ASTValue::Function(name.clone(), args.clone(), body.clone());
         } else {
-            println!("{:?}", vv);
             return Err(format!("Unknown identifier {}", loc.describe()));
         }
 
@@ -922,6 +919,7 @@ impl Visitor for CompileVisitor {
         &mut self,
         value: ASTValue,
         swizzle: &[u8],
+        field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
@@ -1830,6 +1828,7 @@ impl Visitor for CompileVisitor {
         &mut self,
         callee: &Expr,
         swizzle: &[u8],
+        field_path: &[String],
         args: &[Box<Expr>],
         loc: &Location,
         ctx: &mut Context,
@@ -2175,10 +2174,10 @@ impl Visitor for CompileVisitor {
             size += field.components() * ctx.precision.size();
         }
 
-        self.structs
+        ctx.structs
             .insert(name.to_string(), fields.to_vec().clone());
 
-        self.struct_sizes.insert(name.to_string(), size);
+        ctx.struct_sizes.insert(name.to_string(), size);
 
         Ok(ASTValue::Struct(name.to_string(), None, vec![]))
     }

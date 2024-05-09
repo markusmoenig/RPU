@@ -56,9 +56,16 @@ pub struct Context {
     /// Temporary variables to swap stack content (assignment operator).
     pub func_has_temp_float: bool,
     pub func_has_temp_int: bool,
+    pub func_has_temp_mem_ptr: bool,
 
     /// If the code uses memory, i.e. uses structs
     pub uses_memory: bool,
+
+    /// The structs that are defined in the code.
+    pub structs: FxHashMap<String, Vec<(String, ASTValue)>>,
+
+    /// The struct sizes
+    pub struct_sizes: FxHashMap<String, usize>,
 }
 
 impl Default for Context {
@@ -89,8 +96,12 @@ impl Context {
 
             func_has_temp_int: false,
             func_has_temp_float: false,
+            func_has_temp_mem_ptr: false,
 
             uses_memory: false,
+
+            structs: FxHashMap::default(),
+            struct_sizes: FxHashMap::default(),
         }
     }
 
@@ -142,6 +153,7 @@ impl Context {
     pub fn clear_locals(&mut self) {
         self.func_has_temp_int = false;
         self.func_has_temp_float = false;
+        self.func_has_temp_mem_ptr = false;
         self.wat_locals = String::new();
     }
 
@@ -168,6 +180,16 @@ impl Context {
         }
     }
 
+    /// Adds a temporary mem ptr
+    pub fn add_temporary_mem_ptr(&mut self) -> String {
+        if !self.func_has_temp_mem_ptr {
+            self.wat_locals
+                .push_str("        (local $_rpu_temp_mem_ptr i32)\n");
+        }
+        self.func_has_temp_mem_ptr = true;
+        "_rpu_temp_mem_ptr".to_string()
+    }
+
     pub fn alloc_mem_struct(&mut self, name: &str, size: usize) {
         let instr = format!("(i32.const {})", size);
         self.add_wat(&instr);
@@ -185,7 +207,112 @@ impl Context {
     /// Get the component type for the given value, currently i32, i64, f32, f64.
     pub fn get_component_type(&self, comp: &ASTValue) -> String {
         let type_str = if comp.is_float_based() { "f" } else { "i" };
-        format!("({}{}", type_str, self.pr)
+        format!("{}{}", type_str, self.pr)
+    }
+
+    /// Access a struct field.
+    pub fn access_struct_(
+        &mut self,
+        var_name: &str,
+        struct_name: &str,
+        field_path: &[String],
+        write: bool,
+        loc: &Location,
+    ) -> Result<ASTValue, String> {
+        println!("Struct var: {} {} {:?}", var_name, struct_name, field_path);
+        if !field_path.is_empty() {
+            if let Some(struct_fields) = self.structs.get(struct_name) {
+                let mut field_name = field_path[0].clone();
+                let mut field_type = ASTValue::None;
+                let mut field_offset = 0;
+                let mut field_size = 0;
+
+                for (name, value) in struct_fields.iter() {
+                    if *name == field_name {
+                        field_type = value.clone();
+                        field_size = value.components() * self.precision.size();
+                        break;
+                    } else {
+                        field_offset += value.components() * self.precision.size();
+                    }
+                }
+
+                if field_type.to_type() == "void" {
+                    return Err(format!(
+                        "Unknown field '{}' in struct '{}' {}",
+                        field_name,
+                        struct_name,
+                        loc.describe()
+                    ));
+                }
+
+                println!("{}", field_offset);
+
+                /*
+                let mut instr = format!("{}.get ${}", scope, name);
+                ctx.add_wat(&instr);
+
+                for i in 1..field_path.len() {
+                    field = field_path[i].clone();
+                    let mut field_found = false;
+
+                    for f in strct.fields.iter() {
+                        if f.name == field {
+                            field_type = f.type_name.clone();
+                            field_offset = f.offset;
+                            field_size = f.size;
+                            field_found = true;
+                            break;
+                        }
+                    }
+
+                    if !field_found {
+                        return Err(format!(
+                            "Unknown field '{}' in struct '{}' {}",
+                            field,
+                            name,
+                            loc.describe()
+                        ));
+                    }
+
+                    instr = format!("i32.const {}", field_offset);
+                    ctx.add_wat(&instr);
+                    instr = format!("i32.add");
+                    ctx.add_wat(&instr);
+                    }*/
+
+                if !write {
+                    //let temp_mem_ptr = self.add_temporary_mem_ptr();
+
+                    let components = field_type.components();
+                    let component_type = self.get_component_type(&field_type);
+                    for _ in 0..components {
+                        let instr = format!("(local.get ${})", var_name);
+                        self.add_wat(&instr);
+                        let instr = format!("(i32.const {})", field_offset);
+                        self.add_wat(&instr);
+                        let instr = format!("(i32.add)");
+                        self.add_wat(&instr);
+                        let instr = format!("({}.load)", component_type);
+                        self.add_wat(&instr);
+                        // let instr = format!("(local.set ${}", temp_mem_ptr);
+                        // self.add_wat(&instr);
+                        field_offset += self.precision.size();
+                    }
+                    // let instr = format!("(local.get ${})", var_name);
+                    // self.add_wat(&instr);
+
+                    // let temp = self.add_temporary(&field_type);
+                    // let instr = format!("(i32.const {})", field_offset);
+                    // self.add_wat(&instr);
+                    // let instr = format!("(i32.add)");
+                    // self.add_wat(&instr);
+                }
+
+                return Ok(field_type.clone());
+            }
+        }
+        Ok(ASTValue::None)
     }
 
     /// Reads the components for stack_value into memory and than swizzles back onto the stack.
@@ -415,7 +542,7 @@ impl Context {
     // Write out a global float
     pub fn write_global_float(&self, name: &str, ext: &str, expr: &Expr) -> String {
         let mut output = String::new();
-        if let Expr::Value(ASTValue::Float(_, value), _, _) = expr {
+        if let Expr::Value(ASTValue::Float(_, value), _, _, _) = expr {
             let mut str_value = format!("{:.}", value);
             if !str_value.contains('.') {
                 str_value.push_str(".0");
@@ -434,7 +561,7 @@ impl Context {
     // Write out a global int
     pub fn write_global_int(&self, name: &str, ext: &str, expr: &Expr) -> String {
         let mut output = String::new();
-        if let Expr::Value(ASTValue::Int(_, value), _, _) = expr {
+        if let Expr::Value(ASTValue::Int(_, value), _, _, _) = expr {
             let str_value = format!("{:.}", value);
             output += &format!(
                 "    (global ${}{} (mut i{}) (i{}.const {}))\n",

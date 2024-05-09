@@ -3,7 +3,12 @@ use crate::prelude::*;
 #[macro_export]
 macro_rules! empty_expr {
     () => {
-        Box::new(Expr::Value(ASTValue::None, vec![], Location::default()))
+        Box::new(Expr::Value(
+            ASTValue::None,
+            vec![],
+            vec![],
+            Location::default(),
+        ))
     };
 }
 
@@ -12,6 +17,7 @@ macro_rules! zero_expr_int {
     () => {
         Box::new(Expr::Value(
             ASTValue::Int(None, 0),
+            vec![],
             vec![],
             Location::default(),
         ))
@@ -23,6 +29,7 @@ macro_rules! zero_expr_float {
     () => {
         Box::new(Expr::Value(
             ASTValue::Float(None, 0.0),
+            vec![],
             vec![],
             Location::default(),
         ))
@@ -54,16 +61,23 @@ pub enum Stmt {
 /// Expressions in the AST
 #[derive(Clone, Debug)]
 pub enum Expr {
-    Value(ASTValue, Vec<u8>, Location),
+    Value(ASTValue, Vec<u8>, Vec<String>, Location),
     Logical(Box<Expr>, LogicalOperator, Box<Expr>, Location),
     Unary(UnaryOperator, Box<Expr>, Location),
     Equality(Box<Expr>, EqualityOperator, Box<Expr>, Location),
     Comparison(Box<Expr>, ComparisonOperator, Box<Expr>, Location),
     Binary(Box<Expr>, BinaryOperator, Box<Expr>, Location),
     Grouping(Box<Expr>, Location),
-    Variable(String, Vec<u8>, Location),
-    VariableAssignment(String, AssignmentOperator, Vec<u8>, Box<Expr>, Location),
-    FunctionCall(Box<Expr>, Vec<u8>, Vec<Box<Expr>>, Location),
+    Variable(String, Vec<u8>, Vec<String>, Location),
+    VariableAssignment(
+        String,
+        AssignmentOperator,
+        Vec<u8>,
+        Vec<String>,
+        Box<Expr>,
+        Location,
+    ),
+    FunctionCall(Box<Expr>, Vec<u8>, Vec<String>, Vec<Box<Expr>>, Location),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>, Location),
 }
 
@@ -224,6 +238,7 @@ pub trait Visitor {
         &mut self,
         value: ASTValue,
         swizzle: &[u8],
+        field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -274,6 +289,7 @@ pub trait Visitor {
         &mut self,
         name: String,
         swizzle: &[u8],
+        field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
@@ -283,6 +299,7 @@ pub trait Visitor {
         name: String,
         op: &AssignmentOperator,
         swizzle: &[u8],
+        field_path: &[String],
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
@@ -292,6 +309,7 @@ pub trait Visitor {
         &mut self,
         callee: &Expr,
         swizzle: &[u8],
+        field_path: &[String],
         args: &[Box<Expr>],
         loc: &Location,
         ctx: &mut Context,
@@ -390,19 +408,23 @@ impl Stmt {
 impl Expr {
     pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
         match self {
-            Expr::Value(value, swizzle, loc) => visitor.value(value.clone(), swizzle, loc, ctx),
+            Expr::Value(value, swizzle, field_path, loc) => {
+                visitor.value(value.clone(), swizzle, field_path, loc, ctx)
+            }
             Expr::Logical(left, op, right, loc) => visitor.logical_expr(left, op, right, loc, ctx),
             Expr::Unary(op, expr, loc) => visitor.unary(op, expr, loc, ctx),
             Expr::Equality(left, op, right, loc) => visitor.equality(left, op, right, loc, ctx),
             Expr::Comparison(left, op, right, loc) => visitor.comparison(left, op, right, loc, ctx),
             Expr::Binary(left, op, right, loc) => visitor.binary(left, op, right, loc, ctx),
             Expr::Grouping(expr, loc) => visitor.grouping(expr, loc, ctx),
-            Expr::Variable(name, swizzle, loc) => visitor.variable(name.clone(), swizzle, loc, ctx),
-            Expr::VariableAssignment(name, op, swizzle, expr, loc) => {
-                visitor.variable_assignment(name.clone(), op, swizzle, expr, loc, ctx)
+            Expr::Variable(name, swizzle, field_path, loc) => {
+                visitor.variable(name.clone(), swizzle, field_path, loc, ctx)
             }
-            Expr::FunctionCall(callee, args, swizzle, loc) => {
-                visitor.func_call(callee, args, swizzle, loc, ctx)
+            Expr::VariableAssignment(name, op, swizzle, field_path, expr, loc) => {
+                visitor.variable_assignment(name.clone(), op, swizzle, field_path, expr, loc, ctx)
+            }
+            Expr::FunctionCall(callee, args, swizzle, field_path, loc) => {
+                visitor.func_call(callee, args, swizzle, field_path, loc, ctx)
             }
             Expr::Ternary(cond, then_expr, else_expr, loc) => {
                 visitor.ternary(cond, then_expr, else_expr, loc, ctx)
