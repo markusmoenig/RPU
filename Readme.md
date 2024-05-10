@@ -32,12 +32,22 @@ When working on shaders, RPU uses multiple threads to render the image. This is 
 
 # Currently implemented
 
-- [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4, mat2, mat3, mat4 and custom structs
-- [x] Math operators: +, -, \*, /
-- [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand, clamp
-- [x] Control structures: if, else, ternary (?:), while, break, return, const, export
-- [x] Assignment: =, +=, -=, \*=, /=
-- [x] Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc
+- Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4, mat2, mat3, mat4 and custom structs
+- Math operators: +, -, \*, /
+- Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand, clamp
+- Control structures: if, else, ternary (?:), while, break, return, const, export
+- Assignment: =, +=, -=, \*=, /=
+- Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc
+
+# Planned Features
+
+- A module system to import 2D / 3D renderers, noises, cameras etc.
+
+- Integrated mesh generation.
+
+- 100% GLSL compatibility over time.
+
+- Better error messages.
 
 # Usage
 
