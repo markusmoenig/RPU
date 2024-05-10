@@ -115,6 +115,7 @@ impl ASTValue {
                 format!("({} ${}_8)", instr, name),
                 format!("({} ${}_9)", instr, name),
             ],
+            ASTValue::Struct(_, _, _) => vec![format!("({} ${})", instr, name)],
             _ => vec![],
         }
     }
@@ -225,6 +226,8 @@ impl ASTValue {
                 "f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr} f{pr}",
                 pr = pr
             )),
+            ASTValue::Struct(_, _, _) => Some("i32".to_string()),
+
             _ => None,
         }
     }

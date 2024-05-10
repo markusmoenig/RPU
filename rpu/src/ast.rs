@@ -294,6 +294,7 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
+    #[allow(clippy::too_many_arguments)]
     fn variable_assignment(
         &mut self,
         name: String,

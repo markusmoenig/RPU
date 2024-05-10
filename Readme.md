@@ -1,18 +1,38 @@
-RPU is a GLSL / C like programming language which compiles to WebAssembly (WAT) and is currently under development.
+RPU is a GLSL / C like language for rendering procedural content without limitations. It is currently under development.
 
-You can use it as a general purpose programming language, as a shader language for 2D and 3D renderering and as a (very) fast embedded scripting language for Rust based applications.
-
-RPU compiles to WAT code and uses [wasmer](https://crates.io/crates/wasmer) as a runtime. The GLSL features like vecs, swizzles and math functions get compiled on-demand. They do not introduce any overhead or speed / size penalties if not used.
-
-You can choose between 32 and 64 bit precision during compile time.
+RPU compiles to WebAssembly (WAT) code and uses [wasmer](https://crates.io/crates/wasmer) as a runtime.
 
 All vector based operations (length, dot, cross etc) are implemented in pure WebAssembly. Trigonometric functions are implemented in Rust and are called via the wasmer runtime.
 
+You can choose between 32 and 64 bit precision during compile time.
+
 When working on shaders, RPU uses multiple threads to render the image. This is done by splitting the image into tiles and rendering each tile in parallel.
+
+# CPU vs GPU for procedural content
+
+- CPU+: Unlimited procedural content in 64-bit (or 32-bit) precision. No need to worry that the shader will not compile.
+
+- CPU+: Shader compile times are in milliseconds.
+
+- CPU+: Access to host functionality like high-quality random numbers.
+
+- CPU+: Recursive functions are supported.
+
+- GPU+: Real-time rendering.
+
+- CPU-: Slower rendering. However single-pass shaders of complex scenes render in a second or so (preview). Pathtracers can take minutes to render. The more complex the scene, the more the CPU catches up to the GPU.
+
+# RPU differences to GLSL
+
+- Only signed integers are supported at the moment, i.e. no unsigned integer types and their associated bit operations. As RPU has a `rand()` function which generates high quality random numbers on the Rust side, I do not see unsigned integers as a priority right now.
+
+- Function parameters do not support `in`, `out` or `inout` right now. Vectors and matrices are passed by value, structs are passed by reference. **I will add support for inout parameters in the near future.**
+
+- No preprocessor yet, coming soon.
 
 # Currently implemented
 
-- [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4, mat2, mat3, mat4
+- [x] Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4, mat2, mat3, mat4 and custom structs
 - [x] Math operators: +, -, \*, /
 - [x] Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand, clamp
 - [x] Control structures: if, else, ternary (?:), while, break, return, const, export
@@ -22,14 +42,6 @@ When working on shaders, RPU uses multiple threads to render the image. This is 
 # Usage
 
 You can use the RPU compiler as a [standalone tool](https://crates.io/crates/rpuc) or as a [crate](https://crates.io/crates/rpu) in your Rust project.
-
-# Why RPU?
-
-Sometimes you want to use high precision offline rendering without all the hazzles of the GPU and getting your shaders to compile.
-
-For example I prefer to render SDFs on the CPU, especially when I want to use a lot of them or if the amount of SDFs to render are not known at compile time (user based input).
-
-Using RPU you can use the same code for both CPU and GPU rendering.
 
 # Examples
 

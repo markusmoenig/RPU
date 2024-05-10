@@ -241,6 +241,11 @@ impl RPU {
 
                                                 let mut fc = [0.0, 0.0, 0.0, 0.0];
                                                 for i in 0..iterations {
+                                                    if let Ok(gl) =
+                                                        instance.exports.get_global("mem_ptr")
+                                                    {
+                                                        _ = gl.set(&mut store, Value::I32(32));
+                                                    }
                                                     match func.call(&mut store, &args) {
                                                         Ok(values) => {
                                                             let rgba = if high_precision {

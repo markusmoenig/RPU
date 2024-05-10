@@ -1,0 +1,113 @@
+// Based on https://www.shadertoy.com/view/WtGXDD
+
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
+
+vec2 opU(vec2 o1, vec2 o2) {
+    return (o1.x < o2.x) ? o1 : o2;
+}
+
+float sdBox(vec3 p, vec3 s) {
+    p = abs(p)-s;
+	return length(max(p, 0.))+min(max(p.x, max(p.y, p.z)), 0.);
+}
+
+float sdPlane( vec3 p, vec4 n ) {
+  return dot(p,n.xyz) + n.w;
+}
+
+vec2 GetDist(vec3 p) {
+    vec2 box = vec2(sdBox(p +-vec3(0., .5, 0.), vec3(.5)), 0);
+    vec2 plane = vec2(sdPlane(p, vec4(0, 1, 0, 0)), 1);
+    //d = min(d, sdPlane(p, vec4(0, 1, 0, 0)));
+
+    return opU(box, plane);
+}
+
+vec3 GetRayDir(vec2 uv, vec3 p, vec3 l, float z) {
+    vec3 f = normalize(l-p);
+    vec3 r = normalize(cross(vec3(0,1,0), f));
+    vec3 u = cross(f,r);
+    vec3 c = f*z;
+    vec3 i = c + uv.x*r + uv.y*u;
+    return normalize(i);
+}
+
+vec3 GetNormal(vec3 p) {
+    vec2 e = vec2(0.001, 0.);
+    vec3 n = GetDist(p).x - vec3(GetDist(p-e.xyy).x, GetDist(p-e.yxy).x, GetDist(p-e.yyx).x);
+    return normalize(n);
+}
+
+vec2 RandomInUnitDisk() {
+    vec2 h = vec2(rand(), rand()) * vec2(1.,6.28318530718);
+    float phi = h.y;
+    float r = sqrt(h.x);
+	return r * vec2(sin(phi),cos(phi));
+}
+
+Ray CreateRay(vec2 uv, vec2 resolution, vec3 origin, vec3 lookAt) {
+    Ray ray;
+
+    float aperture = 0.1;
+    float focus_dist = 10.0;
+    float fov = 40.;
+
+    float lens_radius = aperture / 2.;
+    float theta = fov * 3.14159265359 / 180.;
+    float half_height = tan(theta/2.);
+    float half_width = resolution.x / resolution.y * half_height;
+    vec3 w = normalize(origin - lookAt);
+    vec3 u = normalize(cross(vec3(0,1,0), w));
+    vec3 v = cross(w, u);
+    vec3 lower_left_corner = origin - half_width * focus_dist * u - half_height * focus_dist * v - w;
+    vec3 horizontal = 2. * half_width * focus_dist * u;
+    vec3 vertical = 2. * half_height * focus_dist * v;
+
+    vec2 unit = lens_radius * RandomInUnitDisk();
+    vec3 offset = u * unit.x + v * unit.y;
+
+    ray.origin = origin + offset;
+    ray.direction = normalize(lower_left_corner + uv.x * horizontal + uv.y * vertical - origin - offset);
+
+    return ray;
+}
+
+export vec4 shader(vec2 coord, vec2 resolution) {
+    vec2 uv = (coord + vec2(rand(), rand())) / resolution.xy;
+
+    // Create Camera Ray
+
+    vec3 origin = vec3(0, 0.8, 1);
+    vec3 lookAt = vec3(0, 0.5, 0.0);
+
+    Ray ray = CreateRay(uv, resolution, origin, lookAt);
+
+    //
+
+    float t = 0.;
+    float max_t = 100.;
+
+    vec4 col = vec4(uv.x, uv.y, 0., 1.);
+
+    while (t < max_t) {
+        vec3 p = ray.origin + ray.direction * t;
+        vec2 rc = GetDist(p);
+        if (abs(rc.x) < 0.001) {
+            vec3 n = GetNormal(p);
+
+            if (rc.y == 1.0) {
+                col = vec4(1., 0., 0., 1.);
+            } else {
+                col = vec4(0., 1., 0., 1.);
+            }
+
+            break;
+        }
+        t += rc.x;
+    }
+
+    return col;
+}

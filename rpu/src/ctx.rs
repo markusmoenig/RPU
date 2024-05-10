@@ -196,7 +196,7 @@ impl Context {
 
         self.add_wat("(call $malloc)");
 
-        let instr = format!("local.set ${}", name);
+        let instr = format!("(local.set ${})", name);
         self.add_wat(&instr);
 
         self.uses_memory = true;
@@ -219,25 +219,29 @@ impl Context {
         write: bool,
         loc: &Location,
     ) -> Result<ASTValue, String> {
-        println!("Struct var: {} {} {:?}", var_name, struct_name, field_path);
+        // println!(
+        //     "Struct var: {} {} {:?} {}",
+        //     var_name, struct_name, field_path, write
+        // );
         if !field_path.is_empty() {
             if let Some(struct_fields) = self.structs.get(struct_name) {
-                let mut field_name = field_path[0].clone();
-                let mut field_type = ASTValue::None;
+                let field_name = field_path[0].clone();
+                let mut field_value = ASTValue::None;
                 let mut field_offset = 0;
-                let mut field_size = 0;
+
+                let mut field_index = 1;
+                let mut swizzle: Vec<u8> = vec![];
 
                 for (name, value) in struct_fields.iter() {
                     if *name == field_name {
-                        field_type = value.clone();
-                        field_size = value.components() * self.precision.size();
+                        field_value = value.clone();
                         break;
                     } else {
                         field_offset += value.components() * self.precision.size();
                     }
                 }
 
-                if field_type.to_type() == "void" {
+                if field_value.to_type() == "void" {
                     return Err(format!(
                         "Unknown field '{}' in struct '{}' {}",
                         field_name,
@@ -246,71 +250,145 @@ impl Context {
                     ));
                 }
 
-                println!("{}", field_offset);
-
-                /*
-                let mut instr = format!("{}.get ${}", scope, name);
-                ctx.add_wat(&instr);
-
-                for i in 1..field_path.len() {
-                    field = field_path[i].clone();
-                    let mut field_found = false;
-
-                    for f in strct.fields.iter() {
-                        if f.name == field {
-                            field_type = f.type_name.clone();
-                            field_offset = f.offset;
-                            field_size = f.size;
-                            field_found = true;
-                            break;
-                        }
+                while field_index < field_path.len() {
+                    // Last Element is a swizle ?
+                    if field_index == field_path.len() - 1
+                        && field_path[field_index]
+                            .chars()
+                            .all(|c| matches!(c, 'x' | 'y' | 'z' | 'w'))
+                    {
+                        swizzle = field_path[field_index]
+                            .chars()
+                            .map(|c| match c {
+                                'x' => 0,
+                                'y' => 1,
+                                'z' => 2,
+                                'w' => 3,
+                                _ => unreachable!(),
+                            })
+                            .collect();
                     }
-
-                    if !field_found {
-                        return Err(format!(
-                            "Unknown field '{}' in struct '{}' {}",
-                            field,
-                            name,
-                            loc.describe()
-                        ));
-                    }
-
-                    instr = format!("i32.const {}", field_offset);
-                    ctx.add_wat(&instr);
-                    instr = format!("i32.add");
-                    ctx.add_wat(&instr);
-                    }*/
-
-                if !write {
-                    //let temp_mem_ptr = self.add_temporary_mem_ptr();
-
-                    let components = field_type.components();
-                    let component_type = self.get_component_type(&field_type);
-                    for _ in 0..components {
-                        let instr = format!("(local.get ${})", var_name);
-                        self.add_wat(&instr);
-                        let instr = format!("(i32.const {})", field_offset);
-                        self.add_wat(&instr);
-                        let instr = format!("(i32.add)");
-                        self.add_wat(&instr);
-                        let instr = format!("({}.load)", component_type);
-                        self.add_wat(&instr);
-                        // let instr = format!("(local.set ${}", temp_mem_ptr);
-                        // self.add_wat(&instr);
-                        field_offset += self.precision.size();
-                    }
-                    // let instr = format!("(local.get ${})", var_name);
-                    // self.add_wat(&instr);
-
-                    // let temp = self.add_temporary(&field_type);
-                    // let instr = format!("(i32.const {})", field_offset);
-                    // self.add_wat(&instr);
-                    // let instr = format!("(i32.add)");
-                    // self.add_wat(&instr);
+                    field_index += 1;
                 }
 
-                return Ok(field_type.clone());
+                if !write {
+                    // Read the field from memory to the stack.
+
+                    //let temp_mem_ptr = self.add_temporary_mem_ptr();
+
+                    let component_type = self.get_component_type(&field_value);
+                    if swizzle.is_empty() {
+                        // Write the whole field to the stack.
+                        let components = field_value.components();
+                        for _ in 0..components {
+                            let instr = format!("(local.get ${})", var_name);
+                            self.add_wat(&instr);
+                            let instr = format!("(i32.const {})", field_offset);
+                            self.add_wat(&instr);
+                            self.add_wat("(i32.add)");
+                            let instr = format!("({}.load)", component_type);
+                            self.add_wat(&instr);
+                            // let instr = format!("(local.set ${}", temp_mem_ptr);
+                            // self.add_wat(&instr);
+                            field_offset += self.precision.size();
+                        }
+                    } else {
+                        // Swizzle the elements of the field to the stack.
+                        for s in swizzle.iter() {
+                            if *s as usize >= field_value.components() {
+                                return Err(format!(
+                                    "Swizzle '{}' out of bounds for '{}' {}",
+                                    self.deswizzle(*s),
+                                    field_name,
+                                    loc.describe()
+                                ));
+                            }
+                            let instr = format!("(local.get ${})", var_name);
+                            self.add_wat(&instr);
+                            let instr = format!(
+                                "(i32.const {})",
+                                field_offset + *s as usize * self.precision.size()
+                            );
+                            self.add_wat(&instr);
+                            self.add_wat("(i32.add)");
+                            let instr = format!("({}.load)", component_type);
+                            self.add_wat(&instr);
+                        }
+                        return Ok(self.create_value_from_swizzle(&field_value, swizzle.len()));
+                    }
+                } else {
+                    // Write the field from the stack to memory.
+
+                    let component_type = self.get_component_type(&field_value);
+                    let temp_name = self.add_temporary(&field_value);
+                    if swizzle.is_empty() {
+                        // Write the whole field to the stack.
+                        let components = field_value.components();
+                        field_offset += (components - 1) * self.precision.size();
+                        for _ in (0..components).rev() {
+                            let instr = format!("(local.set ${})", temp_name);
+                            self.add_wat(&instr);
+
+                            let instr = format!("(local.get ${})", var_name);
+                            self.add_wat(&instr);
+
+                            let instr = format!("(i32.const {})", field_offset);
+                            self.add_wat(&instr);
+                            self.add_wat("(i32.add)");
+
+                            let instr = format!("(local.get ${})", temp_name);
+                            self.add_wat(&instr);
+
+                            let instr = format!("({}.store)", component_type);
+                            self.add_wat(&instr);
+
+                            field_offset -= self.precision.size();
+                        }
+                    } else {
+                        // Swizzle the elements of the field to the stack.
+                        for s in swizzle.iter() {
+                            if *s as usize >= field_value.components() {
+                                return Err(format!(
+                                    "Swizzle '{}' out of bounds for '{}' {}",
+                                    self.deswizzle(*s),
+                                    field_name,
+                                    loc.describe()
+                                ));
+                            }
+                            let instr = format!("(local.set ${})", temp_name);
+                            self.add_wat(&instr);
+
+                            let instr = format!("(local.get ${})", var_name);
+                            self.add_wat(&instr);
+                            let instr = format!(
+                                "(i32.const {})",
+                                field_offset + *s as usize * self.precision.size()
+                            );
+                            self.add_wat(&instr);
+                            self.add_wat("(i32.add)");
+
+                            let instr = format!("(local.get ${})", temp_name);
+                            self.add_wat(&instr);
+
+                            let instr = format!("({}.store)", component_type);
+                            self.add_wat(&instr);
+                        }
+                        return Ok(self.create_value_from_swizzle(&field_value, swizzle.len()));
+                    }
+                }
+
+                return Ok(field_value.clone());
             }
+        } else {
+            // The field_path is empty, meaning we are accessing the whole struct.
+            // Write the memory offset to the struct on the stack.
+            let instr = format!("(local.get ${})", var_name);
+            self.add_wat(&instr);
+            return Ok(ASTValue::Struct(
+                struct_name.to_string().clone(),
+                None,
+                vec![],
+            ));
         }
         Ok(ASTValue::None)
     }
@@ -334,13 +412,13 @@ impl Context {
 
         // Read the components into memory
         for i in (0..components).rev() {
-            let instr = format!("local.set ${}", temp);
+            let instr = format!("(local.set ${})", temp);
             self.add_wat(&instr);
 
             let instr = format!("(i32.const {})", i * component_size);
             self.add_wat(&instr);
 
-            let instr = format!("local.get ${}", temp);
+            let instr = format!("(local.get ${})", temp);
             self.add_wat(&instr);
 
             let instr = format!("({}{}.store)", type_str, self.pr);
@@ -473,7 +551,7 @@ impl Context {
         output += "\n    (memory 1)\n\n";
 
         if self.uses_memory {
-            output += "    (global $mem_ptr (mut i32) (i32.const 32)) ;; We keep the first 32 bytes to shuffle stack content\n\n";
+            output += "    (global $mem_ptr (export \"mem_ptr\") (mut i32) (i32.const 32)) ;; We keep the first 32 bytes to shuffle stack content\n\n";
             output += "    ;; Allocate memory and move the memory ptr\n";
             output += "    (func $malloc (param $size i32) (result i32)\n";
             output += "      (local $current_ptr i32)\n";

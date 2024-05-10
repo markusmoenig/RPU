@@ -1,8 +1,20 @@
 
-export ivec2  main() {
-    ivec2 test = ivec2(1, 2);
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
 
-    test /= ivec2(4, 8);
+Ray getter() {
+    Ray ray = Ray(vec3(1.0, 2.0, 3.0), vec3(0.0, 1.0, 0.0));
 
-    return test;
+    ray.direction = vec3(8.0, 1.0, 7.0);
+
+    return ray;
+}
+
+export vec3 main() {
+
+    Ray ray = getter();
+
+    return ray.direction;
 }

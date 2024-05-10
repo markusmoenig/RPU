@@ -407,6 +407,16 @@ impl Parser {
                         )?
                         .lexeme;
                     parameters.push(ASTValue::from_token_type(Some(param_name), &token_type));
+                } else if let Some(_strct) = self.structs.get(&self.lexeme()) {
+                    let struct_name = self.lexeme();
+                    self.advance();
+                    let param_name = self
+                        .consume(
+                            TokenType::Identifier,
+                            &format!("Expect parameter name at line {}.", line),
+                        )?
+                        .lexeme;
+                    parameters.push(ASTValue::Struct(struct_name, Some(param_name), vec![]));
                 } else {
                     return Err(format!(
                         "Invalid parameter type '{}' at line {}.",
@@ -1241,7 +1251,7 @@ impl Parser {
                 }
             }
             _ => Err(format!(
-                "Unknown identifier {:?} at line {}.",
+                "Unknown identifier '{:?}' at line {}.",
                 token.lexeme, token.line
             )),
         }

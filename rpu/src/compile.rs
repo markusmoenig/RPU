@@ -401,42 +401,55 @@ impl Visitor for CompileVisitor {
                     ctx.add_wat(c);
                 }
             }
-            ASTValue::Struct(struct_name, _, _) => {
-                // Define the i32 memory ptr for the struct
-                let comps = v.write_definition("local", name, &ctx.pr);
-                for c in comps {
-                    ctx.wat_locals.push_str(&format!("        {}\n", c));
-                }
-                // Allocate memory for the struct and set the offset to the variable
-                let size = *ctx.struct_sizes.get(struct_name).unwrap();
-                ctx.alloc_mem_struct(name, size);
-                let component_size = ctx.precision.size();
-                let mut struct_offset = size - component_size;
-                // Iterate over all fields and move the fields from the stack to the memory
-                if let Some(struct_def) = ctx.structs.get(struct_name).cloned() {
-                    for (_, field_type) in struct_def.iter().rev() {
-                        let temp_name = ctx.add_temporary(field_type);
+            ASTValue::Struct(struct_name, _, fields) => {
+                if !fields.is_empty() {
+                    // Define the i32 memory ptr for the struct
+                    let comps = v.write_definition("local", name, &ctx.pr);
+                    for c in comps {
+                        ctx.wat_locals.push_str(&format!("        {}\n", c));
+                    }
+                    // Allocate memory for the struct and set the offset to the variable
+                    let size = *ctx.struct_sizes.get(struct_name).unwrap();
+                    ctx.alloc_mem_struct(name, size);
+                    let component_size = ctx.precision.size();
+                    let mut struct_offset = size - component_size;
+                    // Iterate over all fields and move the fields from the stack to the memory
+                    if let Some(struct_def) = ctx.structs.get(struct_name).cloned() {
+                        for (_, field_type) in struct_def.iter().rev() {
+                            let temp_name = ctx.add_temporary(field_type);
 
-                        let com_type = ctx.get_component_type(field_type);
-                        let components = field_type.components();
-                        for _ in 0..components {
-                            // Move the field component to a temp local variable
-                            let instr = format!("local.set ${}", temp_name);
-                            ctx.add_wat(&instr);
-                            // Get the memory ptr for the strucy and add the current field.component offset
-                            let instr = format!("local.get ${}", name);
-                            ctx.add_wat(&instr);
-                            let instr = format!("i32.const {}", struct_offset);
-                            ctx.add_wat(&instr);
-                            ctx.add_wat("i32.add");
-                            // Get the field component back from temp
-                            let instr = format!("local.get ${}", temp_name);
-                            ctx.add_wat(&instr);
-                            // Store the field component in the struct memory
-                            let instr = format!("({}.store)", com_type);
-                            ctx.add_wat(&instr);
-                            struct_offset -= component_size;
+                            let com_type = ctx.get_component_type(field_type);
+                            let components = field_type.components();
+                            for _ in 0..components {
+                                // Move the field component to a temp local variable
+                                let instr = format!("local.set ${}", temp_name);
+                                ctx.add_wat(&instr);
+                                // Get the memory ptr for the strucy and add the current field.component offset
+                                let instr = format!("local.get ${}", name);
+                                ctx.add_wat(&instr);
+                                let instr = format!("i32.const {}", struct_offset);
+                                ctx.add_wat(&instr);
+                                ctx.add_wat("i32.add");
+                                // Get the field component back from temp
+                                let instr = format!("local.get ${}", temp_name);
+                                ctx.add_wat(&instr);
+                                // Store the field component in the struct memory
+                                let instr = format!("({}.store)", com_type);
+                                ctx.add_wat(&instr);
+                                struct_offset -= component_size;
+                            }
                         }
+                    }
+                } else {
+                    // The incoming is a struct itself, just copy the ptr
+
+                    let comps = v.write_definition("local", name, &ctx.pr);
+                    for c in comps {
+                        ctx.wat_locals.push_str(&format!("        {}\n", c));
+                    }
+                    let comps = v.write_access("local.set", name);
+                    for c in comps.iter().rev() {
+                        ctx.add_wat(c);
                     }
                 }
             }
@@ -461,38 +474,45 @@ impl Visitor for CompileVisitor {
         let mut v = expression.accept(self, ctx)?;
         let incoming_components = v.components();
 
-        // Use the type of the variable
-        if let Some(vv) = self.environment.get(&name) {
-            if swizzle.is_empty() && incoming_components != vv.components() {
-                return Err(format!(
-                    "Variable '{}' has {} components, but expression has {} {}",
-                    name,
-                    v.components(),
-                    incoming_components,
-                    loc.describe()
-                ));
+        if field_path.is_empty() {
+            // Use the type of the variable
+            if let Some(vv) = self.environment.get(&name) {
+                if swizzle.is_empty() && incoming_components != vv.components() {
+                    return Err(format!(
+                        "Variable '{}' has {} components, but expression has {} {}",
+                        name,
+                        v.components(),
+                        incoming_components,
+                        loc.describe()
+                    ));
+                }
+                v = vv;
             }
-            v = vv;
-        }
 
-        if swizzle.is_empty() {
-            if incoming_components != v.components() {
+            if swizzle.is_empty() {
+                if incoming_components != v.components() {
+                    return Err(format!(
+                        "Variable '{}' has {} components, but expression has {} {}",
+                        name,
+                        v.components(),
+                        incoming_components,
+                        loc.describe()
+                    ));
+                }
+            } else if incoming_components != swizzle.len() {
                 return Err(format!(
-                    "Variable '{}' has {} components, but expression has {} {}",
+                    "Variable '{}' has {} swizzle, but expression has {} components {}",
                     name,
-                    v.components(),
+                    swizzle.len(),
                     incoming_components,
                     loc.describe()
                 ));
             }
-        } else if incoming_components != swizzle.len() {
-            return Err(format!(
-                "Variable '{}' has {} swizzle, but expression has {} components {}",
-                name,
-                swizzle.len(),
-                incoming_components,
-                loc.describe()
-            ));
+        } else {
+            // For structs
+            if let Some(vv) = self.environment.get(&name) {
+                v = vv;
+            }
         }
 
         match &v {
@@ -775,8 +795,8 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
-            ASTValue::Struct(name, _, _) => {
-                println!("Struct var assignment: {}", name);
+            ASTValue::Struct(struct_name, _, _) => {
+                _ = ctx.access_struct_(&name, struct_name, field_path, true, loc)?;
             }
             _ => {}
         }
@@ -905,7 +925,7 @@ impl Visitor for CompileVisitor {
         } else if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
             rc = ASTValue::Function(name.clone(), args.clone(), body.clone());
         } else {
-            return Err(format!("Unknown identifier {}", loc.describe()));
+            return Err(format!("Unknown identifier '{}' {}", name, loc.describe()));
         }
 
         if !instr.is_empty() {
@@ -919,7 +939,7 @@ impl Visitor for CompileVisitor {
         &mut self,
         value: ASTValue,
         swizzle: &[u8],
-        field_path: &[String],
+        _field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
     ) -> Result<ASTValue, String> {
@@ -1828,7 +1848,7 @@ impl Visitor for CompileVisitor {
         &mut self,
         callee: &Expr,
         swizzle: &[u8],
-        field_path: &[String],
+        _field_path: &[String],
         args: &[Box<Expr>],
         loc: &Location,
         ctx: &mut Context,
@@ -2288,6 +2308,9 @@ impl Visitor for CompileVisitor {
                         name.clone().unwrap(),
                         ctx.precision.describe()
                     );
+                }
+                ASTValue::Struct(_, param_name, _) => {
+                    params += &format!("(param ${} i32)", param_name.clone().unwrap());
                 }
                 _ => {}
             }
