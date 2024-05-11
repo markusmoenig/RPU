@@ -2577,7 +2577,7 @@ impl Visitor for CompileVisitor {
 
     fn for_stmt(
         &mut self,
-        init: &[Box<Expr>],
+        init: &[Box<Stmt>],
         conditions: &[Box<Expr>],
         incr: &[Box<Expr>],
         body_stmt: &Stmt,

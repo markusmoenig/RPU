@@ -19,6 +19,9 @@ pub struct Parser {
 
     /// Are we in an open variable declaration (separated by ',') ?
     open_var_declaration: Option<ASTValue>,
+
+    /// Are we inside a for loop initializer ?
+    inside_for_initializer: bool,
 }
 
 impl Default for Parser {
@@ -42,6 +45,7 @@ impl Parser {
             structs: FxHashMap::default(),
 
             open_var_declaration: None,
+            inside_for_initializer: false,
         }
     }
 
@@ -272,14 +276,16 @@ impl Parser {
             self.open_var_declaration = Some(static_type.clone());
         } else {
             self.open_var_declaration = None;
-            self.consume(
-                TokenType::Semicolon,
-                &format!(
-                    "Expect ';' after variable declaration, found '{}' at line {}.",
-                    self.lexeme(),
-                    line
-                ),
-            )?;
+            if !self.inside_for_initializer {
+                self.consume(
+                    TokenType::Semicolon,
+                    &format!(
+                        "Expect ';' after variable declaration, found '{}' at line {}.",
+                        self.lexeme(),
+                        line
+                    ),
+                )?;
+            }
         }
 
         Ok(Stmt::VarDeclaration(
@@ -317,16 +323,20 @@ impl Parser {
             &format!("Expect '(' after 'for' at line {}.", line),
         )?;
 
-        let mut inits: Vec<Box<Expr>> = vec![];
+        let mut inits: Vec<Box<Stmt>> = vec![];
 
         loop {
-            let i = self.expression()?;
+            self.inside_for_initializer = true;
+            let i = self.declaration()?;
+            self.inside_for_initializer = false;
             inits.push(Box::new(i));
 
             if !self.match_token(vec![TokenType::Comma]) {
                 break;
             }
         }
+
+        self._print_current();
 
         self.consume(
             TokenType::Semicolon,

@@ -94,6 +94,7 @@
         (local $origin_y f64)
         (local $origin_z f64)
         (local $_rpu_temp_f64 f64)
+        (local $a i64)
         (local $i i64)
         (call $getter)
         (local.set $ray)
@@ -146,7 +147,7 @@
         local.get $_rpu_temp_f64
         (f64.store)
         (i64.const 0)
-        local.set $i
+        local.set $a
 
         (i64.const 0)
         local.set $i
@@ -158,6 +159,10 @@
                 (i32.eqz)
                 (br_if 1)
                 (block
+                    (i64.const 1)
+                    local.get $a
+                    i64.add
+                    local.set $a
                 )
                 (i64.const 1)
                 local.get $i

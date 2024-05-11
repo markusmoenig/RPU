@@ -42,7 +42,7 @@ pub enum Stmt {
     If(Box<Expr>, Box<Stmt>, Option<Box<Stmt>>, Location),
     While(Box<Expr>, Box<Stmt>, Location),
     For(
-        Vec<Box<Expr>>,
+        Vec<Box<Stmt>>,
         Vec<Box<Expr>>,
         Vec<Box<Expr>>,
         Box<Stmt>,
@@ -371,7 +371,7 @@ pub trait Visitor {
 
     fn for_stmt(
         &mut self,
-        init: &[Box<Expr>],
+        init: &[Box<Stmt>],
         cond: &[Box<Expr>],
         incr: &[Box<Expr>],
         body_stmt: &Stmt,
