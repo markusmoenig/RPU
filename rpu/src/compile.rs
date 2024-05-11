@@ -814,8 +814,10 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
-            ASTValue::Struct(struct_name, param_name, _) => {
-                if param_name == &Some("Instantiation".to_string()) || struct_instantiation {
+            ASTValue::Struct(struct_name, _, _) => {
+                if
+                /*param_name == &Some("Instantiadtion".to_string()) ||*/
+                struct_instantiation {
                     // This is an instantiation of a struct, we have to move it from the stack to the memory
                     let component_size = ctx.precision.size();
                     let size = *ctx.struct_sizes.get(struct_name).unwrap();
