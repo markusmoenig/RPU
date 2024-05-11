@@ -111,9 +111,10 @@ impl Parser {
 
         // Is it a struct ?
         if token_type.is_none() && self.structs.contains_key(&self.tokens[self.current].lexeme) {
+            // We are instantiating a new struct, i.e. Ray(...).
             token_type = Some(ASTValue::Struct(
                 self.tokens[self.current].lexeme.clone(),
-                None,
+                Some("Instantiation".to_string()),
                 vec![],
             ));
             self.current += 1;
@@ -1251,7 +1252,7 @@ impl Parser {
                     let field_path = self.get_field_path_at_current();
 
                     Ok(Expr::Value(
-                        ASTValue::Struct(token.lexeme, None, fields),
+                        ASTValue::Struct(token.lexeme, Some("Instantiation".to_string()), fields),
                         vec![],
                         field_path,
                         self.create_loc(token.line),

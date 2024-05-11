@@ -484,6 +484,15 @@ impl Visitor for CompileVisitor {
         let mut v = expression.accept(self, ctx)?;
         let incoming_components = v.components();
 
+        // Check if the value is a struct instantiation, to check this becomes necessary as the value in the environment
+        // does not contain the struct instantiation, but the struct type only
+        let mut struct_instantiation = false;
+        if let ASTValue::Struct(_, param_name, _) = &v {
+            if param_name == &Some("Instantiation".to_string()) {
+                struct_instantiation = true;
+            }
+        }
+
         if field_path.is_empty() {
             // Use the type of the variable
             if let Some(vv) = self.environment.get(&name) {
@@ -805,9 +814,44 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
-            ASTValue::Struct(struct_name, _, fields) => {
-                //println!("Struct assignment {:?}", fields);
-                _ = ctx.access_struct_(&name, struct_name, field_path, true, loc)?;
+            ASTValue::Struct(struct_name, param_name, _) => {
+                if param_name == &Some("Instantiation".to_string()) || struct_instantiation {
+                    // This is an instantiation of a struct, we have to move it from the stack to the memory
+                    let component_size = ctx.precision.size();
+                    let size = *ctx.struct_sizes.get(struct_name).unwrap();
+                    let mut struct_offset = size - component_size;
+                    // Iterate over all fields and move the fields from the stack to the memory
+                    if let Some(struct_def) = ctx.structs.get(struct_name).cloned() {
+                        for (_, field_type) in struct_def.iter().rev() {
+                            let temp_name = ctx.add_temporary(field_type);
+
+                            let com_type = ctx.get_component_type(field_type);
+                            let components = field_type.components();
+                            for _ in 0..components {
+                                // Move the field component to a temp local variable
+                                let instr = format!("local.set ${}", temp_name);
+                                ctx.add_wat(&instr);
+                                // Get the memory ptr for the strucy and add the current field.component offset
+                                let instr = format!("local.get ${}", name);
+                                ctx.add_wat(&instr);
+                                let instr = format!("i32.const {}", struct_offset);
+                                ctx.add_wat(&instr);
+                                ctx.add_wat("i32.add");
+                                // Get the field component back from temp
+                                let instr = format!("local.get ${}", temp_name);
+                                ctx.add_wat(&instr);
+                                // Store the field component in the struct memory
+                                let instr = format!("({}.store)", com_type);
+                                ctx.add_wat(&instr);
+                                struct_offset -= component_size;
+                            }
+                        }
+                    }
+                } else {
+                    // This is a struct assignment, i.e. just copying the struct ptr
+                    // TODO: Check if the struct types are the same
+                    _ = ctx.access_struct(&name, struct_name, field_path, true, loc)?;
+                }
             }
             _ => {}
         }
@@ -928,7 +972,7 @@ impl Visitor for CompileVisitor {
                     rc = v;
                 }
                 ASTValue::Struct(struct_name, _, _) => {
-                    rc = ctx.access_struct_(&name, struct_name, field_path, false, loc)?;
+                    rc = ctx.access_struct(&name, struct_name, field_path, false, loc)?;
                 }
 
                 _ => {}
@@ -1127,7 +1171,6 @@ impl Visitor for CompileVisitor {
             }
 
             _ => {
-                println!("{:?}", value);
                 return Err(format!("Unknown value {}", loc.describe()));
             }
         };

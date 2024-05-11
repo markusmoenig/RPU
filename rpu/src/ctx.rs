@@ -211,7 +211,7 @@ impl Context {
     }
 
     /// Access a struct field.
-    pub fn access_struct_(
+    pub fn access_struct(
         &mut self,
         var_name: &str,
         struct_name: &str,
