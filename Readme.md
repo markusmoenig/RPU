@@ -1,6 +1,6 @@
 RPU is a GLSL / C like language for rendering procedural content without limitations. It is currently under development.
 
-RPU compiles to WebAssembly (WAT) code and uses [wasmer](https://crates.io/crates/wasmer) as a runtime.
+RPU compiles to WebAssembly (WAT) code and uses [wasmer](https://crates.io/crates/wasmer) as a runtime providing native performance on modern CPUs.
 
 All vector based operations (length, dot, cross etc) are implemented in pure WebAssembly. Trigonometric functions are implemented in Rust and are called via the wasmer runtime.
 
@@ -34,7 +34,7 @@ When working on shaders, RPU uses multiple threads to render the image. This is 
 
 - Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4, mat2, mat3, mat4 and custom structs
 - Math operators: +, -, \*, /
-- Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand, clamp
+- Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand, clamp, sign
 - Control structures: if, else, ternary (?:), while, break, return, const, export
 - Assignment: =, +=, -=, \*=, /=
 - Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc

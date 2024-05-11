@@ -9,4 +9,4 @@ description = "This is the standalone compiler for RPU, a GLSL like programming 
 
 [dependencies]
 rpu = { version = "0.2.5", path = "../rpu" }
-clap = "4.5.4"
+clap = "4.4.11"

@@ -499,6 +499,12 @@ impl Context {
                 pr = self.pr
             );
         }
+        if self.imports_hash.contains("$_rpu_sign") {
+            output += &format!(
+                "    (import \"env\" \"_rpu_sign\" (func $_rpu_sign (param f{pr}) (result f{pr})))\n",
+                pr = self.pr
+            );
+        }
         if self.imports_hash.contains("$_rpu_degrees") {
             output += &format!(
                         "    (import \"env\" \"_rpu_degrees\" (func $_rpu_degrees (param f{pr}) (result f{pr})))\n",
@@ -1558,6 +1564,7 @@ impl Context {
             "degrees" => Some("$_rpu_degrees"),
             "radians" => Some("$_rpu_radians"),
             "fract" => Some("$_rpu_fract"),
+            "sign" => Some("$_rpu_sign"),
             _ => None,
         };
 

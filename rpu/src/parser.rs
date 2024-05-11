@@ -16,6 +16,9 @@ pub struct Parser {
 
     /// Structs
     structs: FxHashMap<String, Vec<(String, ASTValue)>>,
+
+    /// Are we in an open variable declaration (separated by ',') ?
+    open_var_declaration: Option<ASTValue>,
 }
 
 impl Default for Parser {
@@ -37,6 +40,8 @@ impl Parser {
             inside_ternary: false,
 
             structs: FxHashMap::default(),
+
+            open_var_declaration: None,
         }
     }
 
@@ -67,6 +72,11 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Result<Stmt, String> {
+        // We are processing a series of variable declarations
+        if let Some(static_type) = &self.open_var_declaration {
+            return self.var_declaration(static_type.clone());
+        }
+
         let mut export = false;
 
         if self.match_token(vec![TokenType::Struct]) {
@@ -214,15 +224,6 @@ impl Parser {
             initializer = Some(self.expression()?);
         }
 
-        self.consume(
-            TokenType::Semicolon,
-            &format!(
-                "Expect ';' after variable declaration, found '{}' at line {}.",
-                self.lexeme(),
-                line
-            ),
-        )?;
-
         let init = if let Some(i) = initializer {
             Box::new(i)
         } else {
@@ -257,6 +258,28 @@ impl Parser {
                 ))
             }
         };
+
+        if self.check(TokenType::Comma) {
+            self.consume(
+                TokenType::Comma,
+                &format!(
+                    "Expect ',' after variable declaration, found '{}' at line {}.",
+                    self.lexeme(),
+                    line
+                ),
+            )?;
+            self.open_var_declaration = Some(static_type.clone());
+        } else {
+            self.open_var_declaration = None;
+            self.consume(
+                TokenType::Semicolon,
+                &format!(
+                    "Expect ';' after variable declaration, found '{}' at line {}.",
+                    self.lexeme(),
+                    line
+                ),
+            )?;
+        }
 
         Ok(Stmt::VarDeclaration(
             name.lexeme,
@@ -1187,7 +1210,10 @@ impl Parser {
                 if self.match_token(vec![TokenType::RightParen]) {
                     Ok(Expr::Grouping(Box::new(expr), self.create_loc(token.line)))
                 } else {
-                    Err("Expected ')' after expression".to_string())
+                    Err(format!(
+                        "Expected ')' after expression at line {}",
+                        token.line
+                    ))
                 }
             }
             TokenType::Identifier => {

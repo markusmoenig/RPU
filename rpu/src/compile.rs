@@ -160,6 +160,15 @@ impl Visitor for CompileVisitor {
         );
 
         functions.insert(
+            "sign".to_string(),
+            ASTValue::Function(
+                "sign".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
             "rand".to_string(),
             ASTValue::Function("rand".to_string(), vec![], Box::new(ASTValue::None)),
         );
@@ -402,6 +411,7 @@ impl Visitor for CompileVisitor {
                 }
             }
             ASTValue::Struct(struct_name, _, fields) => {
+                //println!("Struct Declaration {:?}", fields);
                 if !fields.is_empty() {
                     // Define the i32 memory ptr for the struct
                     let comps = v.write_definition("local", name, &ctx.pr);
@@ -795,7 +805,8 @@ impl Visitor for CompileVisitor {
                     }
                 }
             }
-            ASTValue::Struct(struct_name, _, _) => {
+            ASTValue::Struct(struct_name, _, fields) => {
+                //println!("Struct assignment {:?}", fields);
                 _ = ctx.access_struct_(&name, struct_name, field_path, true, loc)?;
             }
             _ => {}
@@ -1916,6 +1927,7 @@ impl Visitor for CompileVisitor {
                 || name == "tan"
                 || name == "degrees"
                 || name == "radians"
+                || name == "sign"
             {
                 let v = args[0].accept(self, ctx)?;
                 let components = v.components();
