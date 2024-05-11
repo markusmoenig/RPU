@@ -12,9 +12,17 @@ Ray getter() {
     return ray;
 }
 
-export vec3 main() {
+export int main() {
 
     Ray ray = getter();
 
-    return ray.direction;
+    vec3 origin = vec3(7.0, 8.0, 9.0);
+
+    ray = Ray(vec3(7.0, 8.0, 9.0), vec3(7.0, 8.0, 9.0));
+
+    int i = 0;
+    for (i = 0; i < 10; i+= 1) {
+    }
+
+    return i;
 }

@@ -1,61 +1,45 @@
-RPU is a GLSL / C like language for rendering procedural content without limitations. It is currently under development.
+RPU is a GLSL compatible programming language for rendering procedural graphics on the CPU.
 
-RPU compiles to WebAssembly (WAT) code and uses [wasmer](https://crates.io/crates/wasmer) as a runtime providing native performance on modern CPUs.
+As GPU shaders can limit the complexity of what you can render, RPU aims to provide an alternative way of rendering complex, unlimited procedural graphics on the CPU, in 64-bit or 32-bit precision.
 
-All vector based operations (length, dot, cross etc) are implemented in pure WebAssembly. Trigonometric functions are implemented in Rust and are called via the wasmer runtime.
+RPU strives to be compabible with GLSL which means that you can easily port your existing shaders to RPU.
 
-You can choose between 32 and 64 bit precision during compile time.
+Alternatively you can also use RPU as a general purpose mathematical scripting language, as it is designed to be fast and embeddable in your applications.
 
-When working on shaders, RPU uses multiple threads to render the image. This is done by splitting the image into tiles and rendering each tile in parallel.
+## Features
 
-# CPU vs GPU for procedural content
+- GLSL compatible
+- 64-bit or 32-bit precision (decide on compile time)
+- Unlimited procedural graphics
+- Easy to port existing shaders
+- Fast and embeddable in your applications
+- Run shaders in your terminal via rpuc (see [Usage](./usage) for more info)
 
-- CPU+: Unlimited procedural content in 64-bit (or 32-bit) precision. No need to worry that the shader will not compile.
+RPU compiles to WebAssembly (WAT) and uses [wasmer](https://github.com/wasmerio/wasmer) as a runtime. Which means RPU has near native speed, is hot-reloadable and can run on any platform that wasmer supports.
 
-- CPU+: Shader compile times are in milliseconds.
+For shaders it uses a multi-threaded tiled rendering approach, which splits the image into tiles and renders each tile in parallel.
 
-- CPU+: Access to host functionality like high-quality random numbers.
-
-- CPU+: Recursive functions are supported.
-
-- GPU+: Real-time rendering.
-
-- CPU-: Slower rendering. However single-pass shaders of complex scenes render in a second or so (preview). Pathtracers can take minutes to render. The more complex the scene, the more the CPU catches up to the GPU.
-
-# RPU differences to GLSL
+## Current Limitations
 
 - Only signed integers are supported at the moment, i.e. no unsigned integer types and their associated bit operations. As RPU has a `rand()` function which generates high quality random numbers on the Rust side, I do not see unsigned integers as a priority right now.
 
 - Function parameters do not support `in`, `out` or `inout` right now. Vectors and matrices are passed by value, structs are passed by reference. **I will add support for inout parameters in the near future.**
 
+- No textures yet, coming soon.
+
 - No preprocessor yet, coming soon.
 
-# Currently implemented
+## Goals
 
-- Basic types: int, ivec2, ivec3, ivec4, float, vec2, vec3, vec4, mat2, mat3, mat4 and custom structs
-- Math operators: +, -, \*, /
-- Math functions: dot, cross, mix, smoothstep, length, normalize, sin, cos, sqrt, ceil, floor, fract, abs, tan, degrees, radians, min, max, pow, rand, clamp, sign
-- Control structures: if, else, ternary (?:), while, break, return, const, export
-- Assignment: =, +=, -=, \*=, /=
-- Swizzles: vec2.xy, vec3.xyz, vec4.xyzw etc
+- Create a fast and embeddable GLSL compatible language for procedural graphics
 
-# Planned Features
+- Create a module system to easily import noise libraries, renderers, cameras etc (TBD)
 
-- A module system to import 2D / 3D renderers, noises, cameras etc.
+- Mesh generation for 3D SDF maps (TBD)
 
-- Integrated mesh generation.
+## Getting Started
 
-- 100% GLSL compatibility over time.
-
-- Better error messages.
-
-# Usage
-
-You can use the RPU compiler as a [standalone tool](https://crates.io/crates/rpuc) or as a [crate](https://crates.io/crates/rpu) in your Rust project.
-
-# Examples
-
-Fibonacci example like in a general purpose language:
+Use the `export` keyword to export the function you want to run. For example to run a fibonacci sequence:
 
 ```glsl
 int fib(int n) {
@@ -68,13 +52,23 @@ export int main(int x) {
 }
 ```
 
-You can see the generated WAT file [here](/examples/fib.wat).
+You could then run this with `rpuc --source fib.rpu -f main -a 42` to get the fibonacci sequence of 42 which takes around a second on my machine.
 
-To execute it with a secuence of 42 run `cargo run --release -- --source examples/fib.rpu -f main -a 42`. It executes in about a second on my M3.
+Shaders have a signature of
 
----
+```glsl
+export vec4 shader(vec2 coord, vec2 resolution) {
+  return vec4(1); // For an all white image
+}
+```
 
-A simple shader example using raymarching:
+You could run this via `rpuc --source myshader.rpu -f shader --write`.
+
+The resulting image will be saved by _rpuc_ as `myshader.png`. The `--write` flag tells rpuc to write the image to disk every time a tile is completed. Giving a live preview of the rendering process.
+
+RPU assumes that your shader uses stochastic sampling for anti-aliasing. You can pass the `--iterations` flag to _rpuc_ to specify the number of samples per pixel.
+
+A simple raymarching example:
 
 ```glsl
 // Based on https://www.shadertoy.com/view/WtGXDD
@@ -105,14 +99,14 @@ vec3 GetNormal(vec3 p) {
 }
 
 export vec4 shader(vec2 coord, vec2 resolution) {
-    // Generate the uv with random jittering for anti-aliasing
+    // Generate the uv with jittering for anti-aliasing
     vec2 uv = (2.0 * (coord + vec2(rand(), rand())) - resolution.xy) / resolution.y;
 
     vec3 ro = vec3(.7, .8, -1.);
     vec3 rd = GetRayDir(uv, ro, vec3(0), 1.);
 
     float t = 0.;
-    float max_t = 10.;
+    float max_t = 2.;
 
     vec4 col = vec4(uv.x, uv.y, 0., 1.);
 
@@ -126,7 +120,7 @@ export vec4 shader(vec2 coord, vec2 resolution) {
 
             break;
         }
-        t = t + d;
+        t += d;
     }
 
     return col;
@@ -136,4 +130,6 @@ export vec4 shader(vec2 coord, vec2 resolution) {
 By executing the shader it generates the following image:
 ![Raymarch](examples/raymarch.png)
 
-This runs in about 150ms in 800x600 in 64-bit on my machine. You can run the example with `cargo run --release -- --source examples/raymarch.rpu -f shader`.
+# Sponsors
+
+None yet, but you can [sponsor me on GitHub](https://github.com/sponsors/markusmoenig/).

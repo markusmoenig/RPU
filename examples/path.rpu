@@ -9,9 +9,13 @@ vec2 opU(vec2 o1, vec2 o2) {
     return (o1.x < o2.x) ? o1 : o2;
 }
 
-float sdBox(vec3 p, vec3 s) {
+float sdBox(vec3 p, float s) {
     p = abs(p)-s;
 	return length(max(p, 0.))+min(max(p.x, max(p.y, p.z)), 0.);
+}
+
+float sdSphere(vec3 p, float r) {
+	return length(p)-r;
 }
 
 float sdPlane( vec3 p, vec4 n ) {
@@ -19,11 +23,15 @@ float sdPlane( vec3 p, vec4 n ) {
 }
 
 vec2 GetDist(vec3 p) {
-    vec2 box = vec2(sdBox(p +-vec3(0., .5, 0.), vec3(.5)), 0);
-    vec2 plane = vec2(sdPlane(p, vec4(0, 1, 0, 0)), 1);
+    vec2 plane = vec2(sdPlane(p, vec4(0, 1, 0, 0)), 0);
+    vec2 sphere1 = vec2(sdSphere(p -vec3(-0.8, 0.5, 0.), 0.5), 1);
+    vec2 light = vec2(sdSphere(p - vec3(0.0, 0.3, 0.5), 0.2), 2);
     //d = min(d, sdPlane(p, vec4(0, 1, 0, 0)));
 
-    return opU(box, plane);
+    vec2 r = opU(light, sphere1);
+    r = opU(r, plane);
+
+    return r;
 }
 
 vec3 GetRayDir(vec2 uv, vec3 p, vec3 l, float z) {
@@ -35,28 +43,42 @@ vec3 GetRayDir(vec2 uv, vec3 p, vec3 l, float z) {
     return normalize(i);
 }
 
-vec3 GetNormal(vec3 p) {
+vec3 compNormal(vec3 p) {
     vec2 e = vec2(0.001, 0.);
     vec3 n = GetDist(p).x - vec3(GetDist(p-e.xyy).x, GetDist(p-e.yxy).x, GetDist(p-e.yyx).x);
     return normalize(n);
 }
 
-vec2 RandomInUnitDisk() {
+vec2 randomInUnitDisk() {
     vec2 h = vec2(rand(), rand()) * vec2(1.,6.28318530718);
     float phi = h.y;
     float r = sqrt(h.x);
 	return r * vec2(sin(phi),cos(phi));
 }
 
-Ray CreateRay(vec2 uv, vec2 resolution, vec3 origin, vec3 lookAt) {
+vec3 randomInUnitSphere() {
+    vec3 h = vec3(rand()) * vec3(2.,6.28318530718,1.)-vec3(1,0,0);
+    float phi = h.y;
+    float r = pow(h.z, 1./3.);
+	return r * vec3(sqrt(1.-h.x*h.x)*vec2(sin(phi),cos(phi)),h.x);
+}
+
+vec3 jitter(vec3 d, float phi, float sina, float cosa) {
+	vec3 w = normalize(d);
+    vec3 u = normalize(cross(w.yzx, w));
+    vec3 v = cross(w, u);
+	return (u*cos(phi) + v*sin(phi)) * sina + w * cosa;
+}
+
+Ray createRay(vec2 uv, vec2 resolution, vec3 origin, vec3 lookAt) {
     Ray ray;
 
-    float aperture = 0.1;
-    float focus_dist = 10.0;
-    float fov = 40.;
+    float aperture = 0.04;
+    float focus_dist = 4.0;
+    float fov = 20.;
 
     float lens_radius = aperture / 2.;
-    float theta = fov * 3.14159265359 / 180.;
+    float theta = radians(fov);
     float half_height = tan(theta/2.);
     float half_width = resolution.x / resolution.y * half_height;
     vec3 w = normalize(origin - lookAt);
@@ -66,7 +88,7 @@ Ray CreateRay(vec2 uv, vec2 resolution, vec3 origin, vec3 lookAt) {
     vec3 horizontal = 2. * half_width * focus_dist * u;
     vec3 vertical = 2. * half_height * focus_dist * v;
 
-    vec2 unit = lens_radius * RandomInUnitDisk();
+    vec2 unit = lens_radius * randomInUnitDisk();
     vec3 offset = u * unit.x + v * unit.y;
 
     ray.origin = origin + offset;
@@ -75,39 +97,138 @@ Ray CreateRay(vec2 uv, vec2 resolution, vec3 origin, vec3 lookAt) {
     return ray;
 }
 
-export vec4 shader(vec2 coord, vec2 resolution) {
-    vec2 uv = (coord + vec2(rand(), rand())) / resolution.xy;
+// Ray createRay(vec2 uv, vec2 resolution, vec3 origin, vec3 center) {
+//     Ray ray;
 
-    // Create Camera Ray
+//     float fov = 80.;
 
-    vec3 origin = vec3(0, 0.8, 1);
-    vec3 lookAt = vec3(0, 0.5, 0.0);
+//     float ratio = resolution.x / resolution.y;
+//     vec2 pixel_size = vec2(1.0 / resolution.x, 1.0 / resolution.y);
 
-    Ray ray = CreateRay(uv, resolution, origin, lookAt);
+//     float half_width = tan(radians(fov) * 0.5);
+//     float half_height = half_width / ratio;
 
-    //
+//     vec3 w = normalize(origin - center);
+//     vec3 u = cross(vec3(0, 1, 0), w);
+//     vec3 v = cross(w, u);
 
-    float t = 0.;
-    float max_t = 100.;
+//     vec3 lower_left = origin - u * half_width - v * half_height - w;
+//     vec3 horizontal = u * half_width * 2.0;
+//     vec3 vertical = v * half_height * 2.0;
+//     vec3 dir = lower_left - origin;
 
-    vec4 col = vec4(uv.x, uv.y, 0., 1.);
+//     dir += horizontal * (pixel_size.x * rand() + uv.x);
+//     dir += vertical * (pixel_size.y * rand() + uv.y);
 
-    while (t < max_t) {
+//     ray.origin = origin;
+//     ray.direction = normalize(dir);
+
+//     return ray;
+// }
+
+vec2 raymarch(Ray ray, float max_dist) {
+    float t = 0.1;
+
+    while (t < max_dist) {
         vec3 p = ray.origin + ray.direction * t;
         vec2 rc = GetDist(p);
-        if (abs(rc.x) < 0.001) {
-            vec3 n = GetNormal(p);
-
-            if (rc.y == 1.0) {
-                col = vec4(1., 0., 0., 1.);
-            } else {
-                col = vec4(0., 1., 0., 1.);
-            }
-
-            break;
+        if (abs(rc.x) < 0.01) {
+            return vec2(t, rc.y);
         }
         t += rc.x;
     }
 
-    return col;
+    return vec2(t, -1.);
+}
+
+vec3 radiance(Ray r) {
+	vec3 acc = vec3(0.);
+	vec3 mask = vec3(1.);
+
+    int depth = 0;
+    while (depth < 8) {
+        vec2 hit = raymarch(r, 10.0);
+
+        if (hit.y < 0.0) {
+            acc += mask * vec3(0.5, 0.7, 1.0) * 0.5;
+            break;
+        }
+
+        if (depth > 1) {
+            if (rand() > max(max(mask.x, mask.y), mask.z)) {
+                return acc;
+            } else {
+                mask = mask * (1.0 / max(max(mask.x, mask.y), mask.z));
+            }
+        }
+
+        vec3 objColor = vec3(0.2);
+        vec3 objEmission = vec3(0.0);
+
+        if (hit.y == 2.0) {
+            objColor = vec3(1.0, 1.0, 1.0);
+            objEmission = vec3(10.0);
+        } else
+        if (hit.y == 1.0) {
+            objColor = vec3(1.0, 0.0, 0.0);
+        }
+
+
+		vec3 x = r.origin + hit.x * r.direction,
+		 n = compNormal(x),
+		 nl = n * sign(-dot(n, r.direction));
+
+        float r2 = rand();
+        vec3 d = jitter(nl, 2. * 3.14159265359 * rand(), sqrt(r2), sqrt(1. - r2)), e = vec3(0.);
+        //{
+
+            // vec3 l0 = vec3(0, 0.4, 0.0) - x;
+            // float cos_a_max = sqrt(1. - clamp(0.2 * 0.2/ dot(l0, l0), 0., 1.));
+            // float cosa = mix(cos_a_max, 1., rand());
+            // vec3 l = jitter(l0, 2.* 3.14159265359 * rand(), sqrt(1. - cosa * cosa), cosa);
+
+
+            // Ray lightRay = Ray(x, l);
+            // if (raymarch(lightRay, 10.0).y == 2.0) {
+            //     float omega = 2. * 3.14159265359 * (1. - cos_a_max);
+            //     e += vec3(10.0) * clamp(dot(l, n), 0., 1.) * omega / 3.14159265359;
+            // }
+
+
+        //}
+        float E = 1.;
+        acc += mask * objEmission * E + mask * objColor * e;
+        //acc += mask * vec3(0.5);
+        //mask *= obj.albedo;
+        //mask *= objColor;
+
+        vec3 dir = normalize(n + vec3(randomInUnitSphere()));
+
+        mask *= objColor;
+
+        r = Ray(x, d);
+
+        // r.origin = x;
+        // r.direction = dir;
+
+        depth += 1;
+    }
+
+    return acc;
+}
+
+export vec4 shader(vec2 coord, vec2 resolution) {
+    vec2 uv = coord / resolution;
+    // vec2 uv = (2.0 * coord - resolution.xy) / resolution.y;
+
+    vec3 origin = vec3(0, 1.0, 2);
+    vec3 lookAt = vec3(0, 0.5, 0.0);
+
+    Ray ray = createRay(uv, resolution, origin, lookAt);
+
+    vec3 color = vec3(0);
+
+    color += radiance(ray);
+
+    return vec4(pow(color, 0.4545), 1.);
 }

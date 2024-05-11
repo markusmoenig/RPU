@@ -44,6 +44,15 @@ fn main() {
                 .value_parser(clap::builder::ValueParser::string()),
         )
         .arg(
+            Arg::new("image_size")
+                .short('z')
+                .long("size")
+                .help("The size of the image to be rendered. Defaults to '800x600'")
+                .action(ArgAction::Set)
+                .value_name("STRING")
+                .value_parser(clap::builder::ValueParser::string()),
+        )
+        .arg(
             Arg::new("tiled")
                 .short('t')
                 .long("tiled")
@@ -65,10 +74,8 @@ fn main() {
             Arg::new("write")
                 .short('w')
                 .long("write")
-                .help("Writes the shader output image to disk after each completed block. Defaults to 'false'")
-                .action(ArgAction::Set)
-                .value_name("STRING")
-                .value_parser(clap::builder::ValueParser::string()),
+                .help("Writes the shader image after each completed tile")
+                .action(ArgAction::SetTrue),
         )
         .get_matches();
 
@@ -116,6 +123,16 @@ fn main() {
         }
     }
 
+    let mut width = 800;
+    let mut height = 600;
+    if let Some(f) = matches.get_one::<String>("image_size") {
+        let parts: Vec<&str> = f.split('x').collect();
+        if parts.len() == 2 {
+            width = parts[0].parse::<usize>().unwrap();
+            height = parts[1].parse::<usize>().unwrap();
+        }
+    }
+
     let mut tiled: Option<(usize, usize)> = Some((80, 80));
     if let Some(f) = matches.get_one::<String>("tiled") {
         let parts: Vec<&str> = f.split('x').collect();
@@ -134,10 +151,8 @@ fn main() {
     }
 
     let mut write: bool = false;
-    if let Some(str) = matches.get_one::<String>("write") {
-        if str == "true" {
-            write = true;
-        }
+    if *matches.get_one::<bool>("write").unwrap_or(&false) {
+        write = true;
     }
 
     println!(
@@ -174,7 +189,7 @@ fn main() {
                     }
                 }
             } else {
-                let mut buffer = Arc::new(Mutex::new(ColorBuffer::new(800, 600)));
+                let mut buffer = Arc::new(Mutex::new(ColorBuffer::new(width, height)));
                 if write {
                     if let Ok(mut buffer) = buffer.lock() {
                         path.set_extension("png");
@@ -204,7 +219,7 @@ fn main() {
                         }
                     }
                 } else {
-                    let mut buffer = ColorBuffer::new(800, 600);
+                    let mut buffer = ColorBuffer::new(width, height);
 
                     let rc = rpu.compile_wat_and_run_as_shader(
                         &wat,

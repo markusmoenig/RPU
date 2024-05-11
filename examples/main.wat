@@ -88,22 +88,85 @@
     )
 
     ;; function 'main'
-    (func $main (export "main")  (result f64 f64 f64)
+    (func $main (export "main")  (result i64)
         (local $ray i32)
+        (local $origin_x f64)
+        (local $origin_y f64)
+        (local $origin_z f64)
+        (local $_rpu_temp_f64 f64)
+        (local $i i64)
         (call $getter)
         (local.set $ray)
-        (local.get $ray)
-        (i32.const 24)
-        (i32.add)
-        (f64.load)
-        (local.get $ray)
-        (i32.const 32)
-        (i32.add)
-        (f64.load)
-        (local.get $ray)
-        (i32.const 40)
-        (i32.add)
-        (f64.load)
+        (f64.const 7)
+        (f64.const 8)
+        (f64.const 9)
+        local.set $origin_z
+        local.set $origin_y
+        local.set $origin_x
+        (f64.const 7)
+        (f64.const 8)
+        (f64.const 9)
+        (f64.const 7)
+        (f64.const 8)
+        (f64.const 9)
+        local.set $_rpu_temp_f64
+        local.get $ray
+        i32.const 40
+        i32.add
+        local.get $_rpu_temp_f64
+        (f64.store)
+        local.set $_rpu_temp_f64
+        local.get $ray
+        i32.const 32
+        i32.add
+        local.get $_rpu_temp_f64
+        (f64.store)
+        local.set $_rpu_temp_f64
+        local.get $ray
+        i32.const 24
+        i32.add
+        local.get $_rpu_temp_f64
+        (f64.store)
+        local.set $_rpu_temp_f64
+        local.get $ray
+        i32.const 16
+        i32.add
+        local.get $_rpu_temp_f64
+        (f64.store)
+        local.set $_rpu_temp_f64
+        local.get $ray
+        i32.const 8
+        i32.add
+        local.get $_rpu_temp_f64
+        (f64.store)
+        local.set $_rpu_temp_f64
+        local.get $ray
+        i32.const 0
+        i32.add
+        local.get $_rpu_temp_f64
+        (f64.store)
+        (i64.const 0)
+        local.set $i
+
+        (i64.const 0)
+        local.set $i
+        (block
+            (loop
+                local.get $i
+                (i64.const 10)
+                (i64.lt_s)
+                (i32.eqz)
+                (br_if 1)
+                (block
+                )
+                (i64.const 1)
+                local.get $i
+                i64.add
+                local.set $i
+                (br 0)
+            )
+        )
+        local.get $i
         (return)
     )
 )

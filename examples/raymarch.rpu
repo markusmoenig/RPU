@@ -47,7 +47,7 @@ export vec4 shader(vec2 coord, vec2 resolution) {
 
             break;
         }
-        t = t + d;
+        t += d;
     }
 
     return col;

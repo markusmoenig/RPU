@@ -2575,6 +2575,61 @@ impl Visitor for CompileVisitor {
         Ok(then_returns)
     }
 
+    fn for_stmt(
+        &mut self,
+        init: &[Box<Expr>],
+        conditions: &[Box<Expr>],
+        incr: &[Box<Expr>],
+        body_stmt: &Stmt,
+        _loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String> {
+        ctx.add_line();
+
+        for i in init {
+            let _rc = i.accept(self, ctx)?;
+        }
+
+        let instr = "(block".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        let instr = "(loop".to_string();
+        ctx.add_wat(&instr);
+        ctx.add_indention();
+
+        self.break_depth.push(0);
+
+        for cond in conditions {
+            let _rc = cond.accept(self, ctx)?;
+
+            let instr = "(i32.eqz)".to_string();
+            ctx.add_wat(&instr);
+
+            let instr = "(br_if 1)".to_string();
+            ctx.add_wat(&instr);
+        }
+
+        let _rc = body_stmt.accept(self, ctx)?;
+
+        for i in incr {
+            let _rc = i.accept(self, ctx)?;
+        }
+
+        let instr = "(br 0)".to_string();
+        ctx.add_wat(&instr);
+
+        self.break_depth.pop();
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+
+        ctx.remove_indention();
+        ctx.add_wat(")");
+
+        Ok(ASTValue::None)
+    }
+
     fn while_stmt(
         &mut self,
         cond: &Expr,

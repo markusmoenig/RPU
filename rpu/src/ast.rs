@@ -41,6 +41,13 @@ macro_rules! zero_expr_float {
 pub enum Stmt {
     If(Box<Expr>, Box<Stmt>, Option<Box<Stmt>>, Location),
     While(Box<Expr>, Box<Stmt>, Location),
+    For(
+        Vec<Box<Expr>>,
+        Vec<Box<Expr>>,
+        Vec<Box<Expr>>,
+        Box<Stmt>,
+        Location,
+    ),
     Print(Box<Expr>, Location),
     Block(Vec<Box<Stmt>>, Location),
     Expression(Box<Expr>, Location),
@@ -362,6 +369,16 @@ pub trait Visitor {
         ctx: &mut Context,
     ) -> Result<ASTValue, String>;
 
+    fn for_stmt(
+        &mut self,
+        init: &[Box<Expr>],
+        cond: &[Box<Expr>],
+        incr: &[Box<Expr>],
+        body_stmt: &Stmt,
+        loc: &Location,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, String>;
+
     fn logical_expr(
         &mut self,
         left: &Expr,
@@ -388,6 +405,9 @@ impl Stmt {
                 visitor.if_stmt(cond, then_stmt, else_stmt, loc, ctx)
             }
             Stmt::While(cond, body, loc) => visitor.while_stmt(cond, body, loc, ctx),
+            Stmt::For(init, cond, incr, body, loc) => {
+                visitor.for_stmt(init, cond, incr, body, loc, ctx)
+            }
             Stmt::Print(expression, loc) => visitor.print(expression, loc, ctx),
             Stmt::Block(list, loc) => visitor.block(list, loc, ctx),
             Stmt::Expression(expression, loc) => visitor.expression(expression, loc, ctx),

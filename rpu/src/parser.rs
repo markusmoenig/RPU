@@ -297,6 +297,8 @@ impl Parser {
             self.print_statement()
         } else if self.match_token(vec![TokenType::While]) {
             self.while_statement()
+        } else if self.match_token(vec![TokenType::For]) {
+            self.for_statement()
         } else if self.match_token(vec![TokenType::Return]) {
             self.return_statement()
         } else if self.match_token(vec![TokenType::Break]) {
@@ -306,6 +308,72 @@ impl Parser {
         } else {
             self.expression_statement()
         }
+    }
+
+    fn for_statement(&mut self) -> Result<Stmt, String> {
+        let line = self.current_line;
+        self.consume(
+            TokenType::LeftParen,
+            &format!("Expect '(' after 'for' at line {}.", line),
+        )?;
+
+        let mut inits: Vec<Box<Expr>> = vec![];
+
+        loop {
+            let i = self.expression()?;
+            inits.push(Box::new(i));
+
+            if !self.match_token(vec![TokenType::Comma]) {
+                break;
+            }
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            &format!("Expect ';' after loop initializer at line {}.", line),
+        )?;
+
+        let mut conditions: Vec<Box<Expr>> = vec![];
+
+        loop {
+            let c = self.expression()?;
+            conditions.push(Box::new(c));
+
+            if !self.match_token(vec![TokenType::Comma]) {
+                break;
+            }
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            &format!("Expect ';' after loop condition at line {}.", line),
+        )?;
+
+        let mut incrs: Vec<Box<Expr>> = vec![];
+
+        loop {
+            let c = self.expression()?;
+            incrs.push(Box::new(c));
+
+            if !self.match_token(vec![TokenType::Comma]) {
+                break;
+            }
+        }
+
+        self.consume(
+            TokenType::RightParen,
+            &format!("Expect ')' after for loop at line {}.", line),
+        )?;
+
+        let body = self.statement()?;
+
+        Ok(Stmt::For(
+            inits,
+            conditions,
+            incrs,
+            Box::new(body),
+            self.create_loc(line),
+        ))
     }
 
     fn while_statement(&mut self) -> Result<Stmt, String> {

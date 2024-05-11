@@ -6,6 +6,7 @@
 
     (memory 1)
 
+
     ;; vec3 abs
     (func $_rpu_vec3_abs_f64  (param $x f64)  (param $y f64)  (param $z f64)  (result f64 f64 f64)
         local.get $x
@@ -676,9 +677,9 @@
                             )
                         )
                     )
-                    local.get $t
                     local.get $d
-                    (f64.add)
+                    local.get $t
+                    f64.add
                     local.set $t
                 )
                 (br 0)

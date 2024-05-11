@@ -2,7 +2,7 @@
 name = "rpu"
 version = "0.2.5"
 edition = "2021"
-description = "RPU is a GLSL like programming language which compiles to WebAssembly (WAT). Fast and embeddable."
+description = "RPU is a GLSL-like language for rendering procedural content on the CPU."
 license = "MIT"
 keywords = ["language", "glsl", "graphics", "shader", "rendering"]
 repository = "https://github.com/markusmoenig/RPU.git"
