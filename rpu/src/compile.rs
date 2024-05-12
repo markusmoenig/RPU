@@ -142,6 +142,15 @@ impl Visitor for CompileVisitor {
         );
 
         functions.insert(
+            "atan".to_string(),
+            ASTValue::Function(
+                "atan".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
             "degrees".to_string(),
             ASTValue::Function(
                 "degrees".to_string(),
@@ -1930,6 +1939,7 @@ impl Visitor for CompileVisitor {
                 || name == "fract"
                 || name == "abs"
                 || name == "tan"
+                || name == "atan"
                 || name == "degrees"
                 || name == "radians"
                 || name == "sign"

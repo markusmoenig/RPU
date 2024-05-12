@@ -14,6 +14,7 @@ pub struct Var {
 /// Verifies variable and identifier names in scope and handles shadowing
 pub struct VarVerifier {
     scopes: Vec<FxHashMap<String, Var>>,
+    var_counter: i32,
 }
 
 impl Default for VarVerifier {
@@ -49,6 +50,7 @@ impl VarVerifier {
             "rand",
             "clamp",
             "sign",
+            "atan",
         ];
 
         for func in inbuilt_functions {
@@ -66,6 +68,7 @@ impl VarVerifier {
 
         VarVerifier {
             scopes: vec![inbuilt],
+            var_counter: 0,
         }
     }
 
@@ -118,12 +121,16 @@ impl VarVerifier {
 
     /// Creates a new var name based on the original name.
     pub fn create_var_name(&mut self, name: &str) -> String {
-        let mut new_name: String = name.to_string();
-        let mut i = 0;
-        while self.var_exists(&new_name) {
-            i += 1;
-            new_name = format!("{}_{}", name, i);
-        }
+        // let mut new_name: String = name.to_string();
+        // let mut i = 0;
+        // while self.var_exists(&new_name) {
+        //     i += 1;
+        //     new_name = format!("{}_{}", name, i);
+        // }
+        // new_name
+
+        let new_name = format!("{}_{}", name, self.var_counter);
+        self.var_counter += 1;
         new_name
     }
 
