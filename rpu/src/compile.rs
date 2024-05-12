@@ -410,57 +410,15 @@ impl Visitor for CompileVisitor {
                     ctx.add_wat(c);
                 }
             }
-            ASTValue::Struct(struct_name, _, fields) => {
-                //println!("Struct Declaration {:?}", fields);
-                if !fields.is_empty() {
-                    // Define the i32 memory ptr for the struct
-                    let comps = v.write_definition("local", name, &ctx.pr);
-                    for c in comps {
-                        ctx.wat_locals.push_str(&format!("        {}\n", c));
-                    }
-                    // Allocate memory for the struct and set the offset to the variable
-                    let size = *ctx.struct_sizes.get(struct_name).unwrap();
-                    ctx.alloc_mem_struct(name, size);
-                    let component_size = ctx.precision.size();
-                    let mut struct_offset = size - component_size;
-                    // Iterate over all fields and move the fields from the stack to the memory
-                    if let Some(struct_def) = ctx.structs.get(struct_name).cloned() {
-                        for (_, field_type) in struct_def.iter().rev() {
-                            let temp_name = ctx.add_temporary(field_type);
-
-                            let com_type = ctx.get_component_type(field_type);
-                            let components = field_type.components();
-                            for _ in 0..components {
-                                // Move the field component to a temp local variable
-                                let instr = format!("local.set ${}", temp_name);
-                                ctx.add_wat(&instr);
-                                // Get the memory ptr for the strucy and add the current field.component offset
-                                let instr = format!("local.get ${}", name);
-                                ctx.add_wat(&instr);
-                                let instr = format!("i32.const {}", struct_offset);
-                                ctx.add_wat(&instr);
-                                ctx.add_wat("i32.add");
-                                // Get the field component back from temp
-                                let instr = format!("local.get ${}", temp_name);
-                                ctx.add_wat(&instr);
-                                // Store the field component in the struct memory
-                                let instr = format!("({}.store)", com_type);
-                                ctx.add_wat(&instr);
-                                struct_offset -= component_size;
-                            }
-                        }
-                    }
-                } else {
-                    // The incoming is a struct itself, just copy the ptr
-
-                    let comps = v.write_definition("local", name, &ctx.pr);
-                    for c in comps {
-                        ctx.wat_locals.push_str(&format!("        {}\n", c));
-                    }
-                    let comps = v.write_access("local.set", name);
-                    for c in comps.iter().rev() {
-                        ctx.add_wat(c);
-                    }
+            ASTValue::Struct(_, _, _) => {
+                // Copy the incoming struct mem ptr to the variable
+                let comps = v.write_definition("local", name, &ctx.pr);
+                for c in comps {
+                    ctx.wat_locals.push_str(&format!("        {}\n", c));
+                }
+                let comps = v.write_access("local.set", name);
+                for c in comps.iter().rev() {
+                    ctx.add_wat(c);
                 }
             }
             _ => {}
@@ -483,15 +441,6 @@ impl Visitor for CompileVisitor {
     ) -> Result<ASTValue, String> {
         let mut v = expression.accept(self, ctx)?;
         let incoming_components = v.components();
-
-        // Check if the value is a struct instantiation, to check this becomes necessary as the value in the environment
-        // does not contain the struct instantiation, but the struct type only
-        let mut struct_instantiation = false;
-        if let ASTValue::Struct(_, param_name, _) = &v {
-            if param_name == &Some("Instantiation".to_string()) {
-                struct_instantiation = true;
-            }
-        }
 
         if field_path.is_empty() {
             // Use the type of the variable
@@ -815,43 +764,13 @@ impl Visitor for CompileVisitor {
                 }
             }
             ASTValue::Struct(struct_name, _, _) => {
-                if
-                /*param_name == &Some("Instantiadtion".to_string()) ||*/
-                struct_instantiation {
-                    // This is an instantiation of a struct, we have to move it from the stack to the memory
-                    let component_size = ctx.precision.size();
-                    let size = *ctx.struct_sizes.get(struct_name).unwrap();
-                    let mut struct_offset = size - component_size;
-                    // Iterate over all fields and move the fields from the stack to the memory
-                    if let Some(struct_def) = ctx.structs.get(struct_name).cloned() {
-                        for (_, field_type) in struct_def.iter().rev() {
-                            let temp_name = ctx.add_temporary(field_type);
-
-                            let com_type = ctx.get_component_type(field_type);
-                            let components = field_type.components();
-                            for _ in 0..components {
-                                // Move the field component to a temp local variable
-                                let instr = format!("local.set ${}", temp_name);
-                                ctx.add_wat(&instr);
-                                // Get the memory ptr for the strucy and add the current field.component offset
-                                let instr = format!("local.get ${}", name);
-                                ctx.add_wat(&instr);
-                                let instr = format!("i32.const {}", struct_offset);
-                                ctx.add_wat(&instr);
-                                ctx.add_wat("i32.add");
-                                // Get the field component back from temp
-                                let instr = format!("local.get ${}", temp_name);
-                                ctx.add_wat(&instr);
-                                // Store the field component in the struct memory
-                                let instr = format!("({}.store)", com_type);
-                                ctx.add_wat(&instr);
-                                struct_offset -= component_size;
-                            }
-                        }
-                    }
+                if field_path.is_empty() {
+                    // We got an incoming complete struct, just copy the mem ptr
+                    // TODO Check if the struct types are the same
+                    let instr = format!("(local.set ${})", name);
+                    ctx.add_wat(&instr);
                 } else {
-                    // This is a struct assignment, i.e. just copying the struct ptr
-                    // TODO: Check if the struct types are the same
+                    // We got a field path, so we need to copy the field
                     _ = ctx.access_struct(&name, struct_name, field_path, true, loc)?;
                 }
             }
@@ -1157,13 +1076,54 @@ impl Visitor for CompileVisitor {
                 }
                 rc = value.clone();
             }
-            ASTValue::Struct(_name, _, fields) => {
+            ASTValue::Struct(struct_name, _, fields) => {
                 instr = "".to_string();
 
-                // Write all fields onto the stack
+                // Write all fields of the struct onto the stack
                 for field in fields {
                     let _ = field.accept(self, ctx)?;
                 }
+
+                // Allocate memory for the struct and set the offset to the variable
+                let size = *ctx.struct_sizes.get(struct_name).unwrap();
+                let temp_mem_ptr_name = ctx.add_temporary_mem_ptr();
+                ctx.alloc_mem_struct(&temp_mem_ptr_name, size);
+
+                // Move from the stack to the memory
+                let component_size = ctx.precision.size();
+                let size = *ctx.struct_sizes.get(struct_name).unwrap();
+                let mut struct_offset = size - component_size;
+                // Iterate over all fields and move the fields from the stack to the memory
+                if let Some(struct_def) = ctx.structs.get(struct_name).cloned() {
+                    for (_, field_type) in struct_def.iter().rev() {
+                        let temp_name = ctx.add_temporary(field_type);
+
+                        let com_type = ctx.get_component_type(field_type);
+                        let components = field_type.components();
+                        for _ in 0..components {
+                            // Move the field component to a temp local variable
+                            let instr = format!("local.set ${}", temp_name);
+                            ctx.add_wat(&instr);
+                            // Get the memory ptr for the struct and add the current field.component offset
+                            let instr = format!("local.get ${}", temp_mem_ptr_name);
+                            ctx.add_wat(&instr);
+                            let instr = format!("i32.const {}", struct_offset);
+                            ctx.add_wat(&instr);
+                            ctx.add_wat("i32.add");
+                            // Get the field component back from temp
+                            let instr = format!("local.get ${}", temp_name);
+                            ctx.add_wat(&instr);
+                            // Store the field component in the struct memory
+                            let instr = format!("({}.store)", com_type);
+                            ctx.add_wat(&instr);
+                            struct_offset -= component_size;
+                        }
+                    }
+                }
+
+                // Leave tge memory ptr on the stack
+                let instr = format!("local.get ${}", temp_mem_ptr_name);
+                ctx.add_wat(&instr);
 
                 rc = value.clone();
             }

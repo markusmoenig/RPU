@@ -1,4 +1,8 @@
-// Based on https://www.shadertoy.com/view/WtGXDD
+
+struct Material {
+    vec3 albedo;
+    vec3 emission;
+};
 
 struct Ray {
     vec3 origin;
@@ -208,8 +212,8 @@ vec3 radiance(Ray r) {
 
         r = Ray(x, d);
 
-        // r.origin = x;
-        // r.direction = dir;
+        //r.origin = x;
+        //r.direction = dir;
 
         depth += 1;
     }

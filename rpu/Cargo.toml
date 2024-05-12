@@ -2,7 +2,7 @@
 name = "rpu"
 version = "0.2.5"
 edition = "2021"
-description = "RPU is a GLSL-like language for rendering procedural content on the CPU."
+description = "RPU is a GLSL-compatible language for rendering procedural graphics on the CPU."
 license = "MIT"
 keywords = ["language", "glsl", "graphics", "shader", "rendering"]
 repository = "https://github.com/markusmoenig/RPU.git"

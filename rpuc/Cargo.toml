@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 keywords = ["language", "glsl", "graphics", "shader", "rendering"]
 repository = "https://github.com/markusmoenig/RPU.git"
-description = "This is the standalone compiler for RPU, a GLSL-like language for rendering procedural content on the CPU."
+description = "This is the standalone compiler for RPU, a GLSL-compatible language for rendering procedural graphics on the CPU."
 
 [dependencies]
 rpu = { version = "0.2.5", path = "../rpu" }
