@@ -11,9 +11,6 @@ pub struct Parser {
     /// High precision (64 bit) or low precision (32 bit)
     high_precision: bool,
 
-    /// We need to know if we are inside a ternary expression to avoid recursion
-    inside_ternary: bool,
-
     /// Structs
     structs: FxHashMap<String, Vec<(String, ASTValue)>>,
 
@@ -43,7 +40,6 @@ impl Parser {
             force_floats: false,
 
             high_precision: true,
-            inside_ternary: false,
 
             structs: FxHashMap::default(),
 
@@ -264,13 +260,7 @@ impl Parser {
                     empty_expr!()
                 }
             } else {
-                //empty_expr!()
-                Box::new(Expr::Value(
-                    static_type.clone(),
-                    vec![],
-                    vec![],
-                    Location::default(),
-                ))
+                Box::new(static_type.as_empty_expression())
             }
         };
 
@@ -336,9 +326,7 @@ impl Parser {
         let mut inits: Vec<Box<Stmt>> = vec![];
 
         loop {
-            self.inside_for_initializer = true;
             let i = self.declaration()?;
-            self.inside_for_initializer = false;
             inits.push(Box::new(i));
 
             if !self.match_token(vec![TokenType::Comma]) {
@@ -599,61 +587,7 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, String> {
-        if !self.inside_ternary && self.look_ahead_for_ternary() {
-            self.ternary_operator()
-        } else {
-            self.assignment()
-        }
-    }
-
-    /// Looks ahead up to the next semicolon to determine if the current expression is a ternary.
-    fn look_ahead_for_ternary(&mut self) -> bool {
-        let mut current = self.current;
-        let mut found_ternary_operator = false;
-
-        while current < self.tokens.len() && self.tokens[current].kind != TokenType::Semicolon {
-            match self.tokens[current].kind {
-                TokenType::TernaryOperator => found_ternary_operator = true,
-                TokenType::Colon => {
-                    if found_ternary_operator {
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-
-            current += 1;
-        }
-
-        false
-    }
-
-    fn ternary_operator(&mut self) -> Result<Expr, String> {
-        let line = self.current_line;
-        self.inside_ternary = true;
-
-        let condition = self.expression()?;
-
-        self.consume(
-            TokenType::TernaryOperator,
-            &format!("Expect '?' after condition for ternary at line {}.", line),
-        )?;
-        let then_branch = self.expression()?;
-
-        self.consume(
-            TokenType::Colon,
-            &format!("Expect ':' after condition for ternary at line {}.", line),
-        )?;
-
-        let else_branch = self.expression()?;
-
-        self.inside_ternary = false;
-        Ok(Expr::Ternary(
-            Box::new(condition),
-            Box::new(then_branch),
-            Box::new(else_branch),
-            self.create_loc(line),
-        ))
+        self.assignment()
     }
 
     fn assignment(&mut self) -> Result<Expr, String> {
@@ -789,7 +723,7 @@ impl Parser {
     }
 
     fn and(&mut self) -> Result<Expr, String> {
-        let mut expr = self.equality()?;
+        let mut expr = self.ternary()?;
 
         while self.match_token(vec![TokenType::And]) {
             let operator = self.previous().unwrap();
@@ -799,6 +733,31 @@ impl Parser {
                 Self::operator_to_logical(operator.kind),
                 Box::new(right),
                 self.create_loc(operator.line),
+            );
+        }
+
+        Ok(expr)
+    }
+
+    fn ternary(&mut self) -> Result<Expr, String> {
+        let mut expr = self.equality()?;
+        let line = self.current_line;
+
+        while self.match_token(vec![TokenType::TernaryOperator]) {
+            let then_branch = self.expression()?;
+
+            self.consume(
+                TokenType::Colon,
+                &format!("Expect ':' after condition for ternary at line {}.", line),
+            )?;
+
+            let else_branch = self.expression()?;
+
+            expr = Expr::Ternary(
+                Box::new(expr),
+                Box::new(then_branch),
+                Box::new(else_branch),
+                self.create_loc(line),
             );
         }
 

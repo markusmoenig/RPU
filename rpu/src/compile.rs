@@ -549,11 +549,11 @@ impl Visitor for CompileVisitor {
                     for s in swizzle.iter().rev() {
                         match s {
                             0 => {
-                                let instr = format!("local.set ${}_x", name);
+                                let instr = format!("(local.set ${}_x)", name);
                                 ctx.add_wat(&instr);
                             }
                             1 => {
-                                let instr = format!("local.set ${}_y", name);
+                                let instr = format!("(local.set ${}_y)", name);
                                 ctx.add_wat(&instr);
                             }
                             _ => {
@@ -2469,7 +2469,7 @@ impl Visitor for CompileVisitor {
         ctx.add_line();
         let _rc = cond.accept(self, ctx)?;
 
-        let param_name = format!("_rpu_ternary_{}", ctx.ternary_counter);
+        let param_name = format!("$_rpu_ternary_{}", ctx.ternary_counter);
         ctx.ternary_counter += 1;
 
         let instr = "(if".to_string();

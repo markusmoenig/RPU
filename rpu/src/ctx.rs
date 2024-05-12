@@ -346,7 +346,7 @@ impl Context {
                         }
                     } else {
                         // Swizzle the elements of the field to the stack.
-                        for s in swizzle.iter() {
+                        for s in swizzle.iter().rev() {
                             if *s as usize >= field_value.components() {
                                 return Err(format!(
                                     "Swizzle '{}' out of bounds for '{}' {}",
