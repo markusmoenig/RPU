@@ -22,6 +22,9 @@ pub struct Parser {
 
     /// Are we inside a for loop initializer ?
     inside_for_initializer: bool,
+
+    /// Verifier manages validity of variable names and scopes
+    verifier: VarVerifier,
 }
 
 impl Default for Parser {
@@ -46,6 +49,8 @@ impl Parser {
 
             open_var_declaration: None,
             inside_for_initializer: false,
+
+            verifier: VarVerifier::default(),
         }
     }
 
@@ -56,6 +61,7 @@ impl Parser {
 
     pub fn parse(&mut self, scanner: Scanner) -> Result<String, String> {
         self.extract_tokens(scanner);
+        self.verifier = VarVerifier::default();
 
         let mut statements = vec![];
 
@@ -221,7 +227,11 @@ impl Parser {
     }
 
     fn var_declaration(&mut self, static_type: ASTValue) -> Result<Stmt, String> {
-        let name = self.consume(TokenType::Identifier, "Expect variable name.")?;
+        let mut var_name = self
+            .consume(TokenType::Identifier, "Expect variable name.")?
+            .lexeme;
+        var_name = self.verifier.define_var(&var_name, false)?;
+
         let line = self.current_line;
 
         let mut initializer = None;
@@ -289,7 +299,7 @@ impl Parser {
         }
 
         Ok(Stmt::VarDeclaration(
-            name.lexeme,
+            var_name,
             static_type,
             init,
             self.create_loc(line),
@@ -335,8 +345,6 @@ impl Parser {
                 break;
             }
         }
-
-        self._print_current();
 
         self.consume(
             TokenType::Semicolon,
@@ -479,6 +487,11 @@ impl Parser {
         self.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
         let mut parameters = vec![];
 
+        _ = self.verifier.define_var(&name.lexeme, true);
+
+        // Parameters have their own scope
+        self.verifier.begin_scope();
+
         if !self.check(TokenType::RightParen) {
             loop {
                 if parameters.len() >= 255 {
@@ -508,7 +521,9 @@ impl Parser {
                             &format!("Expect parameter name at line {}.", line),
                         )?
                         .lexeme;
-                    parameters.push(ASTValue::from_token_type(Some(param_name), &token_type));
+                    if let Ok(param_name) = self.verifier.define_var(&param_name, false) {
+                        parameters.push(ASTValue::from_token_type(Some(param_name), &token_type));
+                    }
                 } else if let Some(_strct) = self.structs.get(&self.lexeme()) {
                     let struct_name = self.lexeme();
                     self.advance();
@@ -518,7 +533,9 @@ impl Parser {
                             &format!("Expect parameter name at line {}.", line),
                         )?
                         .lexeme;
-                    parameters.push(ASTValue::Struct(struct_name, Some(param_name), vec![]));
+                    if let Ok(param_name) = self.verifier.define_var(&param_name, false) {
+                        parameters.push(ASTValue::Struct(struct_name, Some(param_name), vec![]));
+                    }
                 } else {
                     return Err(format!(
                         "Invalid parameter type '{}' at line {}.",
@@ -534,7 +551,10 @@ impl Parser {
 
         self.consume(TokenType::RightParen, "Expect ')' after parameters.")?;
         self.consume(TokenType::LeftBrace, "Expect '{' before function body.")?;
+
         if let Stmt::Block(body, _) = self.block()? {
+            self.verifier.end_scope();
+
             Ok(Stmt::FunctionDeclaration(
                 name.lexeme,
                 parameters,
@@ -552,6 +572,8 @@ impl Parser {
     fn block(&mut self) -> Result<Stmt, String> {
         let mut statements = vec![];
 
+        self.verifier.begin_scope();
+
         while !self.check(TokenType::RightBrace) && !self.is_at_end() {
             match self.declaration() {
                 Ok(stmt) => {
@@ -563,6 +585,8 @@ impl Parser {
                 }
             }
         }
+
+        self.verifier.end_scope();
 
         let line = self.current_line;
 
@@ -654,8 +678,8 @@ impl Parser {
             }
 
             return Err(format!(
-                "Invalid assignment target: {:?} at line {}.",
-                equals, equals.line
+                "Invalid assignment target: '{:?}' at line {}.",
+                equals.lexeme, equals.line
             ));
         } else if self.check(TokenType::Minus)
             && self.match_token(vec![TokenType::Minus])
@@ -676,8 +700,8 @@ impl Parser {
             }
 
             return Err(format!(
-                "Invalid assignment target: {:?} at line {}.",
-                equals, equals.line
+                "Invalid assignment target: '{:?}' at line {}.",
+                equals.lexeme, equals.line
             ));
         } else if self.check(TokenType::Star)
             && self.match_token(vec![TokenType::Star])
@@ -698,8 +722,8 @@ impl Parser {
             }
 
             return Err(format!(
-                "Invalid assignment target: {:?} at line {}.",
-                equals, equals.line
+                "Invalid assignment target: '{:?}' at line {}.",
+                equals.lexeme, equals.line
             ));
         } else if self.check(TokenType::Slash)
             && self.match_token(vec![TokenType::Slash])
@@ -720,8 +744,8 @@ impl Parser {
             }
 
             return Err(format!(
-                "Invalid assignment target: {:?} at line {}.",
-                equals, equals.line
+                "Invalid assignment target: '{:?}' at line {}.",
+                equals.lexeme, equals.line
             ));
         } else if self.match_token(vec![TokenType::Equal]) {
             let equals = self.previous().unwrap();
@@ -739,8 +763,8 @@ impl Parser {
             }
 
             return Err(format!(
-                "Invalid assignment target: {:?} at line {}.",
-                equals, equals.line
+                "Invalid assignment target: '{:?}' at line {}.",
+                equals.lexeme, equals.line
             ));
         }
 
@@ -1296,6 +1320,7 @@ impl Parser {
                 }
             }
             TokenType::Identifier => {
+                // Struct initialization ?
                 if let Some(strct) = self.structs.get(&token.lexeme).cloned() {
                     self.advance();
 
@@ -1336,6 +1361,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
+                    // Variable reference ?
                     self.advance();
 
                     let mut swizzle = vec![];
@@ -1347,16 +1373,24 @@ impl Parser {
                             field_path = self.get_field_path_at_current();
                         }
                     }
-                    Ok(Expr::Variable(
-                        token.lexeme,
-                        swizzle,
-                        field_path,
-                        self.create_loc(token.line),
-                    ))
+                    if let Some(var_name) = self.verifier.get_var_name(&token.lexeme) {
+                        Ok(Expr::Variable(
+                            var_name,
+                            swizzle,
+                            field_path,
+                            self.create_loc(token.line),
+                        ))
+                    } else {
+                        // Check against inbuilt functions
+                        Err(format!(
+                            "Unknown identifier '{}' at line {}.",
+                            token.lexeme, token.line
+                        ))
+                    }
                 }
             }
             _ => Err(format!(
-                "Unknown identifier '{:?}' at line {}.",
+                "Unknown identifier '{}' at line {}.",
                 token.lexeme, token.line
             )),
         }

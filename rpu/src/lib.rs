@@ -8,6 +8,7 @@ pub mod parser;
 pub mod rpu;
 pub mod scanner;
 pub mod tests;
+pub mod varverifier;
 
 pub mod prelude {
     pub use crate::ast::*;
@@ -19,6 +20,7 @@ pub mod prelude {
     pub use crate::parser::*;
     pub use crate::rpu::RPU;
     pub use crate::scanner::*;
+    pub use crate::varverifier::*;
     pub use rustc_hash::FxHashMap;
     pub use wasmer::Value as WasmValue;
 }
