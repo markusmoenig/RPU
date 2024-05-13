@@ -178,6 +178,24 @@ impl Visitor for CompileVisitor {
         );
 
         functions.insert(
+            "exp".to_string(),
+            ASTValue::Function(
+                "exp".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "log".to_string(),
+            ASTValue::Function(
+                "log".to_string(),
+                vec![ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
             "rand".to_string(),
             ASTValue::Function("rand".to_string(), vec![], Box::new(ASTValue::None)),
         );
@@ -204,6 +222,24 @@ impl Visitor for CompileVisitor {
             "pow".to_string(),
             ASTValue::Function(
                 "pow".to_string(),
+                vec![ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "mod".to_string(),
+            ASTValue::Function(
+                "mod".to_string(),
+                vec![ASTValue::None, ASTValue::None],
+                Box::new(ASTValue::None),
+            ),
+        );
+
+        functions.insert(
+            "step".to_string(),
+            ASTValue::Function(
+                "step".to_string(),
                 vec![ASTValue::None, ASTValue::None],
                 Box::new(ASTValue::None),
             ),
@@ -1943,6 +1979,8 @@ impl Visitor for CompileVisitor {
                 || name == "degrees"
                 || name == "radians"
                 || name == "sign"
+                || name == "exp"
+                || name == "log"
             {
                 let v = args[0].accept(self, ctx)?;
                 let components = v.components();
@@ -1964,7 +2002,12 @@ impl Visitor for CompileVisitor {
                 let instr = format!("(call ${})", func_name);
                 ctx.add_wat(&instr);
                 rc = v;
-            } else if name == "max" || name == "min" || name == "pow" {
+            } else if name == "max"
+                || name == "min"
+                || name == "pow"
+                || name == "mod"
+                || name == "step"
+            {
                 let v = args[0].accept(self, ctx)?;
 
                 if func_args.len() != args.len() {

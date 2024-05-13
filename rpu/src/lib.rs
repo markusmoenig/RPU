@@ -5,6 +5,7 @@ pub mod compile;
 pub mod ctx;
 pub mod environment;
 pub mod parser;
+pub mod preprocessor;
 pub mod rpu;
 pub mod scanner;
 pub mod tests;
@@ -18,6 +19,7 @@ pub mod prelude {
     pub use crate::ctx::*;
     pub use crate::environment::Environment;
     pub use crate::parser::*;
+    pub use crate::preprocessor::*;
     pub use crate::rpu::RPU;
     pub use crate::scanner::*;
     pub use crate::varverifier::*;

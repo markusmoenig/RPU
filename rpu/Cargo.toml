@@ -8,8 +8,8 @@ keywords = ["language", "glsl", "graphics", "shader", "rendering"]
 repository = "https://github.com/markusmoenig/RPU.git"
 
 [dependencies]
+rand = "0.8.5"
 rustc-hash = "1.1.0"
 wasmer = "4.3.0"
 image = "0.25.1"
 num_cpus = "1.16.0"
-rand = "0.8.5"

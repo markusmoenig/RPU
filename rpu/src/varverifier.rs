@@ -51,6 +51,10 @@ impl VarVerifier {
             "clamp",
             "sign",
             "atan",
+            "mod",
+            "step",
+            "exp",
+            "log",
         ];
 
         for func in inbuilt_functions {

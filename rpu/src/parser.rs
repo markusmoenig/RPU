@@ -71,7 +71,7 @@ impl Parser {
         ctx.set_high_precision(self.high_precision);
 
         for statement in statements {
-            _ = statement.accept(&mut visitor, &mut ctx)?;
+            _ = statement.accept(&mut visitor, &mut ctx)?
         }
 
         Ok(ctx.gen_wat())
@@ -325,6 +325,7 @@ impl Parser {
 
         let mut inits: Vec<Box<Stmt>> = vec![];
 
+        self.inside_for_initializer = true;
         loop {
             let i = self.declaration()?;
             inits.push(Box::new(i));
@@ -333,6 +334,7 @@ impl Parser {
                 break;
             }
         }
+        self.inside_for_initializer = false;
 
         self.consume(
             TokenType::Semicolon,
@@ -487,6 +489,14 @@ impl Parser {
                         "Cannot have more than 255 parameters at line {}.",
                         line
                     ));
+                }
+
+                // Ignore for now
+                if self.check(TokenType::In)
+                    || self.check(TokenType::Out)
+                    || self.check(TokenType::Inout)
+                {
+                    _ = self.advance();
                 }
 
                 if let Some(token_type) = self.match_token_and_return(vec![

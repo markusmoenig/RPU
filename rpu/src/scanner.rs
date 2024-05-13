@@ -57,6 +57,9 @@ pub enum TokenType {
     Export,
     Const,
     Struct,
+    In,
+    Out,
+    Inout,
 
     Int,
     Int2,
@@ -136,6 +139,10 @@ impl Scanner {
         keywords.insert("export", TokenType::Export);
         keywords.insert("const", TokenType::Const);
         keywords.insert("struct", TokenType::Struct);
+
+        keywords.insert("in", TokenType::In);
+        keywords.insert("out", TokenType::Out);
+        keywords.insert("inout", TokenType::Inout);
 
         Scanner {
             keywords,
@@ -244,6 +251,7 @@ impl Scanner {
         }
     }
 
+    /*
     fn skip_whitespace(&mut self) {
         while !self.is_at_end() {
             match self.peek() {
@@ -259,6 +267,43 @@ impl Scanner {
                 }
                 b'/' if self.peek_next() == b'/' => {
                     while self.peek() != b'\n' && !self.is_at_end() {
+                        self.advance();
+                    }
+                }
+                _ => return,
+            }
+        }
+        }*/
+
+    fn skip_whitespace(&mut self) {
+        while !self.is_at_end() {
+            match self.peek() {
+                b' ' | b'\r' | b'\t' => {
+                    self.advance();
+                }
+                b'\n' => {
+                    self.line += 1;
+                    self.advance();
+                }
+                b'/' if self.peek_next() == b'/' => {
+                    // Single-line comment
+                    while !self.is_at_end() && self.peek() != b'\n' {
+                        self.advance();
+                    }
+                }
+                b'/' if self.peek_next() == b'*' => {
+                    // Start of a multi-line comment
+                    self.advance(); // Advance past '/'
+                    self.advance(); // Advance past '*'
+                    while !self.is_at_end() {
+                        if self.peek() == b'*' && self.peek_next() == b'/' {
+                            self.advance(); // Advance past '*'
+                            self.advance(); // Advance past '/'
+                            break;
+                        }
+                        if self.peek() == b'\n' {
+                            self.line += 1;
+                        }
                         self.advance();
                     }
                 }

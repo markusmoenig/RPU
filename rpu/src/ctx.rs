@@ -547,6 +547,30 @@ impl Context {
                         pr = self.pr
                     );
         }
+        if self.imports_hash.contains("$_rpu_mod") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_mod\" (func $_rpu_mod (param f{pr}) (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
+        if self.imports_hash.contains("$_rpu_step") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_step\" (func $_rpu_step (param f{pr}) (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
+        if self.imports_hash.contains("$_rpu_exp") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_exp\" (func $_rpu_exp (param f{pr}) (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
+        if self.imports_hash.contains("$_rpu_log") {
+            output += &format!(
+                        "    (import \"env\" \"_rpu_log\" (func $_rpu_log (param f{pr}) (param f{pr}) (result f{pr})))\n",
+                        pr = self.pr
+                    );
+        }
         if self.imports_hash.contains("$_rpu_rand") {
             output += &format!(
                 "    (import \"env\" \"_rpu_rand\" (func $_rpu_rand (result f{pr})))\n",
@@ -1572,6 +1596,8 @@ impl Context {
             "radians" => Some("$_rpu_radians"),
             "fract" => Some("$_rpu_fract"),
             "sign" => Some("$_rpu_sign"),
+            "exp" => Some("$_rpu_exp"),
+            "log" => Some("$_rpu_log"),
             _ => None,
         };
 
@@ -1631,7 +1657,7 @@ impl Context {
         )
     }
 
-    // Operation on a vector and as scalar (max, min, powf etc.)
+    // Operation on a vector and as scalar (max, min, pow, step etc.)
 
     pub fn gen_vec_operation_scalar(&mut self, dim: u32, op: &str) -> String {
         let func_name = format!("_rpu_vec{}_{}_f{}", dim, op, self.pr);
@@ -1658,6 +1684,8 @@ impl Context {
             "max" => Some("$_rpu_max"),
             "min" => Some("$_rpu_min"),
             "pow" => Some("$_rpu_pow"),
+            "mod" => Some("$_rpu_mod"),
+            "step" => Some("$_rpu_step"),
             _ => None,
         };
 

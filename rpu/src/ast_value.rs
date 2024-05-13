@@ -349,6 +349,16 @@ impl ASTValue {
                 vec![],
                 Location::default(),
             ),
+            ASTValue::Float2(_, _, _) => Expr::Value(
+                ASTValue::Float2(
+                    Some("2".to_string()),
+                    zero_expr_float!(),
+                    zero_expr_float!(),
+                ),
+                vec![],
+                vec![],
+                Location::default(),
+            ),
             ASTValue::Float3(_, _, _, _) => Expr::Value(
                 ASTValue::Float3(
                     Some("3".to_string()),

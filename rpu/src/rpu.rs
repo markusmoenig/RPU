@@ -33,6 +33,8 @@ impl RPU {
         high_precision: bool,
     ) -> Result<String, String> {
         if let Ok(main) = std::fs::read_to_string(path.clone()) {
+            let mut pre = Preprocessor::default();
+            let main = pre.process_module(&main);
             let scanner = Scanner::new(main);
             let mut parser = Parser::new();
             parser.set_high_precision(high_precision);
@@ -45,6 +47,8 @@ impl RPU {
 
     /// Compile the RPU source code to WAT source code.
     pub fn compile_to_wat(&self, rpu_source: String) -> Result<String, String> {
+        let mut pre = Preprocessor::default();
+        let rpu_source = pre.process_module(&rpu_source);
         let scanner = Scanner::new(rpu_source);
         let mut parser = Parser::new();
 
@@ -354,12 +358,19 @@ impl RPU {
                     "_rpu_cos" => Function::new_typed(store, |x: f64| -> f64 { x.cos() }),
                     "_rpu_tan" => Function::new_typed(store, |x: f64| -> f64 { x.tan() }),
                     "_rpu_atan" => Function::new_typed(store, |x: f64| -> f64 { x.atan() }),
+                    "_rpu_exp" => Function::new_typed(store, |x: f64| -> f64 { x.exp() }),
                     "_rpu_degrees" => Function::new_typed(store, |x: f64| -> f64 { x.to_degrees() }),
                     "_rpu_radians" => Function::new_typed(store, |x: f64| -> f64 { x.to_radians() }),
                     "_rpu_fract" => Function::new_typed(store, |x: f64| -> f64 { x.fract() }),
                     "_rpu_min" => Function::new_typed(store, |x: f64, y: f64| -> f64 { x.min(y) }),
                     "_rpu_max" => Function::new_typed(store, |x: f64, y: f64| -> f64 { x.max(y) }),
                     "_rpu_pow" => Function::new_typed(store, |x: f64, y: f64| -> f64 { x.powf(y) }),
+                    "_rpu_mod" => Function::new_typed(store, |x: f64, y: f64| -> f64 { x - y * (x / y).floor() }),
+                    "_rpu_step" => Function::new_typed(store, |edge: f64, x: f64| -> f64 { if x < edge {
+                        0.0
+                    } else {
+                        1.0
+                    }}),
                     "_rpu_rand" => Function::new_typed(store, || -> f64 {
                         let mut rng = rand::thread_rng();
                         rng.gen()
@@ -375,12 +386,19 @@ impl RPU {
                     "_rpu_cos" => Function::new_typed(store, |x: f32| -> f32 { x.cos() }),
                     "_rpu_tan" => Function::new_typed(store, |x: f32| -> f32 { x.tan() }),
                     "_rpu_atan" => Function::new_typed(store, |x: f32| -> f32 { x.atan() }),
+                    "_rpu_exp" => Function::new_typed(store, |x: f32| -> f32 { x.exp() }),
                     "_rpu_degrees" => Function::new_typed(store, |x: f32| -> f32 { x.to_degrees() }),
                     "_rpu_radians" => Function::new_typed(store, |x: f32| -> f32 { x.to_radians() }),
                     "_rpu_fract" => Function::new_typed(store, |x: f32| -> f32 { x.fract() }),
                     "_rpu_min" => Function::new_typed(store, |x: f32, y: f32| -> f32 { x.min(y) }),
                     "_rpu_max" => Function::new_typed(store, |x: f32, y: f32| -> f32 { x.max(y) }),
                     "_rpu_pow" => Function::new_typed(store, |x: f32, y: f32| -> f32 { x.powf(y) }),
+                    "_rpu_mod" => Function::new_typed(store, |x: f32, y: f32| -> f32 { x - y * (x / y).floor() }),
+                    "_rpu_step" => Function::new_typed(store, |edge: f32, x: f32| -> f32 { if x < edge {
+                        0.0
+                    } else {
+                        1.0
+                    }}),
                     "_rpu_rand" => Function::new_typed(store, || -> f32 {
                         let mut rng = rand::thread_rng();
                         rng.gen()
