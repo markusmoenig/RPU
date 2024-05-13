@@ -1,3 +1,4 @@
+// Scene setup and camera taken from https://www.shadertoy.com/view/XlycWh, thanks reinder
 
 #define PI 3.14159265359
 
