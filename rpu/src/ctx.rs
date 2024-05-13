@@ -477,6 +477,20 @@ impl Context {
         }
     }
 
+    /// Removes the trailing variable identifier from a variable name.
+    pub fn remove_trailing_var_identifier(&self, s: &str) -> String {
+        // Find the last underscore in the string
+        if let Some(idx) = s.rfind('_') {
+            // Check if all characters after the underscore are digits
+            if s[idx + 1..].chars().all(|c| c.is_digit(10)) {
+                // Return the string up to the underscore
+                return s[..idx].to_string();
+            }
+        }
+        // If no pattern is found or the pattern does not match, return the original string
+        s.to_string()
+    }
+
     /// Generate the final wat code
     pub fn gen_wat(&mut self) -> String {
         let mut output = "(module\n".to_string();
@@ -514,12 +528,6 @@ impl Context {
         if self.imports_hash.contains("$_rpu_degrees") {
             output += &format!(
                         "    (import \"env\" \"_rpu_degrees\" (func $_rpu_degrees (param f{pr}) (result f{pr})))\n",
-                        pr = self.pr
-                    );
-        }
-        if self.imports_hash.contains("$_rpu_fract") {
-            output += &format!(
-                        "    (import \"env\" \"_rpu_fract\" (func $_rpu_fract (param f{pr}) (result f{pr})))\n",
                         pr = self.pr
                     );
         }
@@ -561,15 +569,15 @@ impl Context {
         }
         if self.imports_hash.contains("$_rpu_exp") {
             output += &format!(
-                        "    (import \"env\" \"_rpu_exp\" (func $_rpu_exp (param f{pr}) (param f{pr}) (result f{pr})))\n",
-                        pr = self.pr
-                    );
+                "    (import \"env\" \"_rpu_exp\" (func $_rpu_exp (param f{pr}) (result f{pr})))\n",
+                pr = self.pr
+            );
         }
         if self.imports_hash.contains("$_rpu_log") {
             output += &format!(
-                        "    (import \"env\" \"_rpu_log\" (func $_rpu_log (param f{pr}) (param f{pr}) (result f{pr})))\n",
-                        pr = self.pr
-                    );
+                "    (import \"env\" \"_rpu_log\" (func $_rpu_log (param f{pr}) (result f{pr})))\n",
+                pr = self.pr
+            );
         }
         if self.imports_hash.contains("$_rpu_rand") {
             output += &format!(
@@ -595,6 +603,21 @@ impl Context {
             output += "      (global.set $mem_ptr\n";
             output += "        (i32.add (get_local $current_ptr) (get_local $size)))\n";
             output += "      (get_local $current_ptr)\n";
+            output += "    )\n";
+        }
+
+        if self.imports_hash.contains("$_rpu_fract") {
+            output += "\n    ;; fract\n";
+            output += &format!(
+                "    (func $_rpu_fract (param $x f{}) (result f{})\n",
+                self.pr, self.pr
+            );
+            output += &format!("        (f{}.sub\n", self.pr);
+            output += "           (local.get $x)\n";
+            output += &format!("           (f{}.floor\n", self.pr);
+            output += "               (local.get $x)\n";
+            output += "           )\n";
+            output += "        )\n";
             output += "    )\n";
         }
 

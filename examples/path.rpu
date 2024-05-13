@@ -101,48 +101,59 @@ vec3 reflect(vec3 incident, vec3 normal) {
     return incident -  2.0 * dot(normal, incident) * normal;
 }
 
-vec3 hash31(float p)
-{
+vec3 hash31(float p) {
    vec3 p3 = fract(vec3(p) * vec3(.1031, .1030, .0973));
    p3 += vec3(dot(p3, p3.yzx + 33.33));
    return fract((p3.xxy+p3.yzz)*p3.zyx); 
 }
 
 vec2 getDist(vec3 p) {
-    vec2 plane = vec2(sdPlane(p, vec4(0, 1, 0, 0)), 0);
+    vec2 r = vec2(1000.0, 0.0);
 
-    vec2 sphere1 = vec2(sdSphere(p -vec3(-4, 1.0, 0.), 1.0), 1);
-    vec2 sphere2 = vec2(sdSphere(p -vec3(0.0, 1.0, 0.), 1.0), 2);
-    vec2 sphere3 = vec2(sdSphere(p -vec3(4, 1.0, 0.), 1.0), 3);
+    if (p.y < 2.10) {
+        vec2 plane = vec2(sdPlane(p, vec4(0, 1, 0, 0)), 0);
+        r = opU(r, plane);
 
-    vec2 r = opU(plane, sphere1);
-    r = opU(r, sphere2);
-    r = opU(r, sphere3);
+        vec2 sphere1 = vec2(sdSphere(p -vec3(-4, 1.0, 0.), 1.0), 1);
+        vec2 sphere2 = vec2(sdSphere(p -vec3(0.0, 1.0, 0.), 1.0), 2);
+        vec2 sphere3 = vec2(sdSphere(p -vec3(4, 1.0, 0.), 1.0), 3);
+        r = opU(r, sphere1);
+        r = opU(r, sphere2);
+        r = opU(r, sphere3);        
+    }
 
-    float field = 9.0;
+    if (p.y < 0.6) {
+        float field = 8.5;
+        for (float a = -field; a < field; a += 1.) {
+            for (float b = -field; b < field; b += 1.) {
 
-    for (float a = -field; a < field; a += 1.) {
-        for (float b = -field; b < field; b += 1.) {
+                vec3 rand1 = hash31(a * b + 3214.2);
+                vec3 center = vec3( a + 14.1 * rand1.x, .2, b + 11.9 * rand1.y); 
 
-            vec3 rand1 = hash31(a * b);
-            vec3 center = vec3(a + 1.9 * rand1.x, .2, b + 1.9 * rand1.y); 
+                float id = fract(rand1.z * 3.3);
+                float matId = rand1.z;
 
-            float id = fract(rand1.z * 3.3);
-            float matId = 4. + rand1.z;
-
-            if (id > 0.7) {
-                vec2 shape = vec2(sdOctahedron(p - center, 0.2), matId);
-                r = opU(r, shape);
-            } else
-            if (id > 0.3) {
-                vec2 shape = vec2(sdCappedCone(p - center, 0.2, 0.2, 0.0), matId);
-                r = opU(r, shape);
-            } else {
-                vec2 shape = vec2(sdSphere(p - center, 0.2), matId);
-                r = opU(r, shape);
+                if (id > 0.85) {
+                    vec2 shape = vec2(sdOctahedron(p - center, 0.2), matId);
+                    r = opU(r, shape);
+                } else
+                if (id > 0.75) {
+                    vec2 shape = vec2(sdEllipsoid(p - center, vec3(.1, 0.2, .1)), matId);
+                    r = opU(r, shape);
+                } else            
+                if (id > 0.55) {
+                    vec2 shape = vec2(sdCappedCone(p - center, 0.2, 0.2, 0.0), matId);
+                    r = opU(r, shape);
+                } else if (id > 0.35) {
+                    vec2 shape = vec2(sdBox(p - center, vec3(0.2)), matId);
+                    r = opU(r, shape);
+                } else {
+                    vec2 shape = vec2(sdSphere(p - center, 0.2), matId);
+                    r = opU(r, shape);
+                }
             }
-        }
-    }    
+        }    
+    }
 
     return r;
 }
@@ -162,9 +173,23 @@ Material getMaterial(float id) {
     } else   
     // Big Sphere 3
     if (id == 3.0) {
-        return Material(1, vec3(1.0), vec3(0.0), 1.0, 1.0, 1.0, 0.0);
+        return Material(1, vec3(1.0), vec3(0.0), 1.0, 0.82, 1.0, 0.0);
     } else {
-        return Material(1, hash31(id), vec3(0.0), fract(id * 7.2), 1.0, 1.0, 0.0);
+        float d = fract(id * 523.232);
+        vec3 c = hash31(id * 1000.0);
+        if (d < 0.5) {
+            return Material(1, c * c, vec3(0.0), 1.0, 1.0, 1.0, 0.0);
+        } else         
+        if (d < 0.8) {
+            return Material(1, c * c, vec3(0.0), d, 0.5 * d, 1.0, 1.55);
+        } 
+        // else 
+        // if (d < 0.9) {
+        //     return Material(2, c * c, vec3(0.0), d, 1.0, d + 0.3, 1.55);
+        // } 
+         else {
+            return Material(1, c, c * 5., 0.5, 0.0, 0.0, 0.0);
+        }
     }     
 
     return Material(1, vec3(0.5), vec3(0.0), 0.5, 0.0, 0.0, 0.0);
@@ -234,13 +259,13 @@ Ray createRay(vec2 uv, vec2 resolution, vec3 origin, vec3 lookAt) {
 }
 
 vec2 raymarch(Ray ray, float max_dist) {
-    float t = 0.01;
+    float t = 0.1;
 
     while (t < max_dist) {
         vec3 p = ray.origin + ray.direction * t;
         vec2 rc = getDist(p);
         float d = abs(rc.x);
-        if (d < 0.001) {
+        if (d < 0.01) {
             return vec2(t, rc.y);
         }
         t += d;
@@ -294,9 +319,8 @@ vec3 radiance(Ray r) {
 	vec3 acc = vec3(0.);
 	vec3 mask = vec3(1.);
 
-    int depth = 0;
-    while (depth < 4) {
-        vec2 hit = raymarch(r, 50.0);
+    for (int depth = 0; depth < 8; depth+=1) {
+        vec2 hit = raymarch(r, 20.0);
 
         if (hit.y < 0.0) {
             float t = .5*r.direction.y + .5;
@@ -340,7 +364,7 @@ vec3 radiance(Ray r) {
             
             vec3 brdf = vec3(0.0);
             
-            if (rand() < reflectance) {
+            // if (rand() < reflectance) {
 				// vec3 l0 = vec3(0, 0.3, 0) - x;
 				// float cos_a_max = sqrt(1. - clamp(0.2 * 0.2/ dot(l0, l0), 0., 1.));
 				// float cosa = mix(cos_a_max, 1., rand());
@@ -360,10 +384,10 @@ vec3 radiance(Ray r) {
                 r = Ray(x, direction);
                 acc += mask * material.emission * E + mask * color * brdf;
                 mask *= color;
-			} else {
-                float r2 = rand();
-                vec3 d = jitter(nl, 2.*PI *rand(), sqrt(r2), sqrt(1. - r2));
-                vec3 e = vec3(0.);
+			// } else {
+            //     float r2 = rand();
+            //     vec3 d = jitter(nl, 2.*PI *rand(), sqrt(r2), sqrt(1. - r2));
+            //     vec3 e = vec3(0.);
                 // {
 				//     vec3 l0 = vec3(0, 0.3, 0) - x;
 				//     float cos_a_max = sqrt(1. - clamp(0.2 * 0.2/ dot(l0, l0), 0., 1.));
@@ -376,11 +400,11 @@ vec3 radiance(Ray r) {
                 //         e += (material.emission * clamp(dot(l, n),0.,1.) * omega) / PI;
                 //     }
                 // }
-                float E = 1.;
-                acc += mask * material.emission * E + mask * color * e;
-                mask *= color;
-                r = Ray(x, d);
-            }            
+                // float E = 1.;
+                // acc += mask * material.emission * E + mask * color * e;
+                // mask *= color;
+                // r = Ray(x, d);
+            //}            
         } else if (material.type == 2) {
 			float a = dot(n,r.direction), ddn = abs(a);
 			float nc = 1., nt= material.ior, nnt = mix(nc/nt, nt/nc, (a > 0.0) ? 1.0 : 0.0);
@@ -407,9 +431,6 @@ vec3 radiance(Ray r) {
             	}
 			}            
         }   
-        
-
-        depth += 1;
     }
 
     return acc;

@@ -327,7 +327,7 @@ impl Visitor for CompileVisitor {
         if v.to_type() != static_type.to_type() {
             return Err(format!(
                 "Variable '{}' has type '{}', but expression has type '{}' {}",
-                name,
+                ctx.remove_trailing_var_identifier(name),
                 static_type.to_type(),
                 v.to_type(),
                 loc.describe()
@@ -492,8 +492,8 @@ impl Visitor for CompileVisitor {
             if let Some(vv) = self.environment.get(&name) {
                 if swizzle.is_empty() && incoming_components != vv.components() {
                     return Err(format!(
-                        "Variable '{}' has {} components, but expression has {} {}",
-                        name,
+                        "Variable '{}' has {} component(s), but expression has {} {}",
+                        ctx.remove_trailing_var_identifier(&name),
                         v.components(),
                         incoming_components,
                         loc.describe()
@@ -505,8 +505,8 @@ impl Visitor for CompileVisitor {
             if swizzle.is_empty() {
                 if incoming_components != v.components() {
                     return Err(format!(
-                        "Variable '{}' has {} components, but expression has {} {}",
-                        name,
+                        "Variable '{}' has {} component(s), but expression has {} {}",
+                        ctx.remove_trailing_var_identifier(&name),
                         v.components(),
                         incoming_components,
                         loc.describe()
@@ -514,8 +514,8 @@ impl Visitor for CompileVisitor {
                 }
             } else if incoming_components != swizzle.len() {
                 return Err(format!(
-                    "Variable '{}' has {} swizzle, but expression has {} components {}",
-                    name,
+                    "Variable '{}' has {} swizzle, but expression has {} component(s) {}",
+                    ctx.remove_trailing_var_identifier(&name),
                     swizzle.len(),
                     incoming_components,
                     loc.describe()
