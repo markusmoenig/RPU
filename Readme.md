@@ -1,3 +1,5 @@
+![header](/images/header.png)
+
 RPU is a GLSL compatible programming language for rendering procedural graphics on the CPU.
 
 As GPU shaders can limit the complexity of what you can render, RPU aims to provide an alternative way of rendering complex, unlimited procedural graphics on the CPU, in 64-bit or 32-bit precision.

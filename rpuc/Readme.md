@@ -1,3 +1,6 @@
+![header](../images/header.png)
+
+
 RPU is a GLSL compatible programming language for rendering procedural graphics on the CPU.
 
 For more information visit [rpu-lang.org](https://rpu-lang.org/).
