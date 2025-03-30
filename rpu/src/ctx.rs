@@ -482,7 +482,7 @@ impl Context {
         // Find the last underscore in the string
         if let Some(idx) = s.rfind('_') {
             // Check if all characters after the underscore are digits
-            if s[idx + 1..].chars().all(|c| c.is_digit(10)) {
+            if s[idx + 1..].chars().all(|c| c.is_ascii_digit()) {
                 // Return the string up to the underscore
                 return s[..idx].to_string();
             }

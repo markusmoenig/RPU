@@ -46,11 +46,16 @@ impl RPU {
     }
 
     /// Compile the RPU source code to WAT source code.
-    pub fn compile_to_wat(&self, rpu_source: String) -> Result<String, String> {
+    pub fn compile_to_wat(
+        &self,
+        rpu_source: String,
+        high_precision: bool,
+    ) -> Result<String, String> {
         let mut pre = Preprocessor::default();
         let rpu_source = pre.process_module(&rpu_source);
         let scanner = Scanner::new(rpu_source);
         let mut parser = Parser::new();
+        parser.set_high_precision(high_precision);
 
         parser.parse(scanner)
     }
@@ -63,7 +68,7 @@ impl RPU {
         args: Vec<Value>,
         high_precision: bool,
     ) -> Result<Vec<Value>, String> {
-        let rc = self.compile_to_wat(source.to_string());
+        let rc = self.compile_to_wat(source.to_string(), high_precision);
         match rc {
             Ok(wat) => self.compile_wat_and_run(&wat, func_name, args, high_precision),
             Err(err) => Err(err.to_string()),
