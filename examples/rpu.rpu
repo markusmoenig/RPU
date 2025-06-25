@@ -1,0 +1,67 @@
+
+
+
+float sdBox(vec3 p, vec3 s) {
+    p = abs(p)-s;
+	return length(max(p, 0.))+min(max(p.x, max(p.y, p.z)), 0.);
+}
+
+float sdSphere( vec3 p, float r) {
+    return length(p) - r;
+}
+
+float sdPlane( vec3 p, vec4 n ) {
+  return dot(p,n.xyz) + n.w;
+}
+
+//vec2 opU(vec2 o1, vec2 o2) {
+//    return (o1.x < o2.x) ? o1 : o2;
+//}
+
+float GetDist(vec3 p) {
+    float d = sdBox(p, vec3(.5));
+    return d;
+}
+
+vec3 GetRayDir(vec2 uv, vec3 p, vec3 l, float z) {
+    vec3 f = normalize(l-p);
+    vec3 r = normalize(cross(vec3(0,1,0), f));
+    vec3 u = cross(f,r);
+    vec3 c = f*z;
+    vec3 i = c + uv.x*r + uv.y*u;
+    return normalize(i);
+}
+
+vec3 GetNormal(vec3 p) {
+    vec2 e = vec2(0.001, 0.);
+    vec3 n = GetDist(p) - vec3(GetDist(p-e.xyy), GetDist(p-e.yxy), GetDist(p-e.yyx));
+    return normalize(n);
+}
+
+export vec4 shader(vec2 coord, vec2 resolution) {
+    // Generate the uv with random jittering for anti-aliasing
+    vec2 uv = (2.0 * (coord + vec2(rand(), rand())) - resolution.xy) / resolution.y;
+
+    vec3 ro = vec3(.7, .8, -1.);
+    vec3 rd = GetRayDir(uv, ro, vec3(0), 1.);
+
+    float t = 0.;
+    float max_t = 2.;
+
+    vec4 col = vec4(uv.x, uv.y, 0., 1.);
+
+    while (t < max_t) {
+        vec3 p = ro + rd * t;
+        float d = GetDist(p);
+        if (abs(d) < 0.001) {
+            vec3 n = GetNormal(p);
+            float dif = dot(n, normalize(vec3(1, 2, 3))) * 0.5 + 0.5;
+            col.xyz = pow(vec3(dif), .4545);
+
+            break;
+        }
+        t = t + d;
+    }
+
+    return col;
+}

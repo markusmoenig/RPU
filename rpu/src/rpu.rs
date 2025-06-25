@@ -6,11 +6,11 @@ use std::thread;
 use wasmer::{imports, Function, Instance, Module, Store, Value};
 
 #[derive(Debug, Clone, Copy)]
-struct Tile {
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
+pub struct Tile {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
 }
 
 pub struct RPU {}
@@ -31,7 +31,7 @@ impl RPU {
         &self,
         path: PathBuf,
         high_precision: bool,
-    ) -> Result<String, String> {
+    ) -> Result<String, RPUError> {
         if let Ok(main) = std::fs::read_to_string(path.clone()) {
             let mut pre = Preprocessor::default();
             let main = pre.process_module(&main);
@@ -41,7 +41,7 @@ impl RPU {
 
             parser.parse(scanner)
         } else {
-            Err("Could not read file.".to_string())
+            Err(RPUError::new("Could not read file.", 0))
         }
     }
 
@@ -50,7 +50,7 @@ impl RPU {
         &self,
         rpu_source: String,
         high_precision: bool,
-    ) -> Result<String, String> {
+    ) -> Result<String, RPUError> {
         let mut pre = Preprocessor::default();
         let rpu_source = pre.process_module(&rpu_source);
         let scanner = Scanner::new(rpu_source);
@@ -325,7 +325,7 @@ impl RPU {
     }
 
     /// Create the tiles as a spiral pattern starting from the center.
-    fn create_tiles(
+    pub fn create_tiles(
         &self,
         image_width: usize,
         image_height: usize,
@@ -355,7 +355,7 @@ impl RPU {
         tiles
     }
 
-    fn create_imports(store: &mut Store, high_precision: bool) -> wasmer::Imports {
+    pub fn create_imports(store: &mut Store, high_precision: bool) -> wasmer::Imports {
         if high_precision {
             imports! {
                 "env" => {

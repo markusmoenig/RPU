@@ -4,26 +4,32 @@ struct Ray {
     vec3 direction;
 };
 
+/*
 Ray getter() {
     Ray ray = Ray(vec3(1.0, 2.0, 3.0), vec3(0.0, 1.0, 0.0));
 
-    ray.direction = vec3(8.0, 1.0, 7.0);
+    ray.origin = vec3(8.0, 1.0, 7.0);
 
+    ray = Ray(vec3(9.0, 2.0, 3.0), vec3(0.0, 1.0, 0.0));
     return ray;
-}
+}*/
 
-export int main() {
+export vec3 main() {
 
+    /*
     Ray ray = getter();
 
     vec3 origin = vec3(7.0, 8.0, 9.0);
 
     ray = Ray(vec3(7.0, 8.0, 9.0), vec3(7.0, 8.0, 9.0));
 
-    int a = 0;
-    for (int i = 0; i < 10; i+= 1) {
-        a += 1;
-    }
+    float t = ray.origin.x > 0.0 ? 1.0 : 0.0;
+    vec3 p = vec3(6, 7, 8);//mix(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), t > 0.0 ? 1.0 : 0.0);
+    vec3 r = vec3(0);
 
-    return i;
+    r.xz = p.z>p.x ? p.zx : p.xz;
+
+    //p.xz = r.x;
+    */
+    return vec3(0.0, 1.0, 2.0);//ray.origin;
 }

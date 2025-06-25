@@ -218,7 +218,7 @@ impl Context {
         field_path: &[String],
         write: bool,
         loc: &Location,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         // println!(
         //     "Struct var: {} {} {:?} {}",
         //     var_name, struct_name, field_path, write
@@ -242,11 +242,9 @@ impl Context {
                 }
 
                 if field_value.to_type() == "void" {
-                    return Err(format!(
-                        "Unknown field '{}' in struct '{}' {}",
-                        field_name,
-                        struct_name,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Unknown field '{}' in struct '{}'", field_name, struct_name),
+                        loc,
                     ));
                 }
 
@@ -296,11 +294,13 @@ impl Context {
                         // Swizzle the elements of the field to the stack.
                         for s in swizzle.iter() {
                             if *s as usize >= field_value.components() {
-                                return Err(format!(
-                                    "Swizzle '{}' out of bounds for '{}' {}",
-                                    self.deswizzle(*s),
-                                    field_name,
-                                    loc.describe()
+                                return Err(RPUError::loc(
+                                    format!(
+                                        "Swizzle '{}' out of bounds for '{}'",
+                                        self.deswizzle(*s),
+                                        field_name
+                                    ),
+                                    loc,
                                 ));
                             }
                             let instr = format!("(local.get ${})", var_name);
@@ -348,11 +348,13 @@ impl Context {
                         // Swizzle the elements of the field to the stack.
                         for s in swizzle.iter().rev() {
                             if *s as usize >= field_value.components() {
-                                return Err(format!(
-                                    "Swizzle '{}' out of bounds for '{}' {}",
-                                    self.deswizzle(*s),
-                                    field_name,
-                                    loc.describe()
+                                return Err(RPUError::loc(
+                                    format!(
+                                        "Swizzle '{}' out of bounds for '{}'",
+                                        self.deswizzle(*s),
+                                        field_name
+                                    ),
+                                    loc,
                                 ));
                             }
                             let instr = format!("(local.set ${})", temp_name);
@@ -399,7 +401,7 @@ impl Context {
         stack_value: &ASTValue,
         swizzle: &[u8],
         _loc: &Location,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let components = stack_value.components();
         let component_size = self.precision.size();
         let type_str = if stack_value.is_float_based() {

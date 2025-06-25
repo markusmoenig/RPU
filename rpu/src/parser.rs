@@ -1,4 +1,4 @@
-use crate::{empty_expr, prelude::*, zero_expr_float, zero_expr_int};
+use crate::{empty_expr, error::RPUError, prelude::*, zero_expr_float, zero_expr_int};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -55,7 +55,8 @@ impl Parser {
         self.high_precision = high_precision;
     }
 
-    pub fn parse(&mut self, scanner: Scanner) -> Result<String, String> {
+    /// Parse the given tokens.
+    pub fn parse(&mut self, scanner: Scanner) -> Result<String, RPUError> {
         self.extract_tokens(scanner);
         self.verifier = VarVerifier::default();
 
@@ -77,7 +78,7 @@ impl Parser {
         Ok(ctx.gen_wat())
     }
 
-    fn declaration(&mut self) -> Result<Stmt, String> {
+    fn declaration(&mut self) -> Result<Stmt, RPUError> {
         // We are processing a series of variable declarations
         if let Some(static_type) = &self.open_var_declaration {
             return self.var_declaration(static_type.clone());
@@ -145,17 +146,11 @@ impl Parser {
         }
     }
 
-    fn struct_declaration(&mut self) -> Result<Stmt, String> {
+    fn struct_declaration(&mut self) -> Result<Stmt, RPUError> {
         let line = self.current_line;
-        let name = self.consume(
-            TokenType::Identifier,
-            &format!("Expect struct name at line {}.", line),
-        )?;
+        let name = self.consume(TokenType::Identifier, "Expect struct name", line)?;
 
-        self.consume(
-            TokenType::LeftBrace,
-            &format!("Expect '{{' after struct name at line {}.", line),
-        )?;
+        self.consume(TokenType::LeftBrace, "Expect '{{' after struct name", line)?;
 
         let mut fields = vec![];
 
@@ -179,38 +174,36 @@ impl Parser {
             }
 
             if let Some(field_type) = field_type {
-                let field_name = self.consume(
-                    TokenType::Identifier,
-                    &format!("Expect field name at line  {}.", line),
-                )?;
+                let field_name = self.consume(TokenType::Identifier, "Expect field name", line)?;
 
                 fields.push((field_name.lexeme, field_type));
 
                 _ = self.consume(
                     TokenType::Semicolon,
                     &format!(
-                        "Expect ';' after field name at line {}, found '{}' instead.",
-                        line,
+                        "Expect ';' after field name, found '{}' instead",
                         self.lexeme()
                     ),
+                    line,
                 )?;
             } else {
-                return Err(format!(
-                    "Expect field type at line {}, found '{}' instead.",
+                return Err(RPUError::new(
+                    format!("Expect field type, found '{}' instead", self.lexeme()),
                     line,
-                    self.lexeme()
                 ));
             }
         }
 
         self.consume(
             TokenType::RightBrace,
-            &format!("Expect '}}' after struct declaration at line {}.", line),
+            "Expect '}}' after struct declaration",
+            line,
         )?;
 
         self.consume(
             TokenType::Semicolon,
-            &format!("Expect ';' after struct declaration at line {}.", line),
+            "Expect ';' after struct declaration",
+            line,
         )?;
 
         self.structs.insert(name.lexeme.clone(), fields.clone());
@@ -222,13 +215,12 @@ impl Parser {
         ))
     }
 
-    fn var_declaration(&mut self, static_type: ASTValue) -> Result<Stmt, String> {
+    fn var_declaration(&mut self, static_type: ASTValue) -> Result<Stmt, RPUError> {
+        let line = self.current_line;
         let mut var_name = self
-            .consume(TokenType::Identifier, "Expect variable name.")?
+            .consume(TokenType::Identifier, "Expect variable name", line)?
             .lexeme;
         var_name = self.verifier.define_var(&var_name, false)?;
-
-        let line = self.current_line;
 
         let mut initializer = None;
         if self.match_token(vec![TokenType::Equal]) {
@@ -268,10 +260,10 @@ impl Parser {
             self.consume(
                 TokenType::Comma,
                 &format!(
-                    "Expect ',' after variable declaration, found '{}' at line {}.",
+                    "Expect ',' after variable declaration, found '{}'",
                     self.lexeme(),
-                    line
                 ),
+                line,
             )?;
             self.open_var_declaration = Some(static_type.clone());
         } else {
@@ -280,10 +272,10 @@ impl Parser {
                 self.consume(
                     TokenType::Semicolon,
                     &format!(
-                        "Expect ';' after variable declaration, found '{}' at line {}.",
+                        "Expect ';' after variable declaration, found '{}'",
                         self.lexeme(),
-                        line
                     ),
+                    line,
                 )?;
             }
         }
@@ -296,7 +288,7 @@ impl Parser {
         ))
     }
 
-    fn statement(&mut self) -> Result<Stmt, String> {
+    fn statement(&mut self) -> Result<Stmt, RPUError> {
         if self.match_token(vec![TokenType::If]) {
             self.if_statement()
         } else if self.match_token(vec![TokenType::Print]) {
@@ -316,12 +308,9 @@ impl Parser {
         }
     }
 
-    fn for_statement(&mut self) -> Result<Stmt, String> {
+    fn for_statement(&mut self) -> Result<Stmt, RPUError> {
         let line = self.current_line;
-        self.consume(
-            TokenType::LeftParen,
-            &format!("Expect '(' after 'for' at line {}.", line),
-        )?;
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'", line)?;
 
         let mut inits: Vec<Box<Stmt>> = vec![];
 
@@ -338,7 +327,8 @@ impl Parser {
 
         self.consume(
             TokenType::Semicolon,
-            &format!("Expect ';' after loop initializer at line {}.", line),
+            "Expect ';' after loop initializer",
+            line,
         )?;
 
         let mut conditions: Vec<Box<Expr>> = vec![];
@@ -354,7 +344,8 @@ impl Parser {
 
         self.consume(
             TokenType::Semicolon,
-            &format!("Expect ';' after loop condition at line {}.", line),
+            "Expect ';' after loop condition",
+            line,
         )?;
 
         let mut incrs: Vec<Box<Expr>> = vec![];
@@ -368,10 +359,7 @@ impl Parser {
             }
         }
 
-        self.consume(
-            TokenType::RightParen,
-            &format!("Expect ')' after for loop at line {}.", line),
-        )?;
+        self.consume(TokenType::RightParen, "Expect ')' after for loop", line)?;
 
         let body = self.statement()?;
 
@@ -384,16 +372,14 @@ impl Parser {
         ))
     }
 
-    fn while_statement(&mut self) -> Result<Stmt, String> {
+    fn while_statement(&mut self) -> Result<Stmt, RPUError> {
         let line = self.current_line;
-        self.consume(
-            TokenType::LeftParen,
-            &format!("Expect '(' after 'while' at line {}.", line),
-        )?;
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'", line)?;
         let condition = self.expression()?;
         self.consume(
             TokenType::RightParen,
-            &format!("Expect ')' after while condition at line {}.", line),
+            "Expect ')' after while condition",
+            line,
         )?;
 
         let body = self.statement()?;
@@ -405,17 +391,11 @@ impl Parser {
         ))
     }
 
-    fn if_statement(&mut self) -> Result<Stmt, String> {
+    fn if_statement(&mut self) -> Result<Stmt, RPUError> {
         let line = self.current_line;
-        self.consume(
-            TokenType::LeftParen,
-            &format!("Expect '(' after 'if' at line {}.", line),
-        )?;
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'", line)?;
         let condition = self.expression()?;
-        self.consume(
-            TokenType::RightParen,
-            &format!("Expect ')' after if condition at line {}.", line),
-        )?;
+        self.consume(TokenType::RightParen, "Expect ')' after if condition", line)?;
 
         let then_branch = self.statement()?;
         let else_branch = if self.match_token(vec![TokenType::Else]) {
@@ -432,49 +412,49 @@ impl Parser {
         ))
     }
 
-    fn print_statement(&mut self) -> Result<Stmt, String> {
+    fn print_statement(&mut self) -> Result<Stmt, RPUError> {
         let value = self.expression()?;
         let line = self.current_line;
         self.consume(
             TokenType::Semicolon,
-            &format!("Expect ';' after print statement at line {}.", line),
+            "Expect ';' after print statement",
+            line,
         )?;
         Ok(Stmt::Print(Box::new(value), self.create_loc(line)))
     }
 
-    fn return_statement(&mut self) -> Result<Stmt, String> {
+    fn return_statement(&mut self) -> Result<Stmt, RPUError> {
         let value = self.expression()?;
         let line = self.current_line;
-        self.consume(
-            TokenType::Semicolon,
-            &format!("Expect ';' after return value at line {}.", line),
-        )?;
+        self.consume(TokenType::Semicolon, "Expect ';' after return value", line)?;
         Ok(Stmt::Return(Box::new(value), self.create_loc(line)))
     }
 
-    fn break_statement(&mut self) -> Result<Stmt, String> {
+    fn break_statement(&mut self) -> Result<Stmt, RPUError> {
         let line = self.current_line;
         self.consume(
             TokenType::Semicolon,
-            &format!("Expect ';' after break statement at line {}.", line),
+            "Expect ';' after break statement",
+            line,
         )?;
         Ok(Stmt::Break(self.create_loc(line)))
     }
 
-    fn expression_statement(&mut self) -> Result<Stmt, String> {
+    fn expression_statement(&mut self) -> Result<Stmt, RPUError> {
         let value = self.expression()?;
         let line = self.current_line;
-        self.consume(
-            TokenType::Semicolon,
-            &format!("Expect ';' after expression at line {}.", line),
-        )?;
+        self.consume(TokenType::Semicolon, "Expect ';' after expression", line)?;
         Ok(Stmt::Expression(Box::new(value), self.create_loc(line)))
     }
 
-    fn function(&mut self, export: bool, returns: ASTValue) -> Result<Stmt, String> {
-        let name = self.consume(TokenType::Identifier, "Expect function name.")?;
+    fn function(&mut self, export: bool, returns: ASTValue) -> Result<Stmt, RPUError> {
         let line = self.current_line;
-        self.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
+        let name = self.consume(TokenType::Identifier, "Expect function name.", line)?;
+        self.consume(
+            TokenType::LeftParen,
+            "Expect '(' after function name.",
+            line,
+        )?;
         let mut parameters = vec![];
 
         _ = self.verifier.define_var(&name.lexeme, true);
@@ -485,10 +465,7 @@ impl Parser {
         if !self.check(TokenType::RightParen) {
             loop {
                 if parameters.len() >= 255 {
-                    return Err(format!(
-                        "Cannot have more than 255 parameters at line {}.",
-                        line
-                    ));
+                    return Err(RPUError::new("Cannot have more than 255 parameters", line));
                 }
 
                 // Ignore for now
@@ -514,10 +491,7 @@ impl Parser {
                     TokenType::Mat4,
                 ]) {
                     let param_name = self
-                        .consume(
-                            TokenType::Identifier,
-                            &format!("Expect parameter name at line {}.", line),
-                        )?
+                        .consume(TokenType::Identifier, "Expect parameter name", line)?
                         .lexeme;
                     if let Ok(param_name) = self.verifier.define_var(&param_name, false) {
                         parameters.push(ASTValue::from_token_type(Some(param_name), &token_type));
@@ -526,18 +500,18 @@ impl Parser {
                     let struct_name = self.lexeme();
                     self.advance();
                     let param_name = self
-                        .consume(
-                            TokenType::Identifier,
-                            &format!("Expect parameter name at line {}.", line),
-                        )?
+                        .consume(TokenType::Identifier, "Expect parameter name", line)?
                         .lexeme;
                     if let Ok(param_name) = self.verifier.define_var(&param_name, false) {
                         parameters.push(ASTValue::Struct(struct_name, Some(param_name), vec![]));
                     }
                 } else {
-                    return Err(format!(
-                        "Invalid parameter type '{}' at line {}.",
-                        self.tokens[self.current].lexeme, line
+                    return Err(RPUError::new(
+                        format!(
+                            "Invalid parameter type '{}'",
+                            self.tokens[self.current].lexeme,
+                        ),
+                        line,
                     ));
                 }
 
@@ -547,8 +521,16 @@ impl Parser {
             }
         }
 
-        self.consume(TokenType::RightParen, "Expect ')' after parameters.")?;
-        self.consume(TokenType::LeftBrace, "Expect '{' before function body.")?;
+        self.consume(
+            TokenType::RightParen,
+            "Expect ')' after function parameters",
+            line,
+        )?;
+        self.consume(
+            TokenType::LeftBrace,
+            "Expect '{' before function body",
+            line,
+        )?;
 
         if let Stmt::Block(body, _) = self.block()? {
             self.verifier.end_scope();
@@ -563,11 +545,11 @@ impl Parser {
             ))
         } else {
             // Not reachable
-            Err("Expect block statement.".to_string())
+            Err(RPUError::new("Expect block statement.", line))
         }
     }
 
-    fn block(&mut self) -> Result<Stmt, String> {
+    fn block(&mut self) -> Result<Stmt, RPUError> {
         let mut statements = vec![];
 
         self.verifier.begin_scope();
@@ -588,19 +570,16 @@ impl Parser {
 
         let line = self.current_line;
 
-        self.consume(
-            TokenType::RightBrace,
-            &format!("Expect '}}' after block at line {}.", line),
-        )?;
+        self.consume(TokenType::RightBrace, "Expect '}}' after block", line)?;
 
         Ok(Stmt::Block(statements, self.create_loc(line)))
     }
 
-    fn expression(&mut self) -> Result<Expr, String> {
+    fn expression(&mut self) -> Result<Expr, RPUError> {
         self.assignment()
     }
 
-    fn assignment(&mut self) -> Result<Expr, String> {
+    fn assignment(&mut self) -> Result<Expr, RPUError> {
         let expr = self.or()?;
 
         if self.check(TokenType::Plus)
@@ -621,9 +600,9 @@ impl Parser {
                 ));
             }
 
-            return Err(format!(
-                "Invalid assignment target: '{:?}' at line {}.",
-                equals.lexeme, equals.line
+            return Err(RPUError::new(
+                format!("Invalid assignment target: '{:?}'", equals.lexeme),
+                equals.line,
             ));
         } else if self.check(TokenType::Minus)
             && self.match_token(vec![TokenType::Minus])
@@ -643,9 +622,9 @@ impl Parser {
                 ));
             }
 
-            return Err(format!(
-                "Invalid assignment target: '{:?}' at line {}.",
-                equals.lexeme, equals.line
+            return Err(RPUError::new(
+                format!("Invalid assignment target: '{:?}'", equals.lexeme),
+                equals.line,
             ));
         } else if self.check(TokenType::Star)
             && self.match_token(vec![TokenType::Star])
@@ -665,9 +644,9 @@ impl Parser {
                 ));
             }
 
-            return Err(format!(
-                "Invalid assignment target: '{:?}' at line {}.",
-                equals.lexeme, equals.line
+            return Err(RPUError::new(
+                format!("Invalid assignment target: '{:?}'", equals.lexeme),
+                equals.line,
             ));
         } else if self.check(TokenType::Slash)
             && self.match_token(vec![TokenType::Slash])
@@ -687,9 +666,9 @@ impl Parser {
                 ));
             }
 
-            return Err(format!(
-                "Invalid assignment target: '{:?}' at line {}.",
-                equals.lexeme, equals.line
+            return Err(RPUError::new(
+                format!("Invalid assignment target: '{:?}'", equals.lexeme),
+                equals.line,
             ));
         } else if self.match_token(vec![TokenType::Equal]) {
             let equals = self.previous().unwrap();
@@ -706,16 +685,16 @@ impl Parser {
                 ));
             }
 
-            return Err(format!(
-                "Invalid assignment target: '{:?}' at line {}.",
-                equals.lexeme, equals.line
+            return Err(RPUError::new(
+                format!("Invalid assignment target: '{:?}'", equals.lexeme),
+                equals.line,
             ));
         }
 
         Ok(expr)
     }
 
-    fn or(&mut self) -> Result<Expr, String> {
+    fn or(&mut self) -> Result<Expr, RPUError> {
         let mut expr = self.and()?;
 
         while self.match_token(vec![TokenType::Or]) {
@@ -732,7 +711,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn and(&mut self) -> Result<Expr, String> {
+    fn and(&mut self) -> Result<Expr, RPUError> {
         let mut expr = self.ternary()?;
 
         while self.match_token(vec![TokenType::And]) {
@@ -749,7 +728,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn ternary(&mut self) -> Result<Expr, String> {
+    fn ternary(&mut self) -> Result<Expr, RPUError> {
         let mut expr = self.equality()?;
         let line = self.current_line;
 
@@ -758,7 +737,8 @@ impl Parser {
 
             self.consume(
                 TokenType::Colon,
-                &format!("Expect ':' after condition for ternary at line {}.", line),
+                "Expect ':' after condition for ternary",
+                line,
             )?;
 
             let else_branch = self.expression()?;
@@ -774,7 +754,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn equality(&mut self) -> Result<Expr, String> {
+    fn equality(&mut self) -> Result<Expr, RPUError> {
         let mut expr = self.comparison()?;
 
         while self.match_token(vec![TokenType::BangEqual, TokenType::EqualEqual]) {
@@ -791,7 +771,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn comparison(&mut self) -> Result<Expr, String> {
+    fn comparison(&mut self) -> Result<Expr, RPUError> {
         let mut expr = self.term()?;
 
         while self.match_token(vec![
@@ -813,7 +793,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn term(&mut self) -> Result<Expr, String> {
+    fn term(&mut self) -> Result<Expr, RPUError> {
         let mut expr = self.factor()?;
 
         if (self.check(TokenType::Minus) || self.check(TokenType::Plus))
@@ -834,7 +814,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn factor(&mut self) -> Result<Expr, String> {
+    fn factor(&mut self) -> Result<Expr, RPUError> {
         let mut expr = self.unary()?;
 
         if (self.check(TokenType::Slash) || self.check(TokenType::Star))
@@ -855,7 +835,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn unary(&mut self) -> Result<Expr, String> {
+    fn unary(&mut self) -> Result<Expr, RPUError> {
         if self.match_token(vec![TokenType::Bang, TokenType::Minus]) {
             let operator = self.previous().unwrap();
             let right = self.unary()?;
@@ -869,7 +849,7 @@ impl Parser {
         self.call()
     }
 
-    fn call(&mut self) -> Result<Expr, String> {
+    fn call(&mut self) -> Result<Expr, RPUError> {
         let mut expr = self.primary()?;
 
         loop {
@@ -883,14 +863,14 @@ impl Parser {
         Ok(expr)
     }
 
-    fn finish_call(&mut self, callee: Expr) -> Result<Expr, String> {
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr, RPUError> {
         let mut arguments = vec![];
         let line = self.current_line;
 
         if !self.check(TokenType::RightParen) {
             loop {
                 if arguments.len() >= 255 {
-                    return Err("Cannot have more than 255 arguments.".to_string());
+                    return Err(RPUError::new("Cannot have more than 255 arguments", line));
                 }
 
                 arguments.push(Box::new(self.expression()?));
@@ -903,7 +883,8 @@ impl Parser {
 
         let paren = self.consume(
             TokenType::RightParen,
-            &format!("Expect ')' after function arguments at line {}.", line),
+            "Expect ')' after function arguments",
+            line,
         )?;
         let mut swizzle = vec![];
         let mut field_path = vec![];
@@ -923,7 +904,7 @@ impl Parser {
         ))
     }
 
-    fn primary(&mut self) -> Result<Expr, String> {
+    fn primary(&mut self) -> Result<Expr, RPUError> {
         let token = self.peek();
         match token.kind {
             TokenType::False => {
@@ -978,7 +959,7 @@ impl Parser {
                         ))
                     }
                 } else {
-                    Err(format!("Invalid integer number at line {}.", token.line))
+                    Err(RPUError::new("Invalid integer number", token.line))
                 }
             }
             TokenType::Int2 => {
@@ -1006,7 +987,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after ivec2 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after ivec2", token.line))
                 }
             }
             TokenType::Int3 => {
@@ -1039,7 +1020,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after ivec3 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after ivec3", token.line))
                 }
             }
             TokenType::Int4 => {
@@ -1077,7 +1058,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after ivec4 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after ivec4", token.line))
                 }
             }
             TokenType::FloatNumber => {
@@ -1090,7 +1071,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Invalid float number at line {}.", token.line))
+                    Err(RPUError::new("Invalid float number", token.line))
                 }
             }
             TokenType::Float2 => {
@@ -1118,7 +1099,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after vec2 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after vec2", token.line))
                 }
             }
             TokenType::Float3 => {
@@ -1151,7 +1132,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after vec3 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after vec3", token.line))
                 }
             }
             TokenType::Float4 => {
@@ -1189,7 +1170,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after vec4 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after vec4", token.line))
                 }
             }
             TokenType::Mat2 => {
@@ -1199,10 +1180,7 @@ impl Parser {
                     //let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     if comps.len() != 4 {
-                        return Err(format!(
-                            "Expected 4 components for mat2 at line {}.",
-                            token.line
-                        ));
+                        return Err(RPUError::new("Expected 4 components for mat2", token.line));
                     }
 
                     let mut c = vec![];
@@ -1217,7 +1195,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after mat2 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after mat2", token.line))
                 }
             }
             TokenType::Mat3 => {
@@ -1227,9 +1205,9 @@ impl Parser {
                     //let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     if comps.len() != 9 && comps.len() != 3 {
-                        return Err(format!(
-                            "Expected 9 or 3 components for mat3 at line {}.",
-                            token.line
+                        return Err(RPUError::new(
+                            "Expected 9 or 3 components for mat3",
+                            token.line,
                         ));
                     }
 
@@ -1245,7 +1223,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after mat3 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after mat3", token.line))
                 }
             }
             TokenType::Mat4 => {
@@ -1255,10 +1233,7 @@ impl Parser {
                     //let swizzle: Vec<u8> = self.get_swizzle_at_current();
 
                     if comps.len() != 16 {
-                        return Err(format!(
-                            "Expected 16 components for mat4 at line {}.",
-                            token.line
-                        ));
+                        return Err(RPUError::new("Expected 16 components for mat4", token.line));
                     }
 
                     let mut c = vec![];
@@ -1273,7 +1248,7 @@ impl Parser {
                         self.create_loc(token.line),
                     ))
                 } else {
-                    Err(format!("Expected '(' after mat2 at line {}.", token.line))
+                    Err(RPUError::new("Expected '(' after mat2", token.line))
                 }
             }
             TokenType::LeftParen => {
@@ -1282,10 +1257,7 @@ impl Parser {
                 if self.match_token(vec![TokenType::RightParen]) {
                     Ok(Expr::Grouping(Box::new(expr), self.create_loc(token.line)))
                 } else {
-                    Err(format!(
-                        "Expected ')' after expression at line {}",
-                        token.line
-                    ))
+                    Err(RPUError::new("Expected ')' after expression", token.line))
                 }
             }
             TokenType::Identifier => {
@@ -1294,9 +1266,9 @@ impl Parser {
                     self.advance();
 
                     if !self.match_token(vec![TokenType::LeftParen]) {
-                        return Err(format!(
-                            "Expected '(' after '{}' at line {}.",
-                            token.lexeme, token.line
+                        return Err(RPUError::new(
+                            format!("Expected '(' after '{}'", token.lexeme),
+                            token.line,
                         ));
                     }
 
@@ -1307,17 +1279,17 @@ impl Parser {
                         fields.push(Box::new(expr));
 
                         if i < strct.len() - 1 && !self.match_token(vec![TokenType::Comma]) {
-                            return Err(format!(
-                                "Expected ',' after struct field at line {}.",
-                                token.line
+                            return Err(RPUError::new(
+                                "Expected ',' after struct field",
+                                token.line,
                             ));
                         }
                     }
 
                     if !self.match_token(vec![TokenType::RightParen]) {
-                        return Err(format!(
-                            "Expected ')' after struct definition at line {}.",
-                            token.line
+                        return Err(RPUError::new(
+                            "Expected ')' after struct definition",
+                            token.line,
                         ));
                     }
 
@@ -1351,16 +1323,16 @@ impl Parser {
                         ))
                     } else {
                         // Check against inbuilt functions
-                        Err(format!(
-                            "Unknown identifier '{}' at line {}.",
-                            token.lexeme, token.line
+                        Err(RPUError::new(
+                            format!("Unknown identifier '{}'", token.lexeme),
+                            token.line,
                         ))
                     }
                 }
             }
-            _ => Err(format!(
-                "Unknown identifier '{}' at line {}.",
-                token.lexeme, token.line
+            _ => Err(RPUError::new(
+                format!("Unknown identifier '{}'", token.lexeme),
+                token.line,
             )),
         }
     }
@@ -1372,7 +1344,7 @@ impl Parser {
         max_comps: usize,
         line: usize,
         force_floats: bool,
-    ) -> Result<Vec<Expr>, String> {
+    ) -> Result<Vec<Expr>, RPUError> {
         let mut components = vec![];
         let mut count = 0;
 
@@ -1394,10 +1366,7 @@ impl Parser {
 
             if !self.match_token(vec![TokenType::Comma]) {
                 if !self.match_token(vec![TokenType::RightParen]) {
-                    return Err(format!(
-                        "Expected ')' after vector components at line {}.",
-                        line
-                    ));
+                    return Err(RPUError::new("Expected ')' after vector components", line));
                 }
                 break;
             }
@@ -1514,11 +1483,11 @@ impl Parser {
         println!("Current: {:?}", self.tokens[self.current]);
     }
 
-    fn consume(&mut self, kind: TokenType, message: &str) -> Result<Token, String> {
+    fn consume(&mut self, kind: TokenType, message: &str, line: usize) -> Result<Token, RPUError> {
         if self.check(kind) {
             Ok(self.advance().unwrap())
         } else {
-            Err(message.to_string())
+            Err(RPUError::new(message, line))
         }
     }
 

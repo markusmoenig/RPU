@@ -77,7 +77,11 @@ impl VarVerifier {
     }
 
     /// Defines a new variable name. If the name already exists in the current scope, a new name is created.
-    pub fn define_var(&mut self, original_name: &str, is_function: bool) -> Result<String, String> {
+    pub fn define_var(
+        &mut self,
+        original_name: &str,
+        is_function: bool,
+    ) -> Result<String, RPUError> {
         let name = if !is_function {
             self.create_var_name(original_name)
         } else {

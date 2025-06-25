@@ -6,21 +6,22 @@
     (import "env" "_rpu_clamp" (func $_rpu_clamp (param f64) (param f64) (param f64) (result f64)))
 
     (memory 1)
-    (global $diffuseColor_x (mut f64) (f64.const 0.2))
-    (global $diffuseColor_y (mut f64) (f64.const 0.6))
-    (global $diffuseColor_z (mut f64) (f64.const 0.8))
-    (global $spherePos_x (mut f64) (f64.const 0.0))
-    (global $spherePos_y (mut f64) (f64.const 0.5))
-    (global $spherePos_z (mut f64) (f64.const 0.0))
-    (global $lightDir_x (mut f64) (f64.const 0.0))
-    (global $lightDir_y (mut f64) (f64.const 4.0))
-    (global $lightDir_z (mut f64) (f64.const 5.0))
-    (global $ambientColor_x (mut f64) (f64.const 0.05))
-    (global $ambientColor_y (mut f64) (f64.const 0.15))
-    (global $ambientColor_z (mut f64) (f64.const 0.2))
-    (global $specularColor_x (mut f64) (f64.const 1.0))
-    (global $specularColor_y (mut f64) (f64.const 1.0))
-    (global $specularColor_z (mut f64) (f64.const 1.0))
+
+    (global $lightDir_3_x (mut f64) (f64.const 0.0))
+    (global $lightDir_3_y (mut f64) (f64.const 4.0))
+    (global $lightDir_3_z (mut f64) (f64.const 5.0))
+    (global $specularColor_2_x (mut f64) (f64.const 1.0))
+    (global $specularColor_2_y (mut f64) (f64.const 1.0))
+    (global $specularColor_2_z (mut f64) (f64.const 1.0))
+    (global $diffuseColor_1_x (mut f64) (f64.const 0.2))
+    (global $diffuseColor_1_y (mut f64) (f64.const 0.6))
+    (global $diffuseColor_1_z (mut f64) (f64.const 0.8))
+    (global $spherePos_4_x (mut f64) (f64.const 0.0))
+    (global $spherePos_4_y (mut f64) (f64.const 0.5))
+    (global $spherePos_4_z (mut f64) (f64.const 0.0))
+    (global $ambientColor_0_x (mut f64) (f64.const 0.05))
+    (global $ambientColor_0_y (mut f64) (f64.const 0.15))
+    (global $ambientColor_0_z (mut f64) (f64.const 0.2))
 
     ;; vec3 sub vec3 (f64)
     (func $_rpu_vec3_sub_vec3_f64
@@ -439,69 +440,69 @@
         (call $_rpu_pow))
 
     ;; function 'raytraceSphere'
-    (func $raytraceSphere (param $ro_x f64) (param $ro_y f64) (param $ro_z f64)(param $rd_x f64) (param $rd_y f64) (param $rd_z f64)(param $tmin f64)(param $tmax f64)(param $r f64) (result f64)
-        (local $ce_x f64)
-        (local $ce_y f64)
-        (local $ce_z f64)
-        (local $b f64)
-        (local $c f64)
-        (local $t f64)
-        local.get $ro_x
-        local.get $ro_y
-        local.get $ro_z
-        global.get $spherePos_x
-        global.get $spherePos_y
-        global.get $spherePos_z
+    (func $raytraceSphere (param $ro_5_x f64) (param $ro_5_y f64) (param $ro_5_z f64)(param $rd_6_x f64) (param $rd_6_y f64) (param $rd_6_z f64)(param $tmin_7 f64)(param $tmax_8 f64)(param $r_9 f64) (result f64)
+        (local $ce_10_x f64)
+        (local $ce_10_y f64)
+        (local $ce_10_z f64)
+        (local $b_11 f64)
+        (local $c_12 f64)
+        (local $t_13 f64)
+        local.get $ro_5_x
+        local.get $ro_5_y
+        local.get $ro_5_z
+        global.get $spherePos_4_x
+        global.get $spherePos_4_y
+        global.get $spherePos_4_z
         (call $_rpu_vec3_sub_vec3_f64)
-        local.set $ce_z
-        local.set $ce_y
-        local.set $ce_x
-        local.get $rd_x
-        local.get $rd_y
-        local.get $rd_z
-        local.get $ce_x
-        local.get $ce_y
-        local.get $ce_z
+        local.set $ce_10_z
+        local.set $ce_10_y
+        local.set $ce_10_x
+        local.get $rd_6_x
+        local.get $rd_6_y
+        local.get $rd_6_z
+        local.get $ce_10_x
+        local.get $ce_10_y
+        local.get $ce_10_z
         (call $_rpu_dot_product_vec3_f64)
-        local.set $b
-        local.get $ce_x
-        local.get $ce_y
-        local.get $ce_z
-        local.get $ce_x
-        local.get $ce_y
-        local.get $ce_z
+        local.set $b_11
+        local.get $ce_10_x
+        local.get $ce_10_y
+        local.get $ce_10_z
+        local.get $ce_10_x
+        local.get $ce_10_y
+        local.get $ce_10_z
         (call $_rpu_dot_product_vec3_f64)
-        local.get $r
-        local.get $r
+        local.get $r_9
+        local.get $r_9
         (f64.mul)
         (f64.sub)
-        local.set $c
-        local.get $b
-        local.get $b
+        local.set $c_12
+        local.get $b_11
+        local.get $b_11
         (f64.mul)
-        local.get $c
+        local.get $c_12
         (f64.sub)
-        local.set $t
+        local.set $t_13
 
-        local.get $t
-        local.get $tmin
+        local.get $t_13
+        local.get $tmin_7
         (f64.gt)
         (if
             (then
                 (block
-                    local.get $b
+                    local.get $b_11
                     (call $_rpu_vec1_neg_f64)
-                    local.get $t
+                    local.get $t_13
                     (call $_rpu_vec1_sqrt_f64)
                     (f64.sub)
-                    local.set $t
+                    local.set $t_13
 
-                    local.get $t
-                    local.get $tmax
+                    local.get $t_13
+                    local.get $tmax_8
                     (f64.lt)
                     (if
                         (then
-                            local.get $t
+                            local.get $t_13
                             (return)
                         )
                     )
@@ -514,82 +515,82 @@
     )
 
     ;; function 'shader'
-    (func $shader (export "shader") (param $coord_x f64) (param $coord_y f64)(param $resolution_x f64) (param $resolution_y f64) (result f64 f64 f64 f64)
-        (local $p_x f64)
-        (local $p_y f64)
-        (local $eye_x f64)
-        (local $eye_y f64)
-        (local $eye_z f64)
-        (local $rot_x f64)
-        (local $rot_y f64)
-        (local $ro_x f64)
-        (local $ro_y f64)
-        (local $ro_z f64)
-        (local $ta_x f64)
-        (local $ta_y f64)
-        (local $ta_z f64)
-        (local $cw_x f64)
-        (local $cw_y f64)
-        (local $cw_z f64)
-        (local $cu_x f64)
-        (local $cu_y f64)
-        (local $cu_z f64)
-        (local $cv_x f64)
-        (local $cv_y f64)
-        (local $cv_z f64)
-        (local $cam_1 f64)
-        (local $cam_2 f64)
-        (local $cam_3 f64)
-        (local $cam_4 f64)
-        (local $cam_5 f64)
-        (local $cam_6 f64)
-        (local $cam_7 f64)
-        (local $cam_8 f64)
-        (local $cam_9 f64)
-        (local $rd_x f64)
-        (local $rd_y f64)
-        (local $rd_z f64)
-        (local $color_x f64)
-        (local $color_y f64)
-        (local $color_z f64)
-        (local $tmin f64)
-        (local $tmax f64)
-        (local $t f64)
-        (local $pos_x f64)
-        (local $pos_y f64)
-        (local $pos_z f64)
-        (local $norm_x f64)
-        (local $norm_y f64)
-        (local $norm_z f64)
-        (local $occ f64)
-        (local $amb f64)
-        (local $dif f64)
-        (local $h_x f64)
-        (local $h_y f64)
-        (local $h_z f64)
-        (local $spe f64)
+    (func $shader (export "shader") (param $coord_14_x f64) (param $coord_14_y f64)(param $resolution_15_x f64) (param $resolution_15_y f64) (result f64 f64 f64 f64)
+        (local $p_16_x f64)
+        (local $p_16_y f64)
+        (local $eye_17_x f64)
+        (local $eye_17_y f64)
+        (local $eye_17_z f64)
+        (local $rot_18_x f64)
+        (local $rot_18_y f64)
+        (local $ro_19_x f64)
+        (local $ro_19_y f64)
+        (local $ro_19_z f64)
+        (local $ta_20_x f64)
+        (local $ta_20_y f64)
+        (local $ta_20_z f64)
+        (local $cw_21_x f64)
+        (local $cw_21_y f64)
+        (local $cw_21_z f64)
+        (local $cu_22_x f64)
+        (local $cu_22_y f64)
+        (local $cu_22_z f64)
+        (local $cv_23_x f64)
+        (local $cv_23_y f64)
+        (local $cv_23_z f64)
+        (local $cam_24_1 f64)
+        (local $cam_24_2 f64)
+        (local $cam_24_3 f64)
+        (local $cam_24_4 f64)
+        (local $cam_24_5 f64)
+        (local $cam_24_6 f64)
+        (local $cam_24_7 f64)
+        (local $cam_24_8 f64)
+        (local $cam_24_9 f64)
+        (local $rd_25_x f64)
+        (local $rd_25_y f64)
+        (local $rd_25_z f64)
+        (local $color_26_x f64)
+        (local $color_26_y f64)
+        (local $color_26_z f64)
+        (local $tmin_27 f64)
+        (local $tmax_28 f64)
+        (local $t_29 f64)
+        (local $pos_30_x f64)
+        (local $pos_30_y f64)
+        (local $pos_30_z f64)
+        (local $norm_31_x f64)
+        (local $norm_31_y f64)
+        (local $norm_31_z f64)
+        (local $occ_32 f64)
+        (local $amb_33 f64)
+        (local $dif_34 f64)
+        (local $h_35_x f64)
+        (local $h_35_y f64)
+        (local $h_35_z f64)
+        (local $spe_36 f64)
         (local $_rpu_temp_f64 f64)
-        local.get $resolution_x
-        local.get $resolution_y
+        local.get $resolution_15_x
+        local.get $resolution_15_y
         (call $_rpu_vec2_neg_f64)
         (f64.const 2)
-        local.get $coord_x
-        local.get $coord_y
+        local.get $coord_14_x
+        local.get $coord_14_y
         (call $_rpu_rand)
         (call $_rpu_rand)
         (call $_rpu_vec2_add_vec2_f64)
         (call $_rpu_scalar_mul_vec2_f64)
         (call $_rpu_vec2_add_vec2_f64)
-        local.get $resolution_y
+        local.get $resolution_15_y
         (call $_rpu_vec2_div_scalar_f64)
-        local.set $p_y
-        local.set $p_x
+        local.set $p_16_y
+        local.set $p_16_x
         (f64.const 0)
         (f64.const 1)
         (f64.const 2)
-        local.set $eye_z
-        local.set $eye_y
-        local.set $eye_x
+        local.set $eye_17_z
+        local.set $eye_17_y
+        local.set $eye_17_x
         (f64.const 6.2831)
         (f64.const 0.1)
         (f64.const 150)
@@ -601,283 +602,283 @@
         (f64.const 0)
         (f64.const 0)
         (f64.const 0)
-        local.get $resolution_x
-        local.get $resolution_y
+        local.get $resolution_15_x
+        local.get $resolution_15_y
         (f64.const 0.25)
         (call $_rpu_vec2_mul_scalar_f64)
         (call $_rpu_vec2_sub_vec2_f64)
         (call $_rpu_vec2_mul_vec2_f64)
-        local.get $resolution_x
+        local.get $resolution_15_x
         (call $_rpu_vec2_div_scalar_f64)
         (call $_rpu_vec2_add_vec2_f64)
         (call $_rpu_scalar_mul_vec2_f64)
-        local.set $rot_y
-        local.set $rot_x
-        local.get $rot_y
+        local.set $rot_18_y
+        local.set $rot_18_x
+        local.get $rot_18_y
         (call $_rpu_vec1_cos_f64)
-        local.get $eye_y
-        local.get $eye_z
+        local.get $eye_17_y
+        local.get $eye_17_z
         (call $_rpu_scalar_mul_vec2_f64)
-        local.get $rot_y
+        local.get $rot_18_y
         (call $_rpu_vec1_sin_f64)
-        local.get $eye_z
-        local.get $eye_y
+        local.get $eye_17_z
+        local.get $eye_17_y
         (call $_rpu_scalar_mul_vec2_f64)
         (f64.const 1)
         (call $_rpu_vec1_neg_f64)
         (f64.const 1)
         (call $_rpu_vec2_mul_vec2_f64)
         (call $_rpu_vec2_add_vec2_f64)
-        local.set $eye_z
-        local.set $eye_y
-        local.get $eye_x
-        local.get $eye_y
-        local.get $eye_z
-        local.set $ro_z
-        local.set $ro_y
-        local.set $ro_x
+        local.set $eye_17_z
+        local.set $eye_17_y
+        local.get $eye_17_x
+        local.get $eye_17_y
+        local.get $eye_17_z
+        local.set $ro_19_z
+        local.set $ro_19_y
+        local.set $ro_19_x
         (f64.const 0)
         (f64.const 0.5)
         (f64.const 0)
-        local.set $ta_z
-        local.set $ta_y
-        local.set $ta_x
-        local.get $ta_x
-        local.get $ta_y
-        local.get $ta_z
-        local.get $eye_x
-        local.get $eye_y
-        local.get $eye_z
+        local.set $ta_20_z
+        local.set $ta_20_y
+        local.set $ta_20_x
+        local.get $ta_20_x
+        local.get $ta_20_y
+        local.get $ta_20_z
+        local.get $eye_17_x
+        local.get $eye_17_y
+        local.get $eye_17_z
         (call $_rpu_vec3_sub_vec3_f64)
         (call $_rpu_normalize_vec3_f64)
-        local.set $cw_z
-        local.set $cw_y
-        local.set $cw_x
+        local.set $cw_21_z
+        local.set $cw_21_y
+        local.set $cw_21_x
         (f64.const 0)
         (f64.const 1)
         (f64.const 0)
-        local.get $cw_x
-        local.get $cw_y
-        local.get $cw_z
+        local.get $cw_21_x
+        local.get $cw_21_y
+        local.get $cw_21_z
         (call $_rpu_cross_product_f64)
         (call $_rpu_normalize_vec3_f64)
-        local.set $cu_z
-        local.set $cu_y
-        local.set $cu_x
-        local.get $cw_x
-        local.get $cw_y
-        local.get $cw_z
-        local.get $cu_x
-        local.get $cu_y
-        local.get $cu_z
+        local.set $cu_22_z
+        local.set $cu_22_y
+        local.set $cu_22_x
+        local.get $cw_21_x
+        local.get $cw_21_y
+        local.get $cw_21_z
+        local.get $cu_22_x
+        local.get $cu_22_y
+        local.get $cu_22_z
         (call $_rpu_cross_product_f64)
         (call $_rpu_normalize_vec3_f64)
-        local.set $cv_z
-        local.set $cv_y
-        local.set $cv_x
-        local.get $cu_x
-        local.get $cu_y
-        local.get $cu_z
-        local.get $cv_x
-        local.get $cv_y
-        local.get $cv_z
-        local.get $cw_x
-        local.get $cw_y
-        local.get $cw_z
-        (local.set $cam_9)
-        (local.set $cam_8)
-        (local.set $cam_7)
-        (local.set $cam_6)
-        (local.set $cam_5)
-        (local.set $cam_4)
-        (local.set $cam_3)
-        (local.set $cam_2)
-        (local.set $cam_1)
-        (local.get $cam_1)
-        (local.get $cam_2)
-        (local.get $cam_3)
-        (local.get $cam_4)
-        (local.get $cam_5)
-        (local.get $cam_6)
-        (local.get $cam_7)
-        (local.get $cam_8)
-        (local.get $cam_9)
-        local.get $p_x
-        local.get $p_y
+        local.set $cv_23_z
+        local.set $cv_23_y
+        local.set $cv_23_x
+        local.get $cu_22_x
+        local.get $cu_22_y
+        local.get $cu_22_z
+        local.get $cv_23_x
+        local.get $cv_23_y
+        local.get $cv_23_z
+        local.get $cw_21_x
+        local.get $cw_21_y
+        local.get $cw_21_z
+        (local.set $cam_24_9)
+        (local.set $cam_24_8)
+        (local.set $cam_24_7)
+        (local.set $cam_24_6)
+        (local.set $cam_24_5)
+        (local.set $cam_24_4)
+        (local.set $cam_24_3)
+        (local.set $cam_24_2)
+        (local.set $cam_24_1)
+        (local.get $cam_24_1)
+        (local.get $cam_24_2)
+        (local.get $cam_24_3)
+        (local.get $cam_24_4)
+        (local.get $cam_24_5)
+        (local.get $cam_24_6)
+        (local.get $cam_24_7)
+        (local.get $cam_24_8)
+        (local.get $cam_24_9)
+        local.get $p_16_x
+        local.get $p_16_y
         (f64.const 1.5)
         (call $_rpu_normalize_vec3_f64)
         (call $_rpu_mat3_mul_vec3_f64)
-        local.set $rd_z
-        local.set $rd_y
-        local.set $rd_x
+        local.set $rd_25_z
+        local.set $rd_25_y
+        local.set $rd_25_x
         (f64.const 0)
         (f64.const 0)
         (f64.const 0)
-        local.set $color_z
-        local.set $color_y
-        local.set $color_x
+        local.set $color_26_z
+        local.set $color_26_y
+        local.set $color_26_x
         (f64.const 0.1)
-        local.set $tmin
+        local.set $tmin_27
         (f64.const 50)
-        local.set $tmax
-        local.get $ro_x
-        local.get $ro_y
-        local.get $ro_z
-        local.get $rd_x
-        local.get $rd_y
-        local.get $rd_z
-        local.get $tmin
-        local.get $tmax
+        local.set $tmax_28
+        local.get $ro_19_x
+        local.get $ro_19_y
+        local.get $ro_19_z
+        local.get $rd_25_x
+        local.get $rd_25_y
+        local.get $rd_25_z
+        local.get $tmin_27
+        local.get $tmax_28
         (f64.const 1)
         (call $raytraceSphere)
-        local.set $t
+        local.set $t_29
 
-        local.get $t
-        local.get $tmin
+        local.get $t_29
+        local.get $tmin_27
         (f64.gt)
-        local.get $t
-        local.get $tmax
+        local.get $t_29
+        local.get $tmax_28
         (f64.lt)
         (i32.and)
         (if
             (then
                 (block
-                    local.get $ro_x
-                    local.get $ro_y
-                    local.get $ro_z
-                    local.get $rd_x
-                    local.get $rd_y
-                    local.get $rd_z
-                    local.get $t
+                    local.get $ro_19_x
+                    local.get $ro_19_y
+                    local.get $ro_19_z
+                    local.get $rd_25_x
+                    local.get $rd_25_y
+                    local.get $rd_25_z
+                    local.get $t_29
                     (call $_rpu_vec3_mul_scalar_f64)
                     (call $_rpu_vec3_add_vec3_f64)
-                    local.set $pos_z
-                    local.set $pos_y
-                    local.set $pos_x
-                    local.get $pos_x
-                    local.get $pos_y
-                    local.get $pos_z
-                    global.get $spherePos_x
-                    global.get $spherePos_y
-                    global.get $spherePos_z
+                    local.set $pos_30_z
+                    local.set $pos_30_y
+                    local.set $pos_30_x
+                    local.get $pos_30_x
+                    local.get $pos_30_y
+                    local.get $pos_30_z
+                    global.get $spherePos_4_x
+                    global.get $spherePos_4_y
+                    global.get $spherePos_4_z
                     (call $_rpu_vec3_sub_vec3_f64)
                     (call $_rpu_normalize_vec3_f64)
-                    local.set $norm_z
-                    local.set $norm_y
-                    local.set $norm_x
+                    local.set $norm_31_z
+                    local.set $norm_31_y
+                    local.set $norm_31_x
                     (f64.const 0.5)
                     (f64.const 0.5)
-                    local.get $norm_y
+                    local.get $norm_31_y
                     (f64.mul)
                     (f64.add)
-                    local.set $occ
+                    local.set $occ_32
                     (f64.const 0.5)
                     (f64.const 0.5)
-                    local.get $norm_y
+                    local.get $norm_31_y
                     (f64.mul)
                     (f64.add)
                     (f64.const 0)
                     (f64.const 1)
                     (call $_rpu_vec1_clamp_f64_f64)
-                    local.set $amb
-                    global.get $lightDir_x
-                    global.get $lightDir_y
-                    global.get $lightDir_z
-                    local.get $norm_x
-                    local.get $norm_y
-                    local.get $norm_z
+                    local.set $amb_33
+                    global.get $lightDir_3_x
+                    global.get $lightDir_3_y
+                    global.get $lightDir_3_z
+                    local.get $norm_31_x
+                    local.get $norm_31_y
+                    local.get $norm_31_z
                     (call $_rpu_dot_product_vec3_f64)
                     (f64.const 0)
                     (f64.const 1)
                     (call $_rpu_vec1_clamp_f64_f64)
-                    local.set $dif
-                    local.get $rd_x
-                    local.get $rd_y
-                    local.get $rd_z
+                    local.set $dif_34
+                    local.get $rd_25_x
+                    local.get $rd_25_y
+                    local.get $rd_25_z
                     (call $_rpu_vec3_neg_f64)
-                    global.get $lightDir_x
-                    global.get $lightDir_y
-                    global.get $lightDir_z
+                    global.get $lightDir_3_x
+                    global.get $lightDir_3_y
+                    global.get $lightDir_3_z
                     (call $_rpu_vec3_add_vec3_f64)
                     (call $_rpu_normalize_vec3_f64)
-                    local.set $h_z
-                    local.set $h_y
-                    local.set $h_x
-                    local.get $h_x
-                    local.get $h_y
-                    local.get $h_z
-                    local.get $norm_x
-                    local.get $norm_y
-                    local.get $norm_z
+                    local.set $h_35_z
+                    local.set $h_35_y
+                    local.set $h_35_x
+                    local.get $h_35_x
+                    local.get $h_35_y
+                    local.get $h_35_z
+                    local.get $norm_31_x
+                    local.get $norm_31_y
+                    local.get $norm_31_z
                     (call $_rpu_dot_product_vec3_f64)
                     (f64.const 0)
                     (f64.const 1)
                     (call $_rpu_vec1_clamp_f64_f64)
                     (f64.const 64)
                     (call $_rpu_vec1_pow_f64)
-                    local.set $spe
-                    local.get $amb
-                    global.get $ambientColor_x
-                    global.get $ambientColor_y
-                    global.get $ambientColor_z
+                    local.set $spe_36
+                    local.get $amb_33
+                    global.get $ambientColor_0_x
+                    global.get $ambientColor_0_y
+                    global.get $ambientColor_0_z
                     (call $_rpu_scalar_mul_vec3_f64)
-                    local.get $occ
+                    local.get $occ_32
                     (call $_rpu_vec3_mul_scalar_f64)
-                    local.set $color_z
-                    local.set $color_y
-                    local.set $color_x
-                    local.get $dif
-                    global.get $diffuseColor_x
-                    global.get $diffuseColor_y
-                    global.get $diffuseColor_z
+                    local.set $color_26_z
+                    local.set $color_26_y
+                    local.set $color_26_x
+                    local.get $dif_34
+                    global.get $diffuseColor_1_x
+                    global.get $diffuseColor_1_y
+                    global.get $diffuseColor_1_z
                     (call $_rpu_scalar_mul_vec3_f64)
-                    local.get $occ
+                    local.get $occ_32
                     (call $_rpu_vec3_mul_scalar_f64)
                     local.set $_rpu_temp_f64
-                    local.get $color_z
+                    local.get $color_26_z
                     local.get $_rpu_temp_f64
                     f64.add
-                    local.set $color_z
+                    local.set $color_26_z
                     local.set $_rpu_temp_f64
-                    local.get $color_y
+                    local.get $color_26_y
                     local.get $_rpu_temp_f64
                     f64.add
-                    local.set $color_y
+                    local.set $color_26_y
                     local.set $_rpu_temp_f64
-                    local.get $color_x
+                    local.get $color_26_x
                     local.get $_rpu_temp_f64
                     f64.add
-                    local.set $color_x
-                    local.get $dif
-                    local.get $spe
+                    local.set $color_26_x
+                    local.get $dif_34
+                    local.get $spe_36
                     (f64.mul)
-                    global.get $specularColor_x
-                    global.get $specularColor_y
-                    global.get $specularColor_z
+                    global.get $specularColor_2_x
+                    global.get $specularColor_2_y
+                    global.get $specularColor_2_z
                     (call $_rpu_scalar_mul_vec3_f64)
-                    local.get $occ
+                    local.get $occ_32
                     (call $_rpu_vec3_mul_scalar_f64)
                     local.set $_rpu_temp_f64
-                    local.get $color_z
+                    local.get $color_26_z
                     local.get $_rpu_temp_f64
                     f64.add
-                    local.set $color_z
+                    local.set $color_26_z
                     local.set $_rpu_temp_f64
-                    local.get $color_y
+                    local.get $color_26_y
                     local.get $_rpu_temp_f64
                     f64.add
-                    local.set $color_y
+                    local.set $color_26_y
                     local.set $_rpu_temp_f64
-                    local.get $color_x
+                    local.get $color_26_x
                     local.get $_rpu_temp_f64
                     f64.add
-                    local.set $color_x
+                    local.set $color_26_x
                 )
             )
         )
-        local.get $color_x
-        local.get $color_y
-        local.get $color_z
+        local.get $color_26_x
+        local.get $color_26_y
+        local.get $color_26_z
         (f64.const 1)
         (f64.const 2.2)
         (f64.div)

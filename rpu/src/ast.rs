@@ -216,21 +216,21 @@ pub trait Visitor {
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn block(
         &mut self,
         list: &[Box<Stmt>],
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn expression(
         &mut self,
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn var_declaration(
         &mut self,
@@ -239,7 +239,7 @@ pub trait Visitor {
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn value(
         &mut self,
@@ -248,7 +248,7 @@ pub trait Visitor {
         field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn unary(
         &mut self,
@@ -256,7 +256,7 @@ pub trait Visitor {
         expr: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn equality(
         &mut self,
@@ -265,7 +265,7 @@ pub trait Visitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn comparison(
         &mut self,
@@ -274,7 +274,7 @@ pub trait Visitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn binary(
         &mut self,
@@ -283,14 +283,14 @@ pub trait Visitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn grouping(
         &mut self,
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn variable(
         &mut self,
@@ -299,7 +299,7 @@ pub trait Visitor {
         field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     #[allow(clippy::too_many_arguments)]
     fn variable_assignment(
@@ -311,7 +311,7 @@ pub trait Visitor {
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn func_call(
         &mut self,
@@ -321,7 +321,7 @@ pub trait Visitor {
         args: &[Box<Expr>],
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn struct_declaration(
         &mut self,
@@ -329,7 +329,7 @@ pub trait Visitor {
         field: &[(String, ASTValue)],
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     #[allow(clippy::too_many_arguments)]
     fn func_declaration(
@@ -341,16 +341,16 @@ pub trait Visitor {
         export: &bool,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn return_stmt(
         &mut self,
         expr: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
-    fn break_stmt(&mut self, loc: &Location, ctx: &mut Context) -> Result<ASTValue, String>;
+    fn break_stmt(&mut self, loc: &Location, ctx: &mut Context) -> Result<ASTValue, RPUError>;
 
     fn if_stmt(
         &mut self,
@@ -359,7 +359,7 @@ pub trait Visitor {
         else_stmt: &Option<Box<Stmt>>,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn while_stmt(
         &mut self,
@@ -367,7 +367,7 @@ pub trait Visitor {
         body_stmt: &Stmt,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn for_stmt(
         &mut self,
@@ -377,7 +377,7 @@ pub trait Visitor {
         body_stmt: &Stmt,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn logical_expr(
         &mut self,
@@ -386,7 +386,7 @@ pub trait Visitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 
     fn ternary(
         &mut self,
@@ -395,11 +395,15 @@ pub trait Visitor {
         else_expr: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String>;
+    ) -> Result<ASTValue, RPUError>;
 }
 
 impl Stmt {
-    pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
+    pub fn accept(
+        &self,
+        visitor: &mut dyn Visitor,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, RPUError> {
         match self {
             Stmt::If(cond, then_stmt, else_stmt, loc) => {
                 visitor.if_stmt(cond, then_stmt, else_stmt, loc, ctx)
@@ -427,7 +431,11 @@ impl Stmt {
 }
 
 impl Expr {
-    pub fn accept(&self, visitor: &mut dyn Visitor, ctx: &mut Context) -> Result<ASTValue, String> {
+    pub fn accept(
+        &self,
+        visitor: &mut dyn Visitor,
+        ctx: &mut Context,
+    ) -> Result<ASTValue, RPUError> {
         match self {
             Expr::Value(value, swizzle, field_path, loc) => {
                 visitor.value(value.clone(), swizzle, field_path, loc, ctx)

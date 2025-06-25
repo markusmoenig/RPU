@@ -1,0 +1,670 @@
+// Copyright © 2024 Markus Moenig Distributed under The MIT License.
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
+
+// Path-tracing switch and depth
+#define PATH_DEPTH 2
+
+// --- Material Code
+
+struct Material {
+    int type;
+    vec3 color;
+    vec3 specularColor;
+    float specularAmount;
+    float metallic;
+    float smoothness;
+    float reflectance;
+    float bump;
+    vec3 emission;
+    float ior;
+};
+
+// --- Material code
+
+vec3 source0( in vec3 inPos, in vec2 inUV, in vec3 inNormal, in float inTime, in vec3 inInput1, in vec3 inInput2, in vec3 inInput3 ) {
+  // Copyright by Dave Hoskins.
+  // https://www.shadertoy.com/view/4dlGW2.
+  inInput3 = inInput3.x == 0. ? vec3(10) : inInput3;
+  vec2 p = inUV * inInput3.x;
+  vec2 f;
+  // p *= scale;
+  f = fract(p);		// Separate integer from fractional
+  p = floor(p);
+  f = f*f*(3.0-2.0*f);	// Cosine interpolation approximation
+  vec2 h1 = mod(p, inInput3.x);
+  float h1f = fract(sin(dot(h1, vec2(27.16898, 38.90563))) * 5151.5473453);
+  vec2 h2 = mod(p + vec2( 1.0, 0.0), inInput3.x);
+  float h2f = fract(sin(dot(h2, vec2(27.16898, 38.90563))) * 5151.5473453);
+  vec2 h3 = mod(p + vec2( 0.0, 1.0), inInput3.x);
+  float h3f = fract(sin(dot(h3, vec2(27.16898, 38.90563))) * 5151.5473453);
+  vec2 h4 = mod(p + vec2( 1.0, 1.0), inInput3.x);
+  float h4f = fract(sin(dot(h4, vec2(27.16898, 38.90563))) * 5151.5473453);
+  float noise = mix(mix( h1f, h2f,f.x), mix( h3f, h4f, f.x),f.y);
+inInput1 = vec3( noise );
+return inInput1;
+}
+
+vec3 source1( in vec3 inPos, in vec2 inUV, in vec3 inNormal, in float inTime, in vec3 inInput1, in vec3 inInput2, in vec3 inInput3 ) {
+  // Copyright by Dave Hoskins.
+  // https://www.shadertoy.com/view/4dlGW2.
+  float scale = 20.0;
+  float f = 0.0;
+  // Change starting scale to any integer value...
+  vec2 p = mod(inUV, scale);
+  float amp = 0.600;
+  for (int i = 0; i < 5; i += 1)
+  {
+      f += source0( inPos, p, inNormal, inTime, inInput1, inInput2, vec3(scale) ).x * amp;
+      amp *= 0.500;
+      // Scale must be multiplied by an integer value...
+      scale *= 2.;
+  }
+  // Clamp it just in case....
+  inInput1 = vec3( min(f, 1.0) );
+  return inInput1;
+}
+
+vec3 source2( in vec3 inPos, in vec2 inUV, in vec3 inNormal, in float inTime, in vec3 inInput1, in vec3 inInput2, in vec3 inInput3 ) {
+  const float BMWIDTH = 0.250+0.030;
+  const float BMHEIGHT = 0.080+0.030;
+  const float MWF = 0.030*0.5/BMWIDTH;
+  const float MHF = 0.030*0.5/BMHEIGHT;
+  float ss = inUV.x / BMWIDTH;
+  float tt = inUV.y / BMHEIGHT;
+  if ( mod( tt * 0.5, 1.0 ) > 0.5 )
+  	ss = ss + 0.5;
+  float sbrick = floor( ss );
+  float tbrick = floor( tt );
+  vec2 randv2 = vec2(rand(), rand()); //fract(cos(( vec2( (tbrick + 0.5 ), (sbrick + 0.5) ) * vec2(1000.0,1000.0))));
+  float noise = fract(sin(dot(randv2.xy ,vec2(12.9898,78.233))) * 43758.5453);
+  // --- Distance size is random, currently disabled
+  // ss = ss + 0.05 * noise;
+  // tt = tt + 0.05 * noise;
+  ss = ss - sbrick;
+  tt = tt - tbrick;
+  float w = step( MWF, ss ) - step( 1.0 - MWF, ss );
+  float h = step( MHF, tt ) - step( 1.0 - MHF, tt );
+  // --- Random color per tile, currently uses fast cos based noise which creates visible patterns
+  // float color = mix( 1.0, /*vec3( 0, 0, 0 )*/ 1.0 / 3.0, noise );
+  // ---
+  // outCofdlor = mix( Cmosdrtar, Cbrick, w * h );
+  float sbump = smoothstep(0.0,MWF,ss) - smoothstep(1.0-MWF,1.0,ss);
+  float tbump = smoothstep(0.0,MHF,tt) - smoothstep(1.0-MHF,1.0,tt);
+  float bump = sbump * tbump;
+  float unevenBump = bump;
+  if ( noise <= 0.25 ) unevenBump -= ss * 1.000;
+  else if ( noise <= 0.50 ) unevenBump -= tt * 1.000;
+  else if ( noise <= 0.75 ) unevenBump -= (BMWIDTH-ss) * 1.000;
+  else unevenBump -= (BMHEIGHT-tt) * 1.000;
+  inInput1 = vec3( noise, bump, clamp( unevenBump, 0., 1. ) );
+  return inInput1;
+}
+
+
+vec3 Kogj( in vec3 pos, in vec2 uv, in vec3 normal, in float time, in vec3 param ) {
+    vec3 _Zxur = source0( pos, uv, normal, 0., vec3(0), vec3(0), vec3(0) );
+    vec3 _Eoks = source1( pos, uv, normal, 0., _Zxur, vec3(0), vec3(0) );
+    return _Eoks;
+}
+
+vec3 dhhB( in vec3 pos, in vec2 uv, in vec3 normal, in float time, in vec3 param ) {
+    vec3 _BdHg = param * vec3( 1.000, 1.000, 1.000 );
+    vec3 _bpea = vec3( _BdHg.y );
+    vec3 _eukA = vec3( _BdHg.z );
+    vec3 _xeHM = Kogj( _eukA, vec3(uv, 0.).xy, normal, time, vec3(0) );
+    vec3 _jIHy = _xeHM * _eukA * vec3(1);
+    vec3 _vRSx = vec3( uv.x * vec2( 1.000, 1.000 ).x, uv.y * vec2( 1.000, 1.000 ).y, 1 );
+    vec3 _sRul = _vRSx * 3.000 * vec3( 1.000, 1.000, 1.000 );
+    vec3 _YTpn = Kogj( _sRul, _sRul.xy, normal, time, vec3(0) );
+    vec3 _xzCJ = _YTpn * 7.845 * vec3( 1.000, 1.000, 1.000 );
+    vec3 _vTdO = 1.000 - _bpea;
+    vec3 _bzqA = _vTdO * 0.100 * vec3( 1.000, 1.000, 1.000 );
+    vec3 _gTOo = _bzqA * _bzqA * _xzCJ;
+    vec3 _jkHH = _gTOo * 5.000 * vec3( 1.000, 1.000, 1.000 );
+    vec3 _MxCk = _jkHH + _jIHy + vec3(0);
+    vec3 _PZGo = _MxCk * 1.600 * vec3( 1.000, 1.000, 1.000 );
+    vec3 _fTFt = clamp( _PZGo, 0.0, 1.1 );
+    return _fTFt;
+}
+
+void material0( in vec3 pos, inout vec3 normal, in float time, inout Material material ) {
+    vec2 uv;
+    material.specularColor = vec3( 1, 1, 1 );material.specularAmount = 0.000;material.metallic = 0.000;material.reflectance = 1.000;uv = pos.xy;material.bump = 0.5;
+    vec3 _oCzV = source2( pos, uv, normal, 0., vec3(0), vec3(0), vec3(0) );
+    vec3 _FCZn = vec3( _oCzV.y );
+    vec3 _UaEB = _FCZn * 0.460 * vec3( 1.000, 1.000, 1.000 );
+    vec3 _khBL = vec3( _oCzV.x );
+    vec3 _jZEF = dhhB( _khBL, vec3(uv, 0.).xy, normal, time, _oCzV );
+    vec3 _IiAx = mix( vec3( 0.521, 0.210, 0.210 ), vec3( 0.872, 0.205, 0.223 ), _khBL.x );
+    vec3 _eaWS = vec3( 0.860, 0.730, 0.489 ).xyz;
+    vec3 _ylZT = mix( _eaWS, _IiAx, _FCZn.x );
+    material.smoothness = _UaEB.x;
+    material.bump = _jZEF.x;
+    material.color = _ylZT;
+}
+
+// ---
+
+struct Light {
+    float id;
+    vec3 emission;
+};
+
+struct Ray {
+    vec3 origin;
+    vec3 dir;
+};
+
+// --- IQs distance functions
+// --- https://iquilezles.org/articles/distfunctions
+
+float smin( float a, float b, float k )
+{
+    float res = exp( -k*a ) + exp( -k*b );
+    return -log( res )/k;
+}
+vec3 opBlend( vec3 d1, vec3 d2, float k )
+{
+    vec3 rc;
+    rc.x=smin( d1.x, d2.x, k );
+
+    if ( d1.x < d2.x )
+    {
+        rc.y=d1.y;
+        rc.z=d1.z;
+    } else
+    {
+        rc.y=d2.y;
+        rc.z=d2.z;
+    }
+
+    return rc;
+}
+
+vec3 opU( vec3 d1, vec3 d2 )
+{
+    return (d1.x<d2.x) ? d1 : d2;
+}
+
+vec3 opTwist( vec3 p, float twist )
+{
+    float c = cos(twist*p.z);
+    float s = sin(twist*p.z);
+    mat2  m = mat2(c,-s,s,c);
+    vec3  q = vec3(m*p.xy,p.z);
+    return q;
+}
+
+float opS( float d1, float d2 )
+{
+    return max(-d2,d1);
+}
+
+float sdCylinder( vec3 p, vec2 h )
+{
+    vec2 d = abs(vec2(length(p.xz),p.y)) - h;
+    return min(max(d.x,d.y),0.0) + length(max(d,0.0));
+}
+
+// ---
+
+#define PI 3.1415926535897932384626422832795028841971
+
+#define LIGHT1_POS vec3( 0.5, 0.5, 8 )
+#define LIGHT1_EM vec3( 180*5, 180 *5, 180 *5 )
+
+#define SUN_POS vec3( 0.5, 3.5, 3 )
+#define SUN_EM vec3( 180*5, 180 *5, 180 *5 )
+
+float random() {
+    return rand();
+}
+
+vec2 rand2() {
+    return vec2(rand(), rand());
+}
+
+// --- Map function
+
+vec3 map( vec3 p )
+{
+    vec3 res=vec3( 1000000, -2, -1 ); mat4 mat; vec3 tp, temp;
+    vec3 gResult1, gResult2;
+    gResult1 = vec3( 1000000, -2, -1 );
+    tp=p;
+    gResult1=opU( gResult1, vec3( length( max( abs( tp) - vec3( 399.741, 399.741, 399.741 ), 0.0 ) ) - 0.259, 0, 0 ) );
+    tp=p;
+    tp.y = tp.y + -19.0000;
+    gResult1.x=opS( gResult1.x, length( max( abs( tp) - vec3( 84.000, 3.000, 3.000 ), 0.0 ) ) - 16.000);
+    res=opU( res, gResult1 );
+    tp=p;
+    tp = tp + vec3(-2.0000,-2.0000,-4.0000);
+    res=opU( res, vec3( length( tp ) - 1.000, 1, 3 ) );
+    tp=p;
+    tp = tp + vec3(4.0000,-1.5000,-4.0000);
+    res=opU( res, vec3( length( tp ) - 0.300, 1, 4 ) );
+    gResult1 = vec3( 1000000, -2, -1 );
+    gResult2 = vec3( 1000000, -2, -1 );
+    tp=p;
+    tp.x = tp.x + -0.3542;
+    tp /= vec3( 1.300, 1.300, 1.300 );
+    gResult2=opU( gResult2, vec3( sdCylinder( tp, vec2( 1.000, 0.030) ), 3, 5 ) );
+    tp=p;
+    tp.xy = tp.xy + vec2(-0.3542,-0.1300);
+    tp /= vec3( 1.300, 1.300, 1.300 );
+    vec3 bumpNormal; Material bumpMaterial;
+    material0( p, bumpNormal, 0., bumpMaterial );
+    gResult2 = opBlend( gResult2, vec3( sdCylinder( tp, vec2( 0.800, 0.030) )- bumpMaterial.bump/50., 2, 6 ), 16.7396 );
+    tp=p;
+    tp.xy = tp.xy + vec2(-0.3542,-0.1560);
+    tp /= vec3( 1.300, 1.300, 1.300 );
+    gResult2.x=opS( gResult2.x, sdCylinder( tp, vec2( 0.700, 0.040) ));
+    gResult1=opU( gResult1, gResult2 );
+    gResult2 = vec3( 1000000, -2, -1 );
+    tp=p;
+    mat=mat4(0.3323,-0.1160,-0.9360,0.0000
+    ,0.3295,0.9442,0.0000,0.0000
+    ,0.8838,-0.3084,0.3519,0.0000
+    ,-0.4378,-0.8764,0.3315,1.0000);
+    tp=vec4(mat * vec4(tp, 1.0)).xyz;
+    tp /= vec3( 1.495, 1.495, 1.495 );
+    material0( p, bumpNormal, 0., bumpMaterial );
+    gResult2=opU( gResult2, vec3( length( tp ) - 0.600- bumpMaterial.bump/50., 2, 9 ) );
+    tp=p;
+    tp.xz = mat2(0.8400,-0.5426,0.5426,0.8400) * tp.xz;
+    tp = tp + vec3(-0.3472,-1.4950,-2.3441);
+    tp /= vec3( 1.495, 1.495, 1.495 );
+    gResult2.x=opS( gResult2.x, length( tp ) - 1.280);
+    tp=p;
+    mat=mat4(0.8400,0.0942,-0.5344,0.0000
+    ,-0.0000,0.9848,0.1736,0.0000
+    ,0.5426,-0.1459,0.8272,0.0000
+    ,-0.2975,-0.9904,0.0205,1.0000);
+    tp=vec4(mat * vec4(tp, 1.0)).xyz;
+    tp /= vec3( 1.495, 1.495, 1.495 );
+    gResult2.x=opS( gResult2.x, sdCylinder( tp, vec2( 0.630, 0.030) ));
+    tp=p;
+    tp.xz = mat2(0.8400,-0.5426,0.5426,0.8400) * tp.xz;
+    tp = tp + vec3(-0.2975,-0.9717,0.1922);
+    tp /= vec3( 1.495, 1.495, 1.495 );
+    gResult2.x=opS( gResult2.x, length( tp ) - 0.550);
+    tp=p;
+    tp.xz = mat2(0.8400,-0.5426,0.5426,0.8400) * tp.xz;
+    tp = tp + vec3(-0.2975,-0.9717,0.1922);
+    tp /= vec3( 1.495, 1.495, 1.495 );
+    gResult2=opU( gResult2, vec3( length( tp ) - 0.520, 0, 13 ) );
+    gResult1=opU( gResult1, gResult2 );
+    res=opU( res, gResult1 );
+    return res;
+}
+
+// --- Normal
+
+vec3 calcNormal( in vec3 pos )
+{
+    vec2 e = vec2(1.0,-1.0)*0.5773*0.0005;
+    return normalize( e.xyy*map( pos + e.xyy ).x +
+                    e.yyx*map( pos + e.yyx ).x +
+                    e.yxy*map( pos + e.yxy ).x +
+                    e.xxx*map( pos + e.xxx ).x );
+}
+
+// --- IQs raycasting
+
+vec3 castRay( in vec3 ro, in vec3 rd, in float tmin, in float tmax )
+{
+    float t=tmin;
+    float m=-1.0, id=-1.0;
+
+    //for( int i=0; i<100; i++ )
+    while (t<tmax)
+    {
+        float precis = 0.0005*t;
+
+        vec3 res = map( ro+rd*t );
+        if( t<precis || t>tmax ) break;
+        t += res.x;
+        m = res.y;
+        id = res.z;
+    }
+
+    if( t>tmax ) { m=-1.0; id=-1.0; }
+    return vec3( t, m, id );
+}
+
+// --- PBR / GGX
+
+float ggx(vec3 N, vec3 V, vec3 L, float roughness, float F0)
+{
+    vec3 H = normalize(V + L);
+
+    float dotLH = max(dot(L, H), 0.0);
+    float dotNH = max(dot(N, H), 0.0);
+    float dotNL = max(dot(N, L), 0.0);
+    float dotNV = max(dot(N, V), 0.0);
+
+    float alpha = roughness * roughness + 0.0001;
+
+    // GGX normal distribution
+    float alphaSqr = alpha * alpha;
+    float denom = dotNH * dotNH * (alphaSqr - 1.0) + 1.0;
+    float D = alphaSqr / (denom * denom);
+
+    // Fresnel term approximation
+    float F_a = 1.0;
+    float F_b = pow(1.0 - dotLH, 5.0);
+    float F = mix(F_b, F_a, F0);
+
+    // GGX self shadowing term
+    float k = (alpha + 2.0 * roughness + 1.0) / 8.0;
+    float G = dotNL / (mix(dotNL, 1.0, k) * mix(dotNV, 1.0, k));
+
+    // '* dotNV' - Is canceled due to normalization
+    // '/ dotLN' - Is canceled due to lambert
+    // '/ dotNV' - Is canceled due to G
+    return max(0.0, min(10.0, D * F * G / 4.0));
+}
+
+// --- Light Sampling
+
+vec3 angleToDir(vec3 n, float theta, float phi)
+{
+    float sinPhi = sin(phi);
+    float cosPhi = cos(phi);
+    vec3 w = normalize(n);
+    vec3 u = normalize(cross(w.yzx, w));
+    vec3 v = cross(w, u);
+    return (u * cos(theta) + v * sin(theta)) * sinPhi + w * cosPhi;
+}
+
+vec3 jitter(vec3 d, float phi, float sina, float cosa) {
+    vec3 w = normalize(d), u = normalize(cross(w.yzx, w)), v = cross(w, u);
+    return (u*cos(phi) + v*sin(phi)) * sina + w * cosa;
+}
+
+vec3 sampleLightBRDF( in vec3 hitOrigin, in vec3 hitNormal, in vec3 rayDir, in Material material  )
+{
+    vec3 brdf = vec3( 0 );
+    vec3 s = vec3( 0 );
+
+    Light light;
+    light.id = 3.0;
+    light.emission = LIGHT1_EM;
+
+    vec3 l0 = vec3( 2, 2, 4 ) - hitOrigin;
+
+    float cos_a_max = sqrt(1. - clamp(0.5 * 0.5 / dot(l0, l0), 0., 1.));
+    float cosa = mix(cos_a_max, 1., random());
+    vec3 l = jitter(l0, 2.*PI*random(), sqrt(1. - cosa*cosa), cosa);
+
+    vec3 lightHit = castRay( hitOrigin, l, 0.001, 100.0 );
+    if ( lightHit.z == light.id )
+    {
+        float roughness = 1.0 - material.smoothness * material.smoothness;
+        float metallic = material.metallic;
+
+        float omega = 2. * PI * (1. - cos_a_max);
+        brdf += ((light.emission * clamp(ggx( hitNormal, rayDir, l, roughness, metallic),0.,1.) * omega) / PI);
+    }
+
+    light.id = 4.0;
+
+    l0 = vec3( -4, 1.5, 4 ) - hitOrigin;
+
+    cos_a_max = sqrt(1. - clamp(0.5 * 0.5 / dot(l0, l0), 0., 1.));
+    cosa = mix(cos_a_max, 1., random());
+    l = jitter(l0, 2.*PI*random(), sqrt(1. - cosa*cosa), cosa);
+
+    lightHit = castRay( hitOrigin, l, 0.001, 100.0 );
+    if ( lightHit.z == light.id )
+    {
+        float roughness = 1.0 - material.smoothness * material.smoothness;
+        float metallic = material.metallic;
+
+        float omega = 2. * PI * (1. - cos_a_max);
+        brdf += ((light.emission * clamp(ggx( hitNormal, rayDir, l, roughness, metallic),0.,1.) * omega) / PI);
+    }
+
+    return brdf;
+}
+
+vec3 sampleLightE( in vec3 hitOrigin, in vec3 hitNormal, in vec3 rayDir, in Material material  )
+{
+    vec3 e = vec3( 0 );
+    vec3 s = vec3( 0 );
+
+    Light light;
+    light.id = 3.0;
+    light.emission = LIGHT1_EM;
+
+    vec3 l0 = LIGHT1_POS - hitOrigin;
+
+    float cos_a_max = sqrt(1. - clamp(0.5 * 0.5 / dot(l0, l0), 0., 1.));
+    float cosa = mix(cos_a_max, 1., random());
+    vec3 l = jitter(l0, 2.*PI*random(), sqrt(1. - cosa*cosa), cosa);
+
+    vec3 lightHit = castRay( hitOrigin, l, 0.001, 100.0 );
+    if ( lightHit.z == light.id )
+    {
+        float omega = 2. * PI * (1. - cos_a_max);
+        vec3 n = normalize(hitOrigin - LIGHT1_POS);
+        e += ((light.emission * clamp(dot(l, n),0.,1.) * omega) / PI);
+    }
+
+    light.id = 4.0;
+
+    l0 = vec3( -4, 1.5, 4 ) - hitOrigin;
+
+    cos_a_max = sqrt(1. - clamp(0.5 * 0.5 / dot(l0, l0), 0., 1.));
+    cosa = mix(cos_a_max, 1., random());
+    l = jitter(l0, 2.*PI*random(), sqrt(1. - cosa*cosa), cosa);
+
+    lightHit = castRay( hitOrigin, l, 0.001, 100.0 );
+    if ( lightHit.z == light.id )
+    {
+        float omega = 2. * PI * (1. - cos_a_max);
+        vec3 n = normalize(hitOrigin - vec3( -4, 1.5, 4 ));
+        e += ((light.emission * clamp(dot(l, n),0.,1.) * omega) / PI);
+    }
+
+    return e;
+}
+
+// --- Calculate the color for the given ray
+
+vec4 getColor( in Ray ray )
+{
+    vec4 tcol = vec4(1,0,0,0);
+    vec4 fcol = vec4(1.0);
+
+    for (int depth = 0; depth < PATH_DEPTH; depth += 1)
+    {
+        Material material;
+        vec3 normal;
+
+        vec3 hit = castRay( ray.origin, ray.dir, 0.001, 100.0 );
+
+        if ( hit.y >= 0.0 ) {
+            vec3 hitOrigin = ray.origin + ray.dir * hit.x;
+            normal = calcNormal( hitOrigin );
+
+	        material.emission = vec3( 0 );
+    	    material.specularColor = vec3( 1 );
+        	material.specularAmount = 0.;
+
+
+            if ( hit.y == 0.0 ) {
+            	material.type = 0;
+            	material.color = vec3( 0.996, 0.929, 0.929 );
+            	material.metallic = 0.;
+            	material.smoothness = 0.;
+            	material.reflectance = 1.;
+        	} else
+        	if ( hit.y == 1.0 ) {
+            	material.type = 2;
+            	material.emission = vec3( 200 );
+        	} else
+        	if ( hit.y == 2.0 ) {
+            	material0( hitOrigin, normal, 0., material );
+            } else
+            if ( hit.y == 3.0 ) {
+                material.type = 0;
+                material.color = vec3( 1 );
+                material.metallic = 0.0;
+                material.smoothness = 0.4;
+                material.reflectance = 1.;
+            }
+
+            if ( material.type == 0 )
+            {
+                // PBR
+
+                float E = 1.;
+                float roughness = 1.0 - material.smoothness * material.smoothness;
+                float alpha = roughness * roughness;
+                float metallic = material.metallic;
+                float reflectance = material.reflectance;
+                float specular = material.specularAmount;
+                float diffuse = 1.0 - specular;
+                vec4 color = vec4( material.color * diffuse + material.specularColor * specular, 1.0 );
+
+                vec3 brdf = vec3(0);
+
+                if ( random() < reflectance)
+                {
+                    vec3 brdf = sampleLightBRDF( hitOrigin, normal, ray.dir, material );
+
+                    vec2 rand = rand2();
+                    float xsi_1 = rand.x;
+                    float xsi_2 = rand.y;
+                    float phi = atan((alpha * sqrt(xsi_1)) / sqrt(1.0 - xsi_1));
+                    float theta = 2.0 * PI * xsi_2;
+                    vec3 direction = angleToDir(normal, theta, phi);
+
+                    ray = Ray( hitOrigin, direction );
+
+                    tcol += fcol * vec4( material.emission, 1.0 ) * E + fcol * color * vec4( brdf, 1.0 );
+                    fcol *= color;
+                } else
+                {
+                    float r2 = random();
+                    vec3 d = jitter(normal, 2.*PI*random(), sqrt(r2), sqrt(1. - r2));
+
+                    vec3 e = sampleLightE( hitOrigin, normal, ray.dir, material );
+
+                    float E = 1.;
+
+                    ray = Ray( hitOrigin, d );
+
+                    tcol += fcol * vec4( material.emission, 1.0 ) * E + fcol * color * vec4( e, 1.0 );
+                    fcol *= color;
+                }
+            } /*else
+            if ( material.type == 1 )
+            {
+                // --- Dielectric - material.ior is the index of refraction
+                // --- Based on this smallpt implementation https://www.shadertoy.com/view/MsySzd
+
+                vec3 nl = dot(normal,ray.dir) < 0.0 ? normal : normal * -1.0;
+                float specular = material.specularAmount;
+                float diffuse = 1.0 - specular;
+                vec4 color = vec4( material.color * diffuse + material.specularColor * specular, 1.0 );
+                fcol *= color;
+
+                // Ideal dielectric REFRACTION
+                Ray reflRay = Ray( hitOrigin, ray.dir - normal * 2.0 * dot(normal,ray.dir));
+                float into = dot(normal,nl) > 0.0;                // Ray from outside going in?
+
+                float nc = 1.0;   // IOR of air
+                float nt = material.ior; // IOR of solid
+                float nnt = into == 1.0 ? nc / nt : nt / nc;
+                float ddn = dot(ray.dir , nl);
+                float cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
+
+                if (cos2t < 0.0)    // Total internal reflection
+                {
+                    tcol += fcol * vec4( material.emission, 1.0);
+                    ray = reflRay;
+                } else {
+                    vec3 tdir = normalize(ray.dir * nnt - normal * ((into == 1.0 ? 1.0 : -1.0) * (ddn * nnt + sqrt(cos2t))));
+
+                    float a = nt - nc;
+                    float b = nt + nc;
+                    float R0 = a * a / (b * b);
+                    float c = 1.0 - (into == 1.0 ? -ddn : dot(tdir,normal));
+                    float Re = R0 + (1.0 - R0) * c * c * c * c * c;
+                    float Tr = 1.0 - Re;
+                    float P = .25 + .5 * Re;
+                    float RP = Re / P;
+                    float TP = Tr / (1.0 - P);
+
+                    if( random() < P )
+                    {
+                        vec3 brdf = sampleLightBRDF( hitOrigin, normal, ray.dir, material );
+
+                        ray = reflRay;
+                        fcol = fcol * RP;
+                        tcol += fcol * vec4( material.emission, 1.0 ) + fcol * vec4( brdf, 1.0 );
+
+                    } else {
+
+                        vec3 e = sampleLightE( hitOrigin, normal, ray.dir, material );
+
+                        ray = Ray( hitOrigin, normalize( tdir ) );
+                        fcol = fcol * TP;
+                        tcol += fcol * vec4( material.emission, 1.0 ) + fcol * vec4( e, 1.0 );
+                    }
+                }
+            } else*/
+            if ( material.type == 2 )
+            {
+                // --- Light
+                return vec4( material.emission, 1.0 );
+            }
+        } else {
+
+            vec4 backColor = vec4( 0.322, 0.322, 0.322, 01.0 );
+            return tcol + fcol * backColor;
+        }
+    }
+
+    return tcol;
+}
+
+vec3 uOrigin = vec3( 0.08, 0.5, 2.8 );
+vec3 uLookAt = vec3( 0.4, 0.7, 0 );
+
+export vec4 shader(vec2 coord, vec2 resolution) {
+    vec2 uv = coord.xy / resolution.xy;
+
+    float ratio = resolution.x / resolution.y;
+    vec2 pixelSize = vec2(1.0) / resolution.xy;
+
+    // --- Camera
+
+    const float fov = 80.0;
+    float halfWidth = tan(radians(fov) * 0.5);
+    float halfHeight = halfWidth / ratio;
+
+    vec3 upVector = vec3(0.0, 1.0, 0.0);
+
+    vec3 w = normalize(uOrigin - uLookAt);
+    vec3 u = cross(upVector, w);
+    vec3 v = cross(w, u);
+
+    vec3 lowerLeft = uOrigin - halfWidth * u - halfHeight * v - w;
+    vec3 horizontal = u * halfWidth * 2.0;
+    vec3 vertical = v * halfHeight * 2.0;
+    vec3 dir = lowerLeft - uOrigin;
+    vec2 rand = rand2();
+
+    dir += horizontal * (pixelSize.x * rand.x + uv.x);
+    dir += vertical * (pixelSize.y * rand.y + uv.y);
+
+    // ---
+
+    vec3 color = getColor( Ray( uOrigin, normalize( dir ) ) ).xyz;
+    //color = clamp( color, 0., 1. );
+    return vec4( color, 1.0 );
+}

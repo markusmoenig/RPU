@@ -266,7 +266,7 @@ impl Visitor for CompileVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         print!("-- Print ");
         expression.accept(self, ctx)?;
         println!(" --");
@@ -279,7 +279,7 @@ impl Visitor for CompileVisitor {
         list: &[Box<Stmt>],
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let instr = "(block".to_string();
         ctx.add_wat(&instr);
         ctx.add_indention();
@@ -309,7 +309,7 @@ impl Visitor for CompileVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         expression.accept(self, ctx)
     }
 
@@ -320,17 +320,19 @@ impl Visitor for CompileVisitor {
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let v = expression.accept(self, ctx)?;
 
         // Compare incoming expression type with the static type.
         if v.to_type() != static_type.to_type() {
-            return Err(format!(
-                "Variable '{}' has type '{}', but expression has type '{}' {}",
-                ctx.remove_trailing_var_identifier(name),
-                static_type.to_type(),
-                v.to_type(),
-                loc.describe()
+            return Err(RPUError::loc(
+                format!(
+                    "Variable '{}' has type '{}', but expression has type '{}'",
+                    ctx.remove_trailing_var_identifier(name),
+                    static_type.to_type(),
+                    v.to_type()
+                ),
+                loc,
             ));
         }
 
@@ -483,7 +485,7 @@ impl Visitor for CompileVisitor {
         expression: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let mut v = expression.accept(self, ctx)?;
         let incoming_components = v.components();
 
@@ -491,12 +493,14 @@ impl Visitor for CompileVisitor {
             // Use the type of the variable
             if let Some(vv) = self.environment.get(&name) {
                 if swizzle.is_empty() && incoming_components != vv.components() {
-                    return Err(format!(
-                        "Variable '{}' has {} component(s), but expression has {} {}",
-                        ctx.remove_trailing_var_identifier(&name),
-                        v.components(),
-                        incoming_components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!(
+                            "Variable '{}' has {} component(s), but expression has {}",
+                            ctx.remove_trailing_var_identifier(&name),
+                            v.components(),
+                            incoming_components
+                        ),
+                        loc,
                     ));
                 }
                 v = vv;
@@ -504,21 +508,25 @@ impl Visitor for CompileVisitor {
 
             if swizzle.is_empty() {
                 if incoming_components != v.components() {
-                    return Err(format!(
-                        "Variable '{}' has {} component(s), but expression has {} {}",
-                        ctx.remove_trailing_var_identifier(&name),
-                        v.components(),
-                        incoming_components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!(
+                            "Variable '{}' has {} component(s), but expression has {}",
+                            ctx.remove_trailing_var_identifier(&name),
+                            v.components(),
+                            incoming_components
+                        ),
+                        loc,
                     ));
                 }
             } else if incoming_components != swizzle.len() {
-                return Err(format!(
-                    "Variable '{}' has {} swizzle, but expression has {} component(s) {}",
-                    ctx.remove_trailing_var_identifier(&name),
-                    swizzle.len(),
-                    incoming_components,
-                    loc.describe()
+                return Err(RPUError::loc(
+                    format!(
+                        "Variable '{}' has {} swizzle, but expression has {} component(s)",
+                        ctx.remove_trailing_var_identifier(&name),
+                        swizzle.len(),
+                        incoming_components
+                    ),
+                    loc,
                 ));
             }
         } else {
@@ -602,11 +610,13 @@ impl Visitor for CompileVisitor {
                                 ctx.add_wat(&instr);
                             }
                             _ => {
-                                return Err(format!(
-                                    "Swizzle '{}' out of range for '{}' {}",
-                                    ctx.deswizzle(*s),
-                                    name,
-                                    loc.describe()
+                                return Err(RPUError::loc(
+                                    format!(
+                                        "Swizzle '{}' out of range for '{}'",
+                                        ctx.deswizzle(*s),
+                                        name
+                                    ),
+                                    loc,
                                 ))
                             }
                         }
@@ -689,11 +699,13 @@ impl Visitor for CompileVisitor {
                                 ctx.add_wat(&instr);
                             }
                             _ => {
-                                return Err(format!(
-                                    "Swizzle '{}' out of range for '{}' {}",
-                                    ctx.deswizzle(*s),
-                                    name,
-                                    loc.describe()
+                                return Err(RPUError::loc(
+                                    format!(
+                                        "Swizzle '{}' out of range for '{}'",
+                                        ctx.deswizzle(*s),
+                                        name
+                                    ),
+                                    loc,
                                 ))
                             }
                         }
@@ -797,11 +809,13 @@ impl Visitor for CompileVisitor {
                                 ctx.add_wat(&instr);
                             }
                             _ => {
-                                return Err(format!(
-                                    "Swizzle '{}' out of range for '{}' {}",
-                                    ctx.deswizzle(*s),
-                                    name,
-                                    loc.describe()
+                                return Err(RPUError::loc(
+                                    format!(
+                                        "Swizzle '{}' out of range for '{}'",
+                                        ctx.deswizzle(*s),
+                                        name
+                                    ),
+                                    loc,
                                 ))
                             }
                         }
@@ -834,16 +848,18 @@ impl Visitor for CompileVisitor {
         field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let instr = String::new();
         let mut rc = ASTValue::None;
 
         if swizzle.len() > 4 {
-            return Err(format!(
-                "Maximal swizzle length is 4, got {} for '{}' {}",
-                swizzle.len(),
-                name,
-                loc.describe()
+            return Err(RPUError::loc(
+                format!(
+                    "Maximal swizzle length is 4, got {} for '{}'",
+                    swizzle.len(),
+                    name
+                ),
+                loc,
             ));
         }
 
@@ -946,7 +962,7 @@ impl Visitor for CompileVisitor {
         } else if let Some(ASTValue::Function(name, args, body)) = self.functions.get(&name) {
             rc = ASTValue::Function(name.clone(), args.clone(), body.clone());
         } else {
-            return Err(format!("Unknown identifier '{}' {}", name, loc.describe()));
+            return Err(RPUError::loc(format!("Unknown identifier '{}'", name), loc));
         }
 
         if !instr.is_empty() {
@@ -963,15 +979,17 @@ impl Visitor for CompileVisitor {
         _field_path: &[String],
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let rc;
         let instr;
 
         if swizzle.len() > 4 {
-            return Err(format!(
-                "Maximal swizzle length is 4, got {} for constant {}",
-                swizzle.len(),
-                loc.describe()
+            return Err(RPUError::loc(
+                format!(
+                    "Maximal swizzle length is 4, got {} for constant",
+                    swizzle.len()
+                ),
+                loc,
             ));
         }
 
@@ -1008,10 +1026,9 @@ impl Visitor for CompileVisitor {
                 }
 
                 if to_go != 0 {
-                    return Err(format!(
-                        "Not enough components for '{}' {}",
-                        &value.to_type(),
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Not enough components for '{}'", &value.to_type()),
+                        loc,
                     ));
                 }
                 if !swizzle.is_empty() {
@@ -1045,10 +1062,9 @@ impl Visitor for CompileVisitor {
                 }
 
                 if to_go != 0 {
-                    return Err(format!(
-                        "Not enough components for '{}' {}",
-                        &value.to_type(),
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Not enough components for '{}'", &value.to_type()),
+                        loc,
                     ));
                 }
                 if !swizzle.is_empty() {
@@ -1087,10 +1103,9 @@ impl Visitor for CompileVisitor {
                 }
 
                 if to_go != 0 {
-                    return Err(format!(
-                        "Not enough components for '{}' {}",
-                        &value.to_type(),
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Not enough components for '{}'", &value.to_type()),
+                        loc,
                     ));
                 }
                 if !swizzle.is_empty() {
@@ -1178,7 +1193,7 @@ impl Visitor for CompileVisitor {
             }
 
             _ => {
-                return Err(format!("Unknown value {}", loc.describe()));
+                return Err(RPUError::loc("Unknown value", loc));
             }
         };
 
@@ -1194,7 +1209,7 @@ impl Visitor for CompileVisitor {
         expr: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let v = expr.accept(self, ctx)?;
 
         // !, - have the same behavior right now.
@@ -1212,17 +1227,19 @@ impl Visitor for CompileVisitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let left_value = left.accept(self, ctx)?;
         let right_value = right.accept(self, ctx)?;
 
         if left_value.to_type() != right_value.to_type() {
-            return Err(format!(
-                "Type mismatch for '{}' operator: '{}' and '{}' {}",
-                op.describe(),
-                left_value.to_type(),
-                right_value.to_type(),
-                loc.describe(),
+            return Err(RPUError::loc(
+                format!(
+                    "Type mismatch for '{}' operator: '{}' and '{}'",
+                    op.describe(),
+                    left_value.to_type(),
+                    right_value.to_type()
+                ),
+                loc,
             ));
         }
 
@@ -1249,17 +1266,19 @@ impl Visitor for CompileVisitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let left_value = left.accept(self, ctx)?;
         let right_value = right.accept(self, ctx)?;
 
         if left_value.to_type() != right_value.to_type() {
-            return Err(format!(
-                "Type mismatch for '{}' operator: '{}' and '{}' {}",
-                op.describe(),
-                left_value.to_type(),
-                right_value.to_type(),
-                loc.describe(),
+            return Err(RPUError::loc(
+                format!(
+                    "Type mismatch for '{}' operator: '{}' and '{}'",
+                    op.describe(),
+                    left_value.to_type(),
+                    right_value.to_type()
+                ),
+                loc,
             ));
         }
 
@@ -1293,7 +1312,7 @@ impl Visitor for CompileVisitor {
         right: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let left_type = left.accept(self, ctx)?;
         let right_type = right.accept(self, ctx)?;
         let rc;
@@ -1763,12 +1782,14 @@ impl Visitor for CompileVisitor {
                         format!("(call $_rpu_mat2_mul_vec2_f{})", ctx.pr)
                     }
                     _ => {
-                        return Err(format!(
-                            "Invalid operator '{}' for types '{}' '{}' {}",
-                            op.describe(),
-                            left_type.to_type(),
-                            right_type.to_type(),
-                            loc.describe()
+                        return Err(RPUError::loc(
+                            format!(
+                                "Invalid operator '{}' for types '{}' '{}'",
+                                op.describe(),
+                                left_type.to_type(),
+                                right_type.to_type()
+                            ),
+                            loc,
                         ))
                     }
                 }
@@ -1782,12 +1803,14 @@ impl Visitor for CompileVisitor {
                         format!("(call $_rpu_vec2_mul_mat2_f{})", ctx.pr)
                     }
                     _ => {
-                        return Err(format!(
-                            "Invalid operator '{}' for types '{}' '{}' {}",
-                            op.describe(),
-                            left_type.to_type(),
-                            right_type.to_type(),
-                            loc.describe()
+                        return Err(RPUError::loc(
+                            format!(
+                                "Invalid operator '{}' for types '{}' '{}'",
+                                op.describe(),
+                                left_type.to_type(),
+                                right_type.to_type()
+                            ),
+                            loc,
                         ))
                     }
                 }
@@ -1801,12 +1824,14 @@ impl Visitor for CompileVisitor {
                         format!("(call $_rpu_mat3_mul_vec3_f{})", ctx.pr)
                     }
                     _ => {
-                        return Err(format!(
-                            "Invalid operator '{}' for types '{}' '{}' {}",
-                            op.describe(),
-                            left_type.to_type(),
-                            right_type.to_type(),
-                            loc.describe()
+                        return Err(RPUError::loc(
+                            format!(
+                                "Invalid operator '{}' for types '{}' '{}'",
+                                op.describe(),
+                                left_type.to_type(),
+                                right_type.to_type()
+                            ),
+                            loc,
                         ))
                     }
                 }
@@ -1820,12 +1845,14 @@ impl Visitor for CompileVisitor {
                         format!("(call $_rpu_vec3_mul_mat3_f{})", ctx.pr)
                     }
                     _ => {
-                        return Err(format!(
-                            "Invalid operator '{}' for types '{}' '{}' {}",
-                            op.describe(),
-                            left_type.to_type(),
-                            right_type.to_type(),
-                            loc.describe()
+                        return Err(RPUError::loc(
+                            format!(
+                                "Invalid operator '{}' for types '{}' '{}'",
+                                op.describe(),
+                                left_type.to_type(),
+                                right_type.to_type()
+                            ),
+                            loc,
                         ))
                     }
                 }
@@ -1845,12 +1872,14 @@ impl Visitor for CompileVisitor {
                         format!("(call $_rpu_mat4_mul_vec4_f{})", ctx.pr)
                     }
                     _ => {
-                        return Err(format!(
-                            "Invalid operator '{}' for types '{}' '{}' {}",
-                            op.describe(),
-                            left_type.to_type(),
-                            right_type.to_type(),
-                            loc.describe()
+                        return Err(RPUError::loc(
+                            format!(
+                                "Invalid operator '{}' for types '{}' '{}'",
+                                op.describe(),
+                                left_type.to_type(),
+                                right_type.to_type()
+                            ),
+                            loc,
                         ))
                     }
                 }
@@ -1870,23 +1899,27 @@ impl Visitor for CompileVisitor {
                         format!("(call $_rpu_vec4_mul_mat4_f{})", ctx.pr)
                     }
                     _ => {
-                        return Err(format!(
-                            "Invalid operator '{}' for types '{}' '{}' {}",
-                            op.describe(),
-                            left_type.to_type(),
-                            right_type.to_type(),
-                            loc.describe()
+                        return Err(RPUError::loc(
+                            format!(
+                                "Invalid operator '{}' for types '{}' '{}'",
+                                op.describe(),
+                                left_type.to_type(),
+                                right_type.to_type()
+                            ),
+                            loc,
                         ))
                     }
                 }
             }
             _ => {
-                return Err(format!(
-                    "Invalid types '{}' '{}' for operator '{}' {}",
-                    left_type.to_type(),
-                    right_type.to_type(),
-                    op.describe(),
-                    loc.describe()
+                return Err(RPUError::loc(
+                    format!(
+                        "Invalid types '{}' '{}' for operator '{}'",
+                        left_type.to_type(),
+                        right_type.to_type(),
+                        op.describe()
+                    ),
+                    loc,
                 ))
             }
         };
@@ -1901,7 +1934,7 @@ impl Visitor for CompileVisitor {
         expression: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         expression.accept(self, ctx)
     }
 
@@ -1913,18 +1946,20 @@ impl Visitor for CompileVisitor {
         args: &[Box<Expr>],
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let callee = callee.accept(self, ctx)?;
         let mut rc = ASTValue::None;
 
         if let ASTValue::Function(name, func_args, returns) = callee {
             if func_args.len() != args.len() {
-                return Err(format!(
-                    "Function '{}' expects {} arguments, but {} were provided {}",
-                    name,
-                    func_args.len(),
-                    args.len(),
-                    loc.describe()
+                return Err(RPUError::loc(
+                    format!(
+                        "Function '{}' expects {} arguments, but {} were provided",
+                        name,
+                        func_args.len(),
+                        args.len()
+                    ),
+                    loc,
                 ));
             }
 
@@ -1932,10 +1967,9 @@ impl Visitor for CompileVisitor {
                 let v = args[0].accept(self, ctx)?;
                 let components = v.components();
                 if !(1..=4).contains(&components) {
-                    return Err(format!(
-                        "Invalid number of components {} {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components {}", components),
+                        loc,
                     ));
                 }
                 let func_name = ctx.gen_vec_length(v.components() as u32);
@@ -1946,10 +1980,9 @@ impl Visitor for CompileVisitor {
                 let v = args[0].accept(self, ctx)?;
                 let components = v.components();
                 if !(1..=4).contains(&components) {
-                    return Err(format!(
-                        "Invalid number of components {} {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components {}", components),
+                        loc,
                     ));
                 }
                 let func_name = ctx.gen_vec_normalize(v.components() as u32);
@@ -1958,10 +1991,7 @@ impl Visitor for CompileVisitor {
                 rc = v;
             } else if name == "rand" {
                 if !args.is_empty() {
-                    return Err(format!(
-                        "'rand' does not take any arguments {}",
-                        loc.describe()
-                    ));
+                    return Err(RPUError::loc("'rand' does not take any arguments", loc));
                 }
                 let instr = "(call $_rpu_rand)";
                 ctx.add_wat(instr);
@@ -1985,17 +2015,15 @@ impl Visitor for CompileVisitor {
                 let v = args[0].accept(self, ctx)?;
                 let components = v.components();
                 if !(1..=4).contains(&components) {
-                    return Err(format!(
-                        "Invalid number of components '{}' for {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components '{}'", components),
+                        loc,
                     ));
                 }
                 if !v.is_float_based() {
-                    return Err(format!(
-                        "'{}' expects a float based parameter {}",
-                        name,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("'{}' expects a float based parameter", name),
+                        loc,
                     ));
                 }
                 let func_name = ctx.gen_vec_operation(v.components() as u32, &name);
@@ -2011,37 +2039,36 @@ impl Visitor for CompileVisitor {
                 let v = args[0].accept(self, ctx)?;
 
                 if func_args.len() != args.len() {
-                    return Err(format!(
-                        "Function '{}' expects {} arguments, but {} were provided {}",
-                        name,
-                        func_args.len(),
-                        args.len(),
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!(
+                            "Function '{}' expects {} arguments, but {} were provided",
+                            name,
+                            func_args.len(),
+                            args.len()
+                        ),
+                        loc,
                     ));
                 }
 
                 let components = v.components();
                 if !(1..=4).contains(&components) {
-                    return Err(format!(
-                        "Invalid number of components '{}' for {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components '{}'", components),
+                        loc,
                     ));
                 }
                 if !v.is_float_based() {
-                    return Err(format!(
-                        "'{}' expects a float based parameter {}",
-                        name,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("'{}' expects a float based parameter", name),
+                        loc,
                     ));
                 }
 
                 let b = args[1].accept(self, ctx)?;
                 if b.components() != 1 {
-                    return Err(format!(
-                        "Invalid second parameter for '{}' (scalars only) {}",
-                        name,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid second parameter for '{}' (scalars only)", name),
+                        loc,
                     ));
                 }
 
@@ -2053,46 +2080,44 @@ impl Visitor for CompileVisitor {
                 let v = args[0].accept(self, ctx)?;
 
                 if func_args.len() != args.len() {
-                    return Err(format!(
-                        "Function '{}' expects {} arguments, but {} were provided {}",
-                        name,
-                        func_args.len(),
-                        args.len(),
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!(
+                            "Function '{}' expects {} arguments, but {} were provided",
+                            name,
+                            func_args.len(),
+                            args.len()
+                        ),
+                        loc,
                     ));
                 }
 
                 let components = v.components();
                 if !(1..=4).contains(&components) {
-                    return Err(format!(
-                        "Invalid number of components '{}' for {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components '{}'", components),
+                        loc,
                     ));
                 }
                 if !v.is_float_based() {
-                    return Err(format!(
-                        "'{}' expects a float based parameter {}",
-                        name,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("'{}' expects a float based parameter", name),
+                        loc,
                     ));
                 }
 
                 let b = args[1].accept(self, ctx)?;
                 if b.components() != 1 {
-                    return Err(format!(
-                        "Invalid second parameter for '{}' (scalars only) {}",
-                        name,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid second parameter for '{}' (scalars only)", name),
+                        loc,
                     ));
                 }
 
                 let _ = args[2].accept(self, ctx)?;
                 if b.components() != 1 {
-                    return Err(format!(
-                        "Invalid second parameter for '{}' (scalars only) {}",
-                        name,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid second parameter for '{}' (scalars only)", name),
+                        loc,
                     ));
                 }
 
@@ -2104,29 +2129,28 @@ impl Visitor for CompileVisitor {
                 let a1 = args[0].accept(self, ctx)?;
                 let components = a1.components();
                 if !(1..=4).contains(&components) {
-                    return Err(format!(
-                        "Invalid number of components {} {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components {}", components),
+                        loc,
                     ));
                 }
                 let a2 = args[1].accept(self, ctx)?;
 
                 if a1.to_type() != a2.to_type() || !a1.is_float_based() {
-                    return Err(format!(
-                        "'smoothstep' expects the first two arguments to be the same float type, but '{}' and '{}' were provided {}",
+                    return Err(RPUError::loc(format!(
+                        "'smoothstep' expects the first two arguments to be the same float type, but '{}' and '{}' were provided",
                         a1.to_type(),
-                        a2.to_type(),
-                        loc.describe()
+                        a2.to_type()),
+                        loc
                     ));
                 }
 
                 let a3 = args[2].accept(self, ctx)?;
                 if a3.to_type() != "float" {
-                    return Err(format!(
-                        "'smoothstep' expects the third argument to be of type 'float', but '{}' was provided {}",
-                        a3.to_type(),
-                        loc.describe()
+                    return Err(RPUError::loc(format!(
+                        "'smoothstep' expects the third argument to be of type 'float', but '{}' was provided",
+                        a3.to_type()),
+                        loc
                     ));
                 }
 
@@ -2139,29 +2163,28 @@ impl Visitor for CompileVisitor {
                 let a1 = args[0].accept(self, ctx)?;
                 let components = a1.components();
                 if !(1..=4).contains(&components) {
-                    return Err(format!(
-                        "Invalid number of components {} {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components {}", components),
+                        loc,
                     ));
                 }
                 let a2 = args[1].accept(self, ctx)?;
 
                 if a1.to_type() != a2.to_type() || !a1.is_float_based() {
-                    return Err(format!(
-                        "'mix' expects the first two arguments to be the same float type, but '{}' and '{}' were provided {}",
+                    return Err(RPUError::loc(format!(
+                        "'mix' expects the first two arguments to be the same float type, but '{}' and '{}' were provided",
                         a1.to_type(),
-                        a2.to_type(),
-                        loc.describe()
+                        a2.to_type()),
+                        loc
                     ));
                 }
 
                 let a3 = args[2].accept(self, ctx)?;
                 if a3.to_type() != "float" {
-                    return Err(format!(
-                        "'mix' expects the third argument to be of type 'float', but '{}' was provided {}",
-                        a3.to_type(),
-                        loc.describe()
+                    return Err(RPUError::loc(format!(
+                        "'mix' expects the third argument to be of type 'float', but '{}' was provided",
+                        a3.to_type()),
+                        loc
                     ));
                 }
 
@@ -2174,20 +2197,19 @@ impl Visitor for CompileVisitor {
                 let a1 = args[0].accept(self, ctx)?;
                 let components = a1.components();
                 if !(2..=4).contains(&components) {
-                    return Err(format!(
-                        "Invalid number of components {} for 'dot' {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components {} for 'dot'", components),
+                        loc,
                     ));
                 }
                 let a2 = args[1].accept(self, ctx)?;
 
                 if a1.to_type() != a2.to_type() || !a1.is_float_based() {
-                    return Err(format!(
-                        "'dot' expects the first two arguments to be the same float type, but '{}' and '{}' were provided {}",
+                    return Err(RPUError::loc(format!(
+                        "'dot' expects the first two arguments to be the same float type, but '{}' and '{}' were provided",
                         a1.to_type(),
-                        a2.to_type(),
-                        loc.describe()
+                        a2.to_type()),
+                        loc
                     ));
                 }
 
@@ -2200,20 +2222,19 @@ impl Visitor for CompileVisitor {
                 let a1 = args[0].accept(self, ctx)?;
                 let components = a1.components();
                 if components != 3 {
-                    return Err(format!(
-                        "Invalid number of components {} for 'dot' {}",
-                        components,
-                        loc.describe()
+                    return Err(RPUError::loc(
+                        format!("Invalid number of components {} for 'dot'", components),
+                        loc,
                     ));
                 }
                 let a2 = args[1].accept(self, ctx)?;
 
                 if a1.to_type() != a2.to_type() || !a1.is_float_based() {
-                    return Err(format!(
-                        "'dot' expects the first two arguments to be the same float type, but '{}' and '{}' were provided {}",
+                    return Err(RPUError::loc(format!(
+                        "'dot' expects the first two arguments to be the same float type, but '{}' and '{}' were provided",
                         a1.to_type(),
-                        a2.to_type(),
-                        loc.describe()
+                        a2.to_type()),
+                        loc
                     ));
                 }
 
@@ -2226,13 +2247,13 @@ impl Visitor for CompileVisitor {
                 for index in 0..args.len() {
                     let rc = args[index].accept(self, ctx)?;
                     if rc.to_type() != func_args[index].to_type() {
-                        return Err(format!(
-                        "Function '{}' expects argument {} to be of type '{}', but '{}' was provided {}",
+                        return Err(RPUError::loc(format!(
+                        "Function '{}' expects argument {} to be of type '{}', but '{}' was provided",
                         name,
                         index,
                         func_args[index].to_type(),
-                        rc.to_type(),
-                        loc.describe()
+                        rc.to_type()),
+                        loc
                     ));
                     }
                 }
@@ -2257,7 +2278,7 @@ impl Visitor for CompileVisitor {
         fields: &[(String, ASTValue)],
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let mut size: usize = 0;
 
         for (_, field) in fields {
@@ -2281,7 +2302,7 @@ impl Visitor for CompileVisitor {
         export: &bool,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         self.functions.insert(
             name.to_string(),
             ASTValue::Function(name.to_string(), args.to_vec(), Box::new(returns.clone())),
@@ -2414,10 +2435,9 @@ impl Visitor for CompileVisitor {
 
         if let Some(ret) = self.environment.get_return() {
             if ret.to_type() != "void" && last_value.to_type() != ret.to_type() {
-                return Err(format!(
-                    "Function '{}' does not end with a 'return' statement {}",
-                    name,
-                    loc.describe()
+                return Err(RPUError::loc(
+                    format!("Function '{}' does not end with a 'return' statement", name),
+                    loc,
                 ));
             }
         }
@@ -2438,16 +2458,18 @@ impl Visitor for CompileVisitor {
         expr: &Expr,
         loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let rc = expr.accept(self, ctx)?;
 
         if let Some(ret) = self.environment.get_return() {
             if rc.to_type() != ret.to_type() {
-                return Err(format!(
-                    "Invalid return type '{}', should be '{}' {}",
-                    rc.to_type(),
-                    ret.to_type(),
-                    loc.describe()
+                return Err(RPUError::loc(
+                    format!(
+                        "Invalid return type '{}', should be '{}'",
+                        rc.to_type(),
+                        ret.to_type()
+                    ),
+                    loc,
                 ));
             }
         }
@@ -2464,7 +2486,7 @@ impl Visitor for CompileVisitor {
         else_stmt: &Option<Box<Stmt>>,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         ctx.add_line();
         let _rc = cond.accept(self, ctx)?;
 
@@ -2518,7 +2540,7 @@ impl Visitor for CompileVisitor {
         else_expr: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         ctx.add_line();
         let _rc = cond.accept(self, ctx)?;
 
@@ -2596,7 +2618,7 @@ impl Visitor for CompileVisitor {
         body_stmt: &Stmt,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         ctx.add_line();
 
         for i in init {
@@ -2649,7 +2671,7 @@ impl Visitor for CompileVisitor {
         body_stmt: &Stmt,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         ctx.add_line();
 
         let instr = "(block".to_string();
@@ -2686,7 +2708,7 @@ impl Visitor for CompileVisitor {
         Ok(ASTValue::None)
     }
 
-    fn break_stmt(&mut self, _loc: &Location, ctx: &mut Context) -> Result<ASTValue, String> {
+    fn break_stmt(&mut self, _loc: &Location, ctx: &mut Context) -> Result<ASTValue, RPUError> {
         if let Some(d) = self.break_depth.last() {
             let instr = format!("(br {})", d);
             ctx.add_wat(&instr);
@@ -2702,7 +2724,7 @@ impl Visitor for CompileVisitor {
         right: &Expr,
         _loc: &Location,
         ctx: &mut Context,
-    ) -> Result<ASTValue, String> {
+    ) -> Result<ASTValue, RPUError> {
         let _l = left.accept(self, ctx)?;
         let _r = right.accept(self, ctx)?;
 
