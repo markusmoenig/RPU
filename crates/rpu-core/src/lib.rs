@@ -1,0 +1,2186 @@
+use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectManifest {
+    pub project: ProjectInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectInfo {
+    pub name: String,
+    #[serde(default = "default_version")]
+    pub version: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RpuProject {
+    root: PathBuf,
+    manifest: ProjectManifest,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectPaths {
+    pub manifest: PathBuf,
+    pub scenes: PathBuf,
+    pub scripts: PathBuf,
+    pub assets: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceFile {
+    pub relative_path: PathBuf,
+    pub contents: String,
+    pub modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledProject {
+    pub name: String,
+    pub version: String,
+    pub scenes: Vec<SourceFile>,
+    pub parsed_scenes: Vec<SceneDocument>,
+    pub scripts: Vec<SourceFile>,
+    pub bytecode_scripts: Vec<BytecodeScript>,
+    pub draw_commands: Vec<DrawCommand>,
+    pub assets: Vec<PathBuf>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub script_references: Vec<String>,
+    pub texture_references: Vec<String>,
+    pub fingerprint: ProjectFingerprint,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectFingerprint {
+    pub latest_modified: Option<SystemTime>,
+    pub source_file_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Diagnostic {
+    pub severity: DiagnosticSeverity,
+    pub message: String,
+    pub path: Option<PathBuf>,
+    pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct BytecodeScript {
+    pub path: PathBuf,
+    pub handlers: Vec<BytecodeHandler>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BytecodeHandler {
+    pub event: String,
+    pub ops: Vec<OpCode>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ScriptProperty {
+    X,
+    Y,
+    Pos,
+    Color,
+}
+
+#[derive(Debug, Clone)]
+pub enum ScriptTarget {
+    SelfEntity(ScriptProperty),
+    NamedEntity(String, ScriptProperty),
+}
+
+#[derive(Debug, Clone)]
+pub enum Expr {
+    Number(f32),
+    Dt,
+    Variable(String),
+    Target(ScriptTarget),
+    Color([f32; 4]),
+    Binary(Box<Expr>, BinaryOp, Box<Expr>),
+    Clamp(Box<Expr>, Box<Expr>, Box<Expr>),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CompareOp {
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Equal,
+    NotEqual,
+}
+
+#[derive(Debug, Clone)]
+pub enum Condition {
+    Compare {
+        left: Expr,
+        op: CompareOp,
+        right: Expr,
+    },
+    And(Box<Condition>, Box<Condition>),
+    Or(Box<Condition>, Box<Condition>),
+    Not(Box<Condition>),
+}
+
+#[derive(Debug, Clone)]
+pub enum OpCode {
+    Log(String),
+    IgnoreValue(String),
+    Let(String, Expr),
+    Assign(ScriptTarget, Expr),
+    If(Condition, Vec<OpCode>, Vec<OpCode>),
+    MoveBy([f32; 2]),
+    MoveByDt([f32; 2]),
+    SetPos([f32; 2]),
+    SetColor([f32; 4]),
+    CopyPos(String),
+    ClampX([f32; 2]),
+    ClampY([f32; 2]),
+    MoveByTarget(String, [f32; 2]),
+    MoveByDtTarget(String, [f32; 2]),
+    SetPosTarget(String, [f32; 2]),
+    SetColorTarget(String, [f32; 4]),
+    Raw(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct SceneDocument {
+    pub path: PathBuf,
+    pub scenes: Vec<SceneNode>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SceneNode {
+    pub name: String,
+    pub meta: SceneMeta,
+    pub camera: Option<CameraNode>,
+    pub maps: Vec<AsciiMapNode>,
+    pub rects: Vec<RectNode>,
+    pub sprites: Vec<SpriteNode>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SceneMeta {
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VisualNode {
+    pub layer: i32,
+    pub z: i32,
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
+    pub color: [f32; 4],
+    pub script: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RectNode {
+    pub name: String,
+    pub visual: VisualNode,
+}
+
+#[derive(Debug, Clone)]
+pub struct CameraNode {
+    pub name: String,
+    pub pos: [f32; 2],
+    pub zoom: f32,
+    pub background: [f32; 4],
+}
+
+#[derive(Debug, Clone)]
+pub struct SpriteNode {
+    pub name: String,
+    pub visual: VisualNode,
+    pub texture: Option<String>,
+    pub symbol: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AsciiMapNode {
+    pub name: String,
+    pub origin: [f32; 2],
+    pub cell: [f32; 2],
+    pub legend: Vec<MapLegendEntry>,
+    pub rows: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MapLegendEntry {
+    pub symbol: char,
+    pub meaning: MapLegendMeaning,
+}
+
+#[derive(Debug, Clone)]
+pub enum MapLegendMeaning {
+    Marker,
+    Color([f32; 4]),
+}
+
+#[derive(Debug, Clone)]
+pub enum DrawCommand {
+    Rect(SceneRect),
+    Sprite(SceneSprite),
+}
+
+#[derive(Debug, Clone)]
+pub struct SceneRect {
+    pub layer: i32,
+    pub z: i32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub color: [f32; 4],
+}
+
+#[derive(Debug, Clone)]
+pub struct SceneSprite {
+    pub layer: i32,
+    pub z: i32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub color: [f32; 4],
+    pub texture: Option<String>,
+}
+
+impl RpuProject {
+    pub fn create(root: &Path, name: &str) -> Result<Self> {
+        if root.exists() {
+            bail!("destination already exists: {}", root.display());
+        }
+
+        fs::create_dir_all(root.join("scenes"))
+            .with_context(|| format!("failed to create {}", root.join("scenes").display()))?;
+        fs::create_dir_all(root.join("scripts"))
+            .with_context(|| format!("failed to create {}", root.join("scripts").display()))?;
+        fs::create_dir_all(root.join("assets"))
+            .with_context(|| format!("failed to create {}", root.join("assets").display()))?;
+
+        let manifest = ProjectManifest {
+            project: ProjectInfo {
+                name: name.to_string(),
+                version: default_version(),
+            },
+        };
+
+        fs::write(root.join("rpu.toml"), toml::to_string_pretty(&manifest)?)
+            .with_context(|| format!("failed to write {}", root.join("rpu.toml").display()))?;
+        fs::write(root.join("scenes/main.rpu"), default_scene(name))
+            .with_context(|| format!("failed to write {}", root.join("scenes/main.rpu").display()))?;
+        fs::write(root.join("scripts/main.rpu"), default_script())
+            .with_context(|| format!("failed to write {}", root.join("scripts/main.rpu").display()))?;
+        fs::write(root.join(".gitignore"), default_gitignore())
+            .with_context(|| format!("failed to write {}", root.join(".gitignore").display()))?;
+
+        Ok(Self {
+            root: root.to_path_buf(),
+            manifest,
+        })
+    }
+
+    pub fn load(root: &Path) -> Result<Self> {
+        let manifest_path = root.join("rpu.toml");
+        let manifest_text = fs::read_to_string(&manifest_path)
+            .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+        let manifest: ProjectManifest =
+            toml::from_str(&manifest_text).context("failed to parse rpu.toml")?;
+
+        Ok(Self {
+            root: root.to_path_buf(),
+            manifest,
+        })
+    }
+
+    pub fn compile(&self) -> Result<CompiledProject> {
+        let paths = self.paths();
+        let scenes = collect_source_files(&paths.scenes, &self.root)?;
+        let scripts = collect_source_files(&paths.scripts, &self.root)?;
+        let assets = collect_asset_files(&paths.assets, &self.root)?;
+
+        let mut diagnostics = Vec::new();
+
+        if scenes.is_empty() {
+            diagnostics.push(Diagnostic::error(
+                "project does not contain any scene files",
+                Some(PathBuf::from("scenes")),
+            ));
+        }
+
+        let parsed_scenes = parse_scene_documents(&scenes, &mut diagnostics);
+        let has_main_scene = parsed_scenes.iter().any(|document| {
+            document.path == PathBuf::from("scenes/main.rpu")
+                || document.scenes.iter().any(|scene| scene.name == "Main")
+        });
+        if !has_main_scene {
+            diagnostics.push(Diagnostic::warning(
+                "no main scene detected; expected scenes/main.rpu or `scene Main`",
+                Some(PathBuf::from("scenes")),
+            ));
+        }
+
+        let script_references = extract_script_references(&parsed_scenes);
+        let texture_references = extract_texture_references(&parsed_scenes);
+        if !scenes.is_empty() && script_references.is_empty() {
+            diagnostics.push(Diagnostic::warning(
+                "scene files do not reference any script files",
+                Some(PathBuf::from("scenes")),
+            ));
+        }
+
+        let draw_commands = compile_scene_draw_commands(&parsed_scenes);
+
+        if scripts.is_empty() {
+            diagnostics.push(Diagnostic::warning(
+                "project does not contain any script files",
+                Some(PathBuf::from("scripts")),
+            ));
+        }
+
+        for script_name in &script_references {
+            let expected = PathBuf::from("scripts").join(script_name);
+            if !scripts.iter().any(|script| script.relative_path == expected) {
+                diagnostics.push(Diagnostic::error(
+                    format!("referenced script is missing: {}", script_name),
+                    Some(expected),
+                ));
+            }
+        }
+
+        for texture_name in &texture_references {
+            let expected = PathBuf::from("assets").join(texture_name);
+            if !assets.iter().any(|asset| asset == &expected) {
+                diagnostics.push(Diagnostic::error(
+                    format!("referenced sprite texture is missing: {}", texture_name),
+                    Some(expected),
+                ));
+            }
+        }
+
+        let bytecode_scripts = compile_scripts(&scripts, &mut diagnostics);
+
+        let latest_modified = scenes
+            .iter()
+            .chain(scripts.iter())
+            .filter_map(|file| file.modified)
+            .max();
+
+        Ok(CompiledProject {
+            name: self.manifest.project.name.clone(),
+            version: self.manifest.project.version.clone(),
+            scenes,
+            parsed_scenes,
+            scripts,
+            bytecode_scripts,
+            draw_commands,
+            assets,
+            diagnostics,
+            script_references,
+            texture_references,
+            fingerprint: ProjectFingerprint {
+                latest_modified,
+                source_file_count: self.source_file_count()?,
+            },
+        })
+    }
+
+    pub fn has_source_changes_since(&self, since: Option<SystemTime>) -> Result<bool> {
+        let Some(since) = since else {
+            return Ok(true);
+        };
+
+        for path in self.source_roots() {
+            if newest_modification_in_dir(&path)? > Some(since) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.manifest.project.name
+    }
+
+    pub fn version(&self) -> &str {
+        &self.manifest.project.version
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn paths(&self) -> ProjectPaths {
+        ProjectPaths {
+            manifest: self.root.join("rpu.toml"),
+            scenes: self.root.join("scenes"),
+            scripts: self.root.join("scripts"),
+            assets: self.root.join("assets"),
+        }
+    }
+
+    fn source_roots(&self) -> [PathBuf; 2] {
+        let paths = self.paths();
+        [paths.scenes, paths.scripts]
+    }
+
+    fn source_file_count(&self) -> Result<usize> {
+        let paths = self.paths();
+        Ok(count_source_files(&paths.scenes)? + count_source_files(&paths.scripts)?)
+    }
+}
+
+impl CompiledProject {
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    }
+
+    pub fn warning_count(&self) -> usize {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
+            .count()
+    }
+
+    pub fn error_count(&self) -> usize {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+            .count()
+    }
+
+    pub fn handler_count(&self) -> usize {
+        self.bytecode_scripts
+            .iter()
+            .map(|script| script.handlers.len())
+            .sum()
+    }
+
+    pub fn op_count(&self) -> usize {
+        self.bytecode_scripts
+            .iter()
+            .flat_map(|script| script.handlers.iter())
+            .map(|handler| count_ops(&handler.ops))
+            .sum()
+    }
+
+    pub fn rect_count(&self) -> usize {
+        self.draw_commands
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::Rect(_)))
+            .count()
+    }
+
+    pub fn scene_count(&self) -> usize {
+        self.parsed_scenes.iter().map(|document| document.scenes.len()).sum()
+    }
+
+    pub fn sprite_count(&self) -> usize {
+        self.draw_commands
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::Sprite(_)))
+            .count()
+    }
+
+    pub fn camera_count(&self) -> usize {
+        self.parsed_scenes
+            .iter()
+            .flat_map(|document| document.scenes.iter())
+            .filter(|scene| scene.camera.is_some())
+            .count()
+    }
+
+    pub fn active_camera(&self) -> SceneCamera {
+        self.parsed_scenes
+            .iter()
+            .flat_map(|document| document.scenes.iter())
+            .find_map(|scene| scene.camera.as_ref())
+            .map(|camera| SceneCamera {
+                x: camera.pos[0],
+                y: camera.pos[1],
+                zoom: camera.zoom,
+                background: camera.background,
+            })
+            .unwrap_or_else(SceneCamera::default)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SceneCamera {
+    pub x: f32,
+    pub y: f32,
+    pub zoom: f32,
+    pub background: [f32; 4],
+}
+
+impl Default for SceneCamera {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            zoom: 1.0,
+            background: [0.04, 0.05, 0.08, 1.0],
+        }
+    }
+}
+
+impl Diagnostic {
+    pub fn warning(message: impl Into<String>, path: Option<PathBuf>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Warning,
+            message: message.into(),
+            path,
+            line: None,
+        }
+    }
+
+    pub fn error(message: impl Into<String>, path: Option<PathBuf>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Error,
+            message: message.into(),
+            path,
+            line: None,
+        }
+    }
+
+    pub fn warning_at(message: impl Into<String>, path: Option<PathBuf>, line: usize) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Warning,
+            message: message.into(),
+            path,
+            line: Some(line),
+        }
+    }
+
+    pub fn error_at(message: impl Into<String>, path: Option<PathBuf>, line: usize) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Error,
+            message: message.into(),
+            path,
+            line: Some(line),
+        }
+    }
+}
+
+fn collect_source_files(dir: &Path, root: &Path) -> Result<Vec<SourceFile>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    collect_files_recursive(dir, &mut |path| {
+        if path.extension() == Some(OsStr::new("rpu")) {
+            let contents = fs::read_to_string(path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            let metadata = fs::metadata(path)
+                .with_context(|| format!("failed to read metadata for {}", path.display()))?;
+            out.push(SourceFile {
+                relative_path: path
+                    .strip_prefix(root)
+                    .unwrap_or(path)
+                    .to_path_buf(),
+                contents,
+                modified: metadata.modified().ok(),
+            });
+        }
+        Ok(())
+    })?;
+    out.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    Ok(out)
+}
+
+fn collect_asset_files(dir: &Path, root: &Path) -> Result<Vec<PathBuf>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    collect_files_recursive(dir, &mut |path| {
+        if path.is_file() {
+            out.push(path.strip_prefix(root).unwrap_or(path).to_path_buf());
+        }
+        Ok(())
+    })?;
+    out.sort();
+    Ok(out)
+}
+
+fn count_source_files(dir: &Path) -> Result<usize> {
+    if !dir.exists() {
+        return Ok(0);
+    }
+
+    let mut count = 0usize;
+    collect_files_recursive(dir, &mut |path| {
+        if path.extension() == Some(OsStr::new("rpu")) {
+            count += 1;
+        }
+        Ok(())
+    })?;
+    Ok(count)
+}
+
+fn newest_modification_in_dir(dir: &Path) -> Result<Option<SystemTime>> {
+    if !dir.exists() {
+        return Ok(None);
+    }
+
+    let mut latest = None;
+    collect_files_recursive(dir, &mut |path| {
+        if path.extension() == Some(OsStr::new("rpu")) {
+            let modified = fs::metadata(path)
+                .with_context(|| format!("failed to read metadata for {}", path.display()))?
+                .modified()
+                .ok();
+            latest = max_system_time(latest, modified);
+        }
+        Ok(())
+    })?;
+    Ok(latest)
+}
+
+fn collect_files_recursive(
+    dir: &Path,
+    visit: &mut dyn FnMut(&Path) -> Result<()>,
+) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    let mut entries = fs::read_dir(dir)
+        .with_context(|| format!("failed to read directory {}", dir.display()))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to read directory entries for {}", dir.display()))?;
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files_recursive(&path, visit)?;
+        } else {
+            visit(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn parse_scene_documents(
+    scenes: &[SourceFile],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<SceneDocument> {
+    scenes
+        .iter()
+        .map(|scene| parse_scene_document(scene, diagnostics))
+        .collect()
+}
+
+fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -> SceneDocument {
+    let mut parsed = SceneDocument {
+        path: scene.relative_path.clone(),
+        scenes: Vec::new(),
+    };
+    let mut current_scene: Option<SceneNode> = None;
+    let mut current_camera: Option<CameraNode> = None;
+    let mut current_map: Option<AsciiMapNode> = None;
+    let mut current_rect: Option<RectNode> = None;
+    let mut current_sprite: Option<SpriteNode> = None;
+    let mut in_meta = false;
+    let mut in_legend = false;
+    let mut in_ascii = false;
+
+    for (index, raw_line) in scene.contents.lines().enumerate() {
+        let raw_line = raw_line.trim_end_matches('\r');
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+
+        if in_ascii {
+            if line == "}" {
+                in_ascii = false;
+            } else if let Some(map) = current_map.as_mut() {
+                map.rows.push(raw_line.to_string());
+            }
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "scene") {
+            if current_scene.is_some() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("nested scene block at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+            }
+            current_scene = Some(SceneNode {
+                name,
+                meta: SceneMeta::default(),
+                camera: None,
+                maps: Vec::new(),
+                rects: Vec::new(),
+                sprites: Vec::new(),
+            });
+            continue;
+        }
+
+        if line == "meta {" {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("meta block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+            }
+            in_meta = true;
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "map") {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("map block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_map = Some(AsciiMapNode {
+                name,
+                origin: [0.0, 0.0],
+                cell: [32.0, 32.0],
+                legend: Vec::new(),
+                rows: Vec::new(),
+            });
+            continue;
+        }
+
+        if line == "legend {" {
+            if current_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("legend block outside map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+            }
+            in_legend = true;
+            continue;
+        }
+
+        if line == "ascii {" {
+            if current_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("ascii block outside map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+            }
+            in_ascii = true;
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "rect") {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("rect block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            if current_rect.is_some() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("nested rect block at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+            }
+            current_rect = Some(RectNode {
+                name,
+                visual: default_visual_node(0, [120.0, 120.0], [0.95, 0.45, 0.20, 1.0]),
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "sprite") {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("sprite block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_sprite = Some(SpriteNode {
+                name,
+                visual: default_visual_node(1, [128.0, 128.0], [1.0, 1.0, 1.0, 1.0]),
+                texture: None,
+                symbol: None,
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "camera") {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("camera block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_camera = Some(CameraNode {
+                name,
+                pos: [0.0, 0.0],
+                zoom: 1.0,
+                background: [0.04, 0.05, 0.08, 1.0],
+            });
+            continue;
+        }
+
+        if line == "}" {
+            if in_legend {
+                in_legend = false;
+                continue;
+            }
+            if let Some(map) = current_map.take() {
+                if let Some(scene_node) = current_scene.as_mut() {
+                    scene_node.maps.push(normalize_ascii_map(map));
+                }
+                continue;
+            }
+            if let Some(camera) = current_camera.take() {
+                if let Some(scene_node) = current_scene.as_mut() {
+                    scene_node.camera = Some(camera);
+                }
+                continue;
+            }
+            if let Some(sprite) = current_sprite.take() {
+                if let Some(scene_node) = current_scene.as_mut() {
+                    scene_node.sprites.push(sprite);
+                }
+                continue;
+            }
+            if let Some(rect) = current_rect.take() {
+                if let Some(scene_node) = current_scene.as_mut() {
+                    scene_node.rects.push(rect);
+                }
+                continue;
+            }
+            if in_meta {
+                in_meta = false;
+                continue;
+            }
+            if let Some(scene_node) = current_scene.take() {
+                parsed.scenes.push(scene_node);
+            }
+            continue;
+        }
+
+        if in_meta {
+            if let Some(property) = parse_property(line) {
+                if let Some(("title", PropertyValue::String(title))) = parse_schema_value(
+                    META_SCHEMA,
+                    &property,
+                    index + 1,
+                    "meta",
+                    &scene.relative_path,
+                    diagnostics,
+                ) {
+                    if let Some(scene_node) = current_scene.as_mut() {
+                        scene_node.meta.title = Some(title);
+                    }
+                }
+            }
+            continue;
+        }
+
+        if in_legend {
+            if let Some(property) = parse_property(line) {
+                apply_map_legend_property(
+                    current_map.as_mut(),
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(rect) = current_rect.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_visual_property(
+                    &mut rect.visual,
+                    &property,
+                    index + 1,
+                    "rect",
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(sprite) = current_sprite.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_sprite_property(
+                    sprite,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(map) = current_map.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_map_property(map, &property, index + 1, &scene.relative_path, diagnostics);
+            }
+            continue;
+        }
+
+        if let Some(camera) = current_camera.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_camera_property(
+                    camera,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+        }
+    }
+
+    if let Some(camera) = current_camera.take() {
+        if let Some(scene_node) = current_scene.as_mut() {
+            scene_node.camera = Some(camera);
+        }
+    }
+    if let Some(map) = current_map.take() {
+        if let Some(scene_node) = current_scene.as_mut() {
+            scene_node.maps.push(normalize_ascii_map(map));
+        }
+    }
+    if let Some(sprite) = current_sprite.take() {
+        if let Some(scene_node) = current_scene.as_mut() {
+            scene_node.sprites.push(sprite);
+        }
+    }
+    if let Some(rect) = current_rect.take() {
+        if let Some(scene_node) = current_scene.as_mut() {
+            scene_node.rects.push(rect);
+        }
+    }
+    if let Some(scene_node) = current_scene.take() {
+        parsed.scenes.push(scene_node);
+    }
+
+    parsed
+}
+
+fn extract_script_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
+    parsed_scenes
+        .iter()
+        .flat_map(|document| document.scenes.iter())
+        .flat_map(|scene| {
+            scene
+                .rects
+                .iter()
+                .filter_map(|rect| rect.visual.script.clone())
+                .chain(scene.sprites.iter().filter_map(|sprite| sprite.visual.script.clone()))
+        })
+        .collect()
+}
+
+fn extract_texture_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
+    parsed_scenes
+        .iter()
+        .flat_map(|document| document.scenes.iter())
+        .flat_map(|scene| scene.sprites.iter().filter_map(|sprite| sprite.texture.clone()))
+        .collect()
+}
+
+fn compile_scene_draw_commands(parsed_scenes: &[SceneDocument]) -> Vec<DrawCommand> {
+    parsed_scenes
+        .iter()
+        .flat_map(|document| document.scenes.iter())
+        .flat_map(|scene| {
+            let markers = compile_map_markers(&scene.maps);
+            scene
+                .maps
+                .iter()
+                .flat_map(compile_map_rects)
+                .chain(
+                    scene
+                .rects
+                .iter()
+                .map(|rect| {
+                    DrawCommand::Rect(SceneRect {
+                        layer: rect.visual.layer,
+                        z: rect.visual.z,
+                        x: rect.visual.pos[0],
+                        y: rect.visual.pos[1],
+                        width: rect.visual.size[0],
+                        height: rect.visual.size[1],
+                        color: rect.visual.color,
+                    })
+                })
+                )
+                .chain(scene.sprites.iter().map(move |sprite| {
+                    let pos = sprite
+                        .symbol
+                        .as_deref()
+                        .and_then(|symbol| markers.get(symbol))
+                        .copied()
+                        .unwrap_or(sprite.visual.pos);
+                    DrawCommand::Sprite(SceneSprite {
+                        layer: sprite.visual.layer,
+                        z: sprite.visual.z,
+                        x: pos[0],
+                        y: pos[1],
+                        width: sprite.visual.size[0],
+                        height: sprite.visual.size[1],
+                        color: sprite.visual.color,
+                        texture: sprite.texture.clone(),
+                    })
+                }))
+        })
+        .collect()
+}
+
+fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
+    let legend: std::collections::HashMap<char, &MapLegendMeaning> = map
+        .legend
+        .iter()
+        .map(|entry| (entry.symbol, &entry.meaning))
+        .collect();
+    let mut commands = Vec::new();
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            if matches!(ch, ' ' | '.') {
+                continue;
+            }
+            if let Some(MapLegendMeaning::Color(color)) = legend.get(&ch) {
+                commands.push(DrawCommand::Rect(SceneRect {
+                    layer: -10,
+                    z: (row as i32) * 100 + col as i32,
+                    x: map.origin[0] + col as f32 * map.cell[0],
+                    y: map.origin[1] + row as f32 * map.cell[1],
+                    width: map.cell[0],
+                    height: map.cell[1],
+                    color: *color,
+                }));
+            }
+        }
+    }
+    commands
+}
+
+fn compile_map_markers(maps: &[AsciiMapNode]) -> std::collections::HashMap<String, [f32; 2]> {
+    let mut markers = std::collections::HashMap::new();
+    for map in maps {
+        let legend: std::collections::HashMap<char, &MapLegendMeaning> = map
+            .legend
+            .iter()
+            .map(|entry| (entry.symbol, &entry.meaning))
+            .collect();
+        for (row, line) in map.rows.iter().enumerate() {
+            for (col, ch) in line.chars().enumerate() {
+                if let Some(MapLegendMeaning::Marker) = legend.get(&ch) {
+                    markers.entry(ch.to_string()).or_insert([
+                        map.origin[0] + col as f32 * map.cell[0],
+                        map.origin[1] + row as f32 * map.cell[1],
+                    ]);
+                }
+            }
+        }
+    }
+    markers
+}
+
+fn parse_block_start(line: &str, keyword: &str) -> Option<String> {
+    let rest = line.strip_prefix(keyword)?.trim();
+    let rest = rest.strip_suffix('{')?.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    }
+}
+
+struct Property<'a> {
+    key: &'a str,
+    raw: &'a str,
+}
+
+#[derive(Clone, Copy)]
+enum PropertyKind {
+    String,
+    I32,
+    F32,
+    Vec2,
+    Color,
+    Symbol,
+}
+
+#[derive(Clone, Copy)]
+struct SchemaEntry {
+    key: &'static str,
+    kind: PropertyKind,
+}
+
+enum PropertyValue {
+    String(String),
+    I32(i32),
+    F32(f32),
+    Vec2([f32; 2]),
+    Color([f32; 4]),
+    Symbol(String),
+}
+
+const META_SCHEMA: &[SchemaEntry] = &[SchemaEntry {
+    key: "title",
+    kind: PropertyKind::String,
+}];
+
+const VISUAL_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry { key: "layer", kind: PropertyKind::I32 },
+    SchemaEntry { key: "z", kind: PropertyKind::I32 },
+    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "color", kind: PropertyKind::Color },
+    SchemaEntry { key: "script", kind: PropertyKind::String },
+];
+
+const SPRITE_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry { key: "texture", kind: PropertyKind::String },
+    SchemaEntry { key: "symbol", kind: PropertyKind::Symbol },
+    SchemaEntry { key: "layer", kind: PropertyKind::I32 },
+    SchemaEntry { key: "z", kind: PropertyKind::I32 },
+    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "color", kind: PropertyKind::Color },
+    SchemaEntry { key: "script", kind: PropertyKind::String },
+];
+
+const CAMERA_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "zoom", kind: PropertyKind::F32 },
+    SchemaEntry { key: "background", kind: PropertyKind::Color },
+];
+
+const MAP_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry { key: "origin", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "cell", kind: PropertyKind::Vec2 },
+];
+
+impl<'a> Property<'a> {
+    fn as_string(&self) -> Option<String> {
+        parse_string(self.raw)
+    }
+
+    fn as_i32(&self) -> Option<i32> {
+        self.raw.parse().ok()
+    }
+
+    fn as_f32(&self) -> Option<f32> {
+        self.raw.parse().ok()
+    }
+
+    fn as_vec2(&self) -> Option<[f32; 2]> {
+        parse_f32_tuple::<2>(self.raw)
+    }
+
+    fn as_color(&self) -> Option<[f32; 4]> {
+        parse_color(self.raw)
+    }
+
+    fn parse_as(&self, kind: PropertyKind) -> Option<PropertyValue> {
+        match kind {
+            PropertyKind::String => self.as_string().map(PropertyValue::String),
+            PropertyKind::I32 => self.as_i32().map(PropertyValue::I32),
+            PropertyKind::F32 => self.as_f32().map(PropertyValue::F32),
+            PropertyKind::Vec2 => self.as_vec2().map(PropertyValue::Vec2),
+            PropertyKind::Color => self.as_color().map(PropertyValue::Color),
+            PropertyKind::Symbol => parse_symbol_ref(self.raw).map(PropertyValue::Symbol),
+        }
+    }
+}
+
+fn parse_property(line: &str) -> Option<Property<'_>> {
+    let (key, raw) = line.split_once('=')?;
+    Some(Property {
+        key: key.trim(),
+        raw: raw.trim(),
+    })
+}
+
+fn parse_string(value: &str) -> Option<String> {
+    Some(value.strip_prefix('"')?.strip_suffix('"')?.to_string())
+}
+
+fn parse_symbol_ref(value: &str) -> Option<String> {
+    if let Some(value) = parse_string(value) {
+        if value.chars().count() == 1 {
+            return Some(value);
+        }
+        return None;
+    }
+
+    let value = value.trim();
+    if value.chars().count() == 1 {
+        return Some(value.to_string());
+    }
+
+    None
+}
+
+fn schema_entry<'a>(schema: &'a [SchemaEntry], property: &Property<'_>) -> Option<&'a SchemaEntry> {
+    schema.iter().find(|entry| entry.key == property.key)
+}
+
+fn parse_schema_value(
+    schema: &[SchemaEntry],
+    property: &Property<'_>,
+    line: usize,
+    kind: &str,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(&'static str, PropertyValue)> {
+    let entry = schema_entry(schema, property)?;
+    match property.parse_as(entry.kind) {
+        Some(value) => Some((entry.key, value)),
+        None => {
+            diagnostics.push(Diagnostic::warning_at(
+                format!("invalid {kind} {}", entry.key),
+                Some(path.to_path_buf()),
+                line,
+            ));
+            None
+        }
+    }
+}
+
+fn default_visual_node(layer: i32, size: [f32; 2], color: [f32; 4]) -> VisualNode {
+    VisualNode {
+        layer,
+        z: 0,
+        pos: [0.0, 0.0],
+        size,
+        color,
+        script: None,
+    }
+}
+
+fn apply_visual_property(
+    visual: &mut VisualNode,
+    property: &Property<'_>,
+    line: usize,
+    kind: &str,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) =
+        parse_schema_value(VISUAL_SCHEMA, property, line, kind, path, diagnostics)
+    {
+        match (key, value) {
+            ("layer", PropertyValue::I32(layer)) => visual.layer = layer,
+            ("z", PropertyValue::I32(z)) => visual.z = z,
+            ("pos", PropertyValue::Vec2(pos)) => visual.pos = pos,
+            ("size", PropertyValue::Vec2(size)) => {
+                visual.size = [size[0].max(1.0), size[1].max(1.0)]
+            }
+            ("color", PropertyValue::Color(color)) => visual.color = color,
+            ("script", PropertyValue::String(script)) => visual.script = Some(script),
+            _ => {}
+        }
+    }
+}
+
+fn apply_camera_property(
+    camera: &mut CameraNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) =
+        parse_schema_value(CAMERA_SCHEMA, property, line, "camera", path, diagnostics)
+    {
+        match (key, value) {
+            ("pos", PropertyValue::Vec2(pos)) => camera.pos = pos,
+            ("zoom", PropertyValue::F32(zoom)) => camera.zoom = zoom.max(0.01),
+            ("background", PropertyValue::Color(color)) => camera.background = color,
+            _ => {}
+        }
+    }
+}
+
+fn apply_sprite_property(
+    sprite: &mut SpriteNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) =
+        parse_schema_value(SPRITE_SCHEMA, property, line, "sprite", path, diagnostics)
+    {
+        match (key, value) {
+            ("texture", PropertyValue::String(texture)) => sprite.texture = Some(texture),
+            ("symbol", PropertyValue::Symbol(symbol)) => sprite.symbol = Some(symbol),
+            _ => apply_visual_property(
+                &mut sprite.visual,
+                property,
+                line,
+                "sprite",
+                path,
+                diagnostics,
+            ),
+        }
+    }
+}
+
+fn apply_map_property(
+    map: &mut AsciiMapNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) = parse_schema_value(MAP_SCHEMA, property, line, "map", path, diagnostics)
+    {
+        match (key, value) {
+            ("origin", PropertyValue::Vec2(origin)) => map.origin = origin,
+            ("cell", PropertyValue::Vec2(cell)) => {
+                map.cell = [cell[0].max(1.0), cell[1].max(1.0)];
+            }
+            _ => {}
+        }
+    }
+}
+
+fn apply_map_legend_property(
+    map: Option<&mut AsciiMapNode>,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(map) = map else {
+        diagnostics.push(Diagnostic::warning_at(
+            "legend entry outside map",
+            Some(path.to_path_buf()),
+            line,
+        ));
+        return;
+    };
+
+    let Some(symbol) = parse_symbol_ref(property.key) else {
+        diagnostics.push(Diagnostic::warning_at(
+            "invalid legend symbol",
+            Some(path.to_path_buf()),
+            line,
+        ));
+        return;
+    };
+
+    let Some(symbol) = symbol.chars().next() else {
+        diagnostics.push(Diagnostic::warning_at(
+            "invalid legend symbol",
+            Some(path.to_path_buf()),
+            line,
+        ));
+        return;
+    };
+
+    let Some(meaning) = parse_map_legend_meaning(property.raw) else {
+        diagnostics.push(Diagnostic::warning_at(
+            "invalid legend mapping",
+            Some(path.to_path_buf()),
+            line,
+        ));
+        return;
+    };
+
+    if let Some(existing) = map.legend.iter_mut().find(|entry| entry.symbol == symbol) {
+        existing.meaning = meaning;
+    } else {
+        map.legend.push(MapLegendEntry { symbol, meaning });
+    }
+}
+
+fn parse_map_legend_meaning(value: &str) -> Option<MapLegendMeaning> {
+    let value = value.trim();
+    if matches!(value, "marker" | "spawn" | "entity") {
+        return Some(MapLegendMeaning::Marker);
+    }
+
+    parse_color(value).map(MapLegendMeaning::Color)
+}
+
+fn normalize_ascii_map(mut map: AsciiMapNode) -> AsciiMapNode {
+    let min_indent = map
+        .rows
+        .iter()
+        .filter(|row| !row.trim().is_empty())
+        .map(|row| row.chars().take_while(|ch| *ch == ' ' || *ch == '\t').count())
+        .min()
+        .unwrap_or(0);
+
+    map.rows = map
+        .rows
+        .into_iter()
+        .map(|row| {
+            let mut skip = min_indent;
+            let mut start = 0usize;
+            for (index, ch) in row.char_indices() {
+                if skip == 0 {
+                    start = index;
+                    break;
+                }
+                if ch == ' ' || ch == '\t' {
+                    skip -= 1;
+                    start = index + ch.len_utf8();
+                } else {
+                    start = index;
+                    break;
+                }
+            }
+            row[start..].trim_end().to_string()
+        })
+        .collect();
+
+    map
+}
+
+fn parse_color(value: &str) -> Option<[f32; 4]> {
+    if let Some(hex) = value.strip_prefix('#') {
+        return parse_hex_color(hex);
+    }
+    parse_f32_tuple::<4>(value)
+}
+
+fn parse_hex_color(hex: &str) -> Option<[f32; 4]> {
+    match hex.len() {
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some([
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                1.0,
+            ])
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            Some([
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                a as f32 / 255.0,
+            ])
+        }
+        _ => None,
+    }
+}
+
+fn parse_f32_tuple<const N: usize>(value: &str) -> Option<[f32; N]> {
+    let value = value.strip_prefix('(')?.strip_suffix(')')?;
+    let mut out = [0.0; N];
+    let mut parts = value.split(',').map(str::trim);
+    for item in &mut out {
+        *item = parts.next()?.parse().ok()?;
+    }
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(out)
+}
+
+fn parse_call_vec2(argument: &str) -> Option<[f32; 2]> {
+    let inner = argument.trim().strip_suffix(')')?.trim();
+    let wrapped = format!("({inner})");
+    parse_f32_tuple::<2>(&wrapped)
+}
+
+fn parse_call_color(argument: &str) -> Option<[f32; 4]> {
+    let inner = argument.trim().strip_suffix(')')?.trim();
+    parse_color(inner)
+}
+
+fn split_call_args(argument: &str) -> Option<Vec<String>> {
+    let inner = argument.trim().strip_suffix(')')?.trim();
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+
+    for ch in inner.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            ',' if !in_string => {
+                parts.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if in_string {
+        return None;
+    }
+
+    if !current.trim().is_empty() {
+        parts.push(current.trim().to_string());
+    }
+
+    Some(parts)
+}
+
+fn parse_targeted_call_vec2(argument: &str) -> Option<(String, [f32; 2])> {
+    let parts = split_call_args(argument)?;
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let target = parse_string(&parts[0])?;
+    let wrapped = format!("({}, {})", parts[1], parts[2]);
+    let delta = parse_f32_tuple::<2>(&wrapped)?;
+    Some((target, delta))
+}
+
+fn parse_targeted_call_color(argument: &str) -> Option<(String, [f32; 4])> {
+    let parts = split_call_args(argument)?;
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let target = parse_string(&parts[0])?;
+    let color = parse_color(&parts[1])?;
+    Some((target, color))
+}
+
+fn parse_call_range(argument: &str) -> Option<[f32; 2]> {
+    let inner = argument.trim().strip_suffix(')')?.trim();
+    let wrapped = format!("({inner})");
+    parse_f32_tuple::<2>(&wrapped)
+}
+
+fn parse_call_target(argument: &str) -> Option<String> {
+    let parts = split_call_args(argument)?;
+    if parts.len() != 1 {
+        return None;
+    }
+    parse_string(&parts[0])
+}
+
+fn count_ops(ops: &[OpCode]) -> usize {
+    ops.iter()
+        .map(|op| match op {
+            OpCode::If(_, body, else_body) => 1 + count_ops(body) + count_ops(else_body),
+            _ => 1,
+        })
+        .sum()
+}
+
+fn compile_scripts(scripts: &[SourceFile], diagnostics: &mut Vec<Diagnostic>) -> Vec<BytecodeScript> {
+    scripts
+        .iter()
+        .map(|script| compile_script(script, diagnostics))
+        .collect()
+}
+
+fn compile_script(script: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -> BytecodeScript {
+    let lines = script
+        .contents
+        .lines()
+        .enumerate()
+        .map(|(index, raw)| (index + 1, raw.trim_end_matches('\r').to_string()))
+        .collect::<Vec<_>>();
+    let mut handlers = Vec::new();
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let (line_no, raw_line) = &lines[index];
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with("//") {
+            index += 1;
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("on ") {
+            let event = rest
+                .split_once('(')
+                .map(|(event, _)| event.trim())
+                .unwrap_or(rest.trim())
+                .trim_end_matches('{')
+                .trim();
+            index += 1;
+            let ops = compile_script_block(&lines, &mut index, script, diagnostics);
+            handlers.push(BytecodeHandler {
+                event: event.to_string(),
+                ops,
+            });
+            continue;
+        }
+
+        diagnostics.push(Diagnostic::warning_at(
+            "script statement is outside of an event block",
+            Some(script.relative_path.clone()),
+            *line_no,
+        ));
+        index += 1;
+    }
+
+    if handlers.is_empty() {
+        diagnostics.push(Diagnostic::warning(
+            "script does not define any event handlers",
+            Some(script.relative_path.clone()),
+        ));
+    }
+
+    BytecodeScript {
+        path: script.relative_path.clone(),
+        handlers,
+    }
+}
+
+fn compile_script_block(
+    lines: &[(usize, String)],
+    index: &mut usize,
+    script: &SourceFile,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<OpCode> {
+    let mut ops = Vec::new();
+
+    while *index < lines.len() {
+        let (line_no, raw_line) = &lines[*index];
+        let line = raw_line.trim();
+
+        if line.is_empty() || line.starts_with("//") {
+            *index += 1;
+            continue;
+        }
+
+        if line == "}" {
+            *index += 1;
+            break;
+        }
+
+        if let Some(condition_text) = line.strip_prefix("if ").and_then(|rest| rest.strip_suffix('{')) {
+            *index += 1;
+            if let Some(condition) = parse_condition(condition_text.trim()) {
+                let body = compile_script_block(lines, index, script, diagnostics);
+                let mut else_body = Vec::new();
+                if *index < lines.len() {
+                    let else_line = lines[*index].1.trim();
+                    if else_line == "else {" {
+                        *index += 1;
+                        else_body = compile_script_block(lines, index, script, diagnostics);
+                    }
+                }
+                ops.push(OpCode::If(condition, body, else_body));
+            } else {
+                diagnostics.push(Diagnostic::warning_at(
+                    "invalid if condition",
+                    Some(script.relative_path.clone()),
+                    *line_no,
+                ));
+                let _ = compile_script_block(lines, index, script, diagnostics);
+            }
+            continue;
+        }
+
+        if let Some(op) = compile_statement(line) {
+            ops.push(op);
+        } else {
+            diagnostics.push(Diagnostic::warning_at(
+                "unsupported script statement",
+                Some(script.relative_path.clone()),
+                *line_no,
+            ));
+        }
+        *index += 1;
+    }
+
+    ops
+}
+
+fn compile_statement(line: &str) -> Option<OpCode> {
+    if let Some(rest) = line.strip_prefix("let ") {
+        let (name, right) = rest.split_once('=')?;
+        let name = name.trim();
+        let right = right.trim();
+        if name == "_" {
+            return Some(compile_op(line));
+        }
+        if name.is_empty() {
+            return None;
+        }
+        return Some(OpCode::Let(name.to_string(), parse_expr(right)?));
+    }
+
+    if let Some((left, right)) = line.split_once('=') {
+        let left = left.trim();
+        let right = right.trim();
+        if let (Some(target), Some(expr)) = (parse_script_target(left), parse_expr(right)) {
+            return Some(OpCode::Assign(target, expr));
+        }
+    }
+
+    Some(compile_op(line))
+}
+
+fn parse_script_target(value: &str) -> Option<ScriptTarget> {
+    let (entity, property) = value.split_once('.')?;
+    let property = match property.trim() {
+        "x" => ScriptProperty::X,
+        "y" => ScriptProperty::Y,
+        "pos" => ScriptProperty::Pos,
+        "color" => ScriptProperty::Color,
+        _ => return None,
+    };
+
+    let entity = entity.trim();
+    if entity == "self" {
+        Some(ScriptTarget::SelfEntity(property))
+    } else {
+        Some(ScriptTarget::NamedEntity(entity.to_string(), property))
+    }
+}
+
+fn parse_condition(value: &str) -> Option<Condition> {
+    let value = strip_outer_condition_parens(value.trim());
+
+    if let Some((left, right)) = split_top_level_condition(value, "||") {
+        return Some(Condition::Or(
+            Box::new(parse_condition(left)?),
+            Box::new(parse_condition(right)?),
+        ));
+    }
+
+    if let Some((left, right)) = split_top_level_condition(value, "&&") {
+        return Some(Condition::And(
+            Box::new(parse_condition(left)?),
+            Box::new(parse_condition(right)?),
+        ));
+    }
+
+    if let Some(rest) = value.strip_prefix('!') {
+        return Some(Condition::Not(Box::new(parse_condition(rest.trim())?)));
+    }
+
+    for (symbol, op) in [
+        ("<=", CompareOp::LessEqual),
+        (">=", CompareOp::GreaterEqual),
+        ("==", CompareOp::Equal),
+        ("!=", CompareOp::NotEqual),
+        ("<", CompareOp::Less),
+        (">", CompareOp::Greater),
+    ] {
+        if let Some((left, right)) = split_top_level_condition(value, symbol) {
+            return Some(Condition::Compare {
+                left: parse_expr(left)?,
+                op,
+                right: parse_expr(right)?,
+            });
+        }
+    }
+
+    None
+}
+
+fn strip_outer_condition_parens(mut value: &str) -> &str {
+    loop {
+        let trimmed = value.trim();
+        if !(trimmed.starts_with('(') && trimmed.ends_with(')')) {
+            return trimmed;
+        }
+        let mut depth = 0i32;
+        let mut wraps = true;
+        for (index, ch) in trimmed.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 && index != trimmed.len() - 1 {
+                        wraps = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            if depth < 0 {
+                wraps = false;
+                break;
+            }
+        }
+        if wraps {
+            value = &trimmed[1..trimmed.len() - 1];
+        } else {
+            return trimmed;
+        }
+    }
+}
+
+fn split_top_level_condition<'a>(value: &'a str, needle: &str) -> Option<(&'a str, &'a str)> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '"' => in_string = !in_string,
+            '(' if !in_string => depth += 1,
+            ')' if !in_string => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && !in_string && value[index..].starts_with(needle) {
+            let left = value[..index].trim();
+            let right = value[index + needle.len()..].trim();
+            if !left.is_empty() && !right.is_empty() {
+                return Some((left, right));
+            }
+        }
+    }
+    None
+}
+
+#[derive(Clone)]
+enum ExprToken {
+    Number(f32),
+    Dt,
+    Variable(String),
+    Target(ScriptTarget),
+    Color([f32; 4]),
+    Clamp,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    LParen,
+    RParen,
+    Comma,
+}
+
+fn parse_expr(value: &str) -> Option<Expr> {
+    let tokens = tokenize_expr(value)?;
+    let mut index = 0usize;
+    let expr = parse_expr_bp(&tokens, &mut index, 0)?;
+    if index != tokens.len() {
+        return None;
+    }
+    Some(expr)
+}
+
+fn tokenize_expr(value: &str) -> Option<Vec<ExprToken>> {
+    let mut chars = value.char_indices().peekable();
+    let mut tokens = Vec::new();
+
+    while let Some((index, ch)) = chars.next() {
+        if ch.is_whitespace() {
+            continue;
+        }
+
+        match ch {
+            '+' => tokens.push(ExprToken::Plus),
+            '-' => {
+                let unary_context = matches!(
+                    tokens.last(),
+                    None
+                        | Some(
+                            ExprToken::Plus
+                                | ExprToken::Minus
+                                | ExprToken::Star
+                                | ExprToken::Slash
+                                | ExprToken::LParen
+                                | ExprToken::Comma
+                        )
+                );
+                if unary_context {
+                    let start = index;
+                    let mut end = index + ch.len_utf8();
+                    while let Some((next_index, next_ch)) = chars.peek().copied() {
+                        if next_ch.is_ascii_digit() || next_ch == '.' {
+                            end = next_index + next_ch.len_utf8();
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    tokens.push(ExprToken::Number(value[start..end].parse().ok()?));
+                } else {
+                    tokens.push(ExprToken::Minus);
+                }
+            }
+            '*' => tokens.push(ExprToken::Star),
+            '/' => tokens.push(ExprToken::Slash),
+            '(' => tokens.push(ExprToken::LParen),
+            ')' => tokens.push(ExprToken::RParen),
+            ',' => tokens.push(ExprToken::Comma),
+            '#' => {
+                let start = index;
+                let mut end = index + ch.len_utf8();
+                while let Some((next_index, next_ch)) = chars.peek().copied() {
+                    if next_ch.is_ascii_hexdigit() {
+                        end = next_index + next_ch.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(ExprToken::Color(parse_color(&value[start..end])?));
+            }
+            '0'..='9' => {
+                let start = index;
+                let mut end = index + ch.len_utf8();
+                while let Some((next_index, next_ch)) = chars.peek().copied() {
+                    if next_ch.is_ascii_digit() || next_ch == '.' {
+                        end = next_index + next_ch.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(ExprToken::Number(value[start..end].parse().ok()?));
+            }
+            _ if ch.is_ascii_alphabetic() || ch == '_' => {
+                let start = index;
+                let mut end = index + ch.len_utf8();
+                while let Some((next_index, next_ch)) = chars.peek().copied() {
+                    if next_ch.is_ascii_alphanumeric() || next_ch == '_' || next_ch == '.' {
+                        end = next_index + next_ch.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                let ident = &value[start..end];
+                match ident {
+                    "dt" => tokens.push(ExprToken::Dt),
+                    "clamp" => tokens.push(ExprToken::Clamp),
+                    _ => match parse_script_target(ident) {
+                        Some(target) => tokens.push(ExprToken::Target(target)),
+                        None => tokens.push(ExprToken::Variable(ident.to_string())),
+                    },
+                }
+            }
+            _ => return None,
+        }
+    }
+
+    Some(tokens)
+}
+
+fn parse_expr_bp(tokens: &[ExprToken], index: &mut usize, min_bp: u8) -> Option<Expr> {
+    let mut lhs = match tokens.get(*index)? {
+        ExprToken::Number(value) => {
+            *index += 1;
+            Expr::Number(*value)
+        }
+        ExprToken::Dt => {
+            *index += 1;
+            Expr::Dt
+        }
+        ExprToken::Variable(name) => {
+            *index += 1;
+            Expr::Variable(name.clone())
+        }
+        ExprToken::Target(target) => {
+            *index += 1;
+            Expr::Target(target.clone())
+        }
+        ExprToken::Color(color) => {
+            *index += 1;
+            Expr::Color(*color)
+        }
+        ExprToken::LParen => {
+            *index += 1;
+            let expr = parse_expr_bp(tokens, index, 0)?;
+            match tokens.get(*index)? {
+                ExprToken::RParen => {
+                    *index += 1;
+                    expr
+                }
+                _ => return None,
+            }
+        }
+        ExprToken::Clamp => {
+            *index += 1;
+            match tokens.get(*index)? {
+                ExprToken::LParen => *index += 1,
+                _ => return None,
+            }
+            let value = parse_expr_bp(tokens, index, 0)?;
+            match tokens.get(*index)? {
+                ExprToken::Comma => *index += 1,
+                _ => return None,
+            }
+            let min = parse_expr_bp(tokens, index, 0)?;
+            match tokens.get(*index)? {
+                ExprToken::Comma => *index += 1,
+                _ => return None,
+            }
+            let max = parse_expr_bp(tokens, index, 0)?;
+            match tokens.get(*index)? {
+                ExprToken::RParen => *index += 1,
+                _ => return None,
+            }
+            Expr::Clamp(Box::new(value), Box::new(min), Box::new(max))
+        }
+        _ => return None,
+    };
+
+    loop {
+        let (l_bp, r_bp, op) = match tokens.get(*index) {
+            Some(ExprToken::Plus) => (1, 2, BinaryOp::Add),
+            Some(ExprToken::Minus) => (1, 2, BinaryOp::Sub),
+            Some(ExprToken::Star) => (3, 4, BinaryOp::Mul),
+            Some(ExprToken::Slash) => (3, 4, BinaryOp::Div),
+            _ => break,
+        };
+
+        if l_bp < min_bp {
+            break;
+        }
+        *index += 1;
+        let rhs = parse_expr_bp(tokens, index, r_bp)?;
+        lhs = Expr::Binary(Box::new(lhs), op, Box::new(rhs));
+    }
+
+    Some(lhs)
+}
+
+fn compile_op(line: &str) -> OpCode {
+    if let Some(argument) = line.strip_prefix("log(") {
+        let message = argument
+            .trim_end_matches(')')
+            .trim()
+            .trim_matches('"')
+            .to_string();
+        return OpCode::Log(message);
+    }
+
+    if let Some(argument) = line.strip_prefix("let _ =") {
+        return OpCode::IgnoreValue(argument.trim().to_string());
+    }
+
+    if let Some(argument) = line.strip_prefix("move_by_dt(") {
+        if let Some((target, delta)) = parse_targeted_call_vec2(argument) {
+            return OpCode::MoveByDtTarget(target, delta);
+        }
+        if let Some(delta) = parse_call_vec2(argument) {
+            return OpCode::MoveByDt(delta);
+        }
+    }
+
+    if let Some(argument) = line.strip_prefix("move_by(") {
+        if let Some((target, delta)) = parse_targeted_call_vec2(argument) {
+            return OpCode::MoveByTarget(target, delta);
+        }
+        if let Some(delta) = parse_call_vec2(argument) {
+            return OpCode::MoveBy(delta);
+        }
+    }
+
+    if let Some(argument) = line.strip_prefix("set_pos(") {
+        if let Some((target, pos)) = parse_targeted_call_vec2(argument) {
+            return OpCode::SetPosTarget(target, pos);
+        }
+        if let Some(pos) = parse_call_vec2(argument) {
+            return OpCode::SetPos(pos);
+        }
+    }
+
+    if let Some(argument) = line.strip_prefix("set_color(") {
+        if let Some((target, color)) = parse_targeted_call_color(argument) {
+            return OpCode::SetColorTarget(target, color);
+        }
+        if let Some(color) = parse_call_color(argument) {
+            return OpCode::SetColor(color);
+        }
+    }
+
+    if let Some(argument) = line.strip_prefix("copy_pos(") {
+        if let Some(target) = parse_call_target(argument) {
+            return OpCode::CopyPos(target);
+        }
+    }
+
+    if let Some(argument) = line.strip_prefix("clamp_x(") {
+        if let Some(range) = parse_call_range(argument) {
+            return OpCode::ClampX(range);
+        }
+    }
+
+    if let Some(argument) = line.strip_prefix("clamp_y(") {
+        if let Some(range) = parse_call_range(argument) {
+            return OpCode::ClampY(range);
+        }
+    }
+
+    OpCode::Raw(line.to_string())
+}
+
+fn max_system_time(a: Option<SystemTime>, b: Option<SystemTime>) -> Option<SystemTime> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(std::cmp::max(a, b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn default_version() -> String {
+    "0.1.0".to_string()
+}
+
+fn default_scene(name: &str) -> String {
+    format!(
+        "scene Main {{\n    meta {{\n        title = \"{}\"\n    }}\n\n    camera MainCamera {{\n        pos = (320, 220)\n        zoom = 1.0\n        background = (0.07, 0.08, 0.12, 1.0)\n    }}\n\n    map Terrain {{\n        origin = (80, 288)\n        cell = (48, 48)\n\n        legend {{\n            x = marker\n            # = #ffb224\n            - = #3d7cff\n        }}\n\n        ascii {{\n            x      \n            ###----\n        }}\n    }}\n\n    rect Hero {{\n        layer = 0\n        z = 10\n        pos = (96, 96)\n        size = (240, 140)\n        color = (0.94, 0.42, 0.18, 1.0)\n        script = \"main.rpu\"\n    }}\n\n    sprite Mascot {{\n        layer = 1\n        z = 20\n        symbol = x\n        size = (192, 192)\n        color = (0.94, 0.92, 0.26, 1.0)\n    }}\n\n    rect Accent {{\n        layer = 0\n        z = 30\n        pos = (380, 180)\n        size = (180, 220)\n        color = (0.14, 0.72, 0.88, 1.0)\n    }}\n}}\n",
+        name
+    )
+}
+
+fn default_script() -> &'static str {
+    "on ready() {\n    log(\"RPU project booted\")\n    set_color(#ffd447)\n}\n\non update(dt) {\n    let _ = dt\n    move_by_dt(16.0, 0.0)\n}\n"
+}
+
+fn default_gitignore() -> &'static str {
+    "/build/\n/.rpu/\n"
+}

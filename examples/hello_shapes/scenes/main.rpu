@@ -1,0 +1,45 @@
+scene Main {
+    meta {
+        title = "Hello Shapes"
+    }
+
+    camera MainCamera {
+        pos = (360, 240)
+        zoom = 1.0
+        background = (0.07, 0.09, 0.14, 1.0)
+    }
+
+    rect Hero {
+        layer = 0
+        z = 20
+        pos = (80, 40)
+        size = (280, 160)
+        color = #ff4455
+        script = "main.rpu"
+    }
+
+    sprite Mascot {
+        layer = 1
+        z = 40
+        pos = (420, 60)
+        size = (180, 180)
+        color = (0.98, 0.92, 0.28, 0.96)
+        texture = "mascot.png"
+    }
+
+    rect Accent {
+        layer = 0
+        z = 30
+        pos = (380, 180)
+        size = (220, 220)
+        color = (0.10, 0.72, 0.88, 1.0)
+    }
+
+    rect Footer {
+        layer = -1
+        z = 0
+        pos = (100, 320)
+        size = (520, 96)
+        color = (0.96, 0.90, 0.24, 0.92)
+    }
+}

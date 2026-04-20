@@ -1,0 +1,9 @@
+on ready() {
+    log("terrain_playground ready")
+    set_color(#fff1a8)
+}
+
+on update(dt) {
+    let _ = dt
+    move_by_dt(18.0, 0.0)
+}

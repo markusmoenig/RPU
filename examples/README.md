@@ -1,0 +1,12 @@
+# Examples
+
+The projects in this directory are maintained alongside the current `rpu-core`,
+`rpu-runtime`, and `rpu-scenevm` compiler/runtime path.
+
+Use them as smoke-test projects while evolving the DSL and renderer.
+
+`hello_shapes`
+- Declaration-focused example for `rect`, `sprite`, camera, colors, layering, and simple entity-bound scripting.
+
+`terrain_playground`
+- Terrain-focused example for embedded `map`, `legend`, `ascii`, marker placement, and sprite spawning via `symbol`.

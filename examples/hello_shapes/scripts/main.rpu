@@ -1,0 +1,19 @@
+on ready() {
+    log("hello_shapes ready")
+    self.color = #ffbf47
+    Accent.color = #7ce0ff
+}
+
+on update(dt) {
+    let next_x = Mascot.x - 12.0 * dt
+    Mascot.x = next_x
+    Accent.x = Accent.x - 0.08
+    self.pos = Mascot.pos
+    self.y = clamp(self.y, 48.0, 260.0)
+    if next_x < 120.0 || (Accent.x < 260.0 && !(self.y < 200.0)) {
+        Mascot.x = 520.0
+        Accent.color = #ff8899
+    } else {
+        Accent.color = #7ce0ff
+    }
+}

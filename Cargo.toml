@@ -1,0 +1,30 @@
+[package]
+name = "rpu"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = [
+    ".",
+    "crates/rpu-build",
+    "crates/rpu-core",
+    "crates/rpu-runtime",
+    "crates/rpu-scenevm",
+]
+resolver = "2"
+
+[workspace.dependencies]
+anyhow = "1.0"
+bytemuck = { version = "1.25", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+pollster = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.9"
+wgpu = "27.0.1"
+winit = "0.30"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rpu-build = { path = "crates/rpu-build" }

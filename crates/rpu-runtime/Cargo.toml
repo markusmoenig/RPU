@@ -1,0 +1,10 @@
+[package]
+name = "rpu-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+rpu-core = { path = "../rpu-core" }
+rpu-scenevm = { path = "../rpu-scenevm" }
+

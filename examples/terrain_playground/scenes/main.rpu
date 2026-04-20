@@ -1,0 +1,48 @@
+scene Main {
+    meta {
+        title = "Terrain Playground"
+    }
+
+    camera MainCamera {
+        pos = (320, 240)
+        zoom = 1.0
+        background = (0.06, 0.08, 0.10, 1.0)
+    }
+
+    map Terrain {
+        origin = (80, 176)
+        cell = (48, 48)
+
+        legend {
+            x = marker
+            # = #c58c35
+            - = #4dc7ff
+            / = #7b8cff
+            \ = #5970d8
+        }
+
+        ascii {
+            x
+            ###/
+              /----
+                 \##
+        }
+    }
+
+    sprite Player {
+        layer = 2
+        z = 40
+        symbol = x
+        size = (144, 144)
+        color = #ffd447
+        script = "main.rpu"
+    }
+
+    rect SkyBand {
+        layer = -20
+        z = 0
+        pos = (32, 32)
+        size = (576, 96)
+        color = #203f58
+    }
+}
