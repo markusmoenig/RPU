@@ -1,5 +1,6 @@
 use anyhow::{Context as AnyhowContext, Result, anyhow};
 use bytemuck::{Pod, Zeroable};
+use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashSet;
 #[cfg(not(target_arch = "wasm32"))]
@@ -219,12 +220,36 @@ impl SceneFrame {
             texture_path: texture.map(ToOwned::to_owned),
         }));
     }
+
+    pub fn push_text(
+        &mut self,
+        layer: i32,
+        order: i32,
+        x: f32,
+        y: f32,
+        value: &str,
+        font: &str,
+        font_size: f32,
+        color: [f32; 4],
+    ) {
+        self.items.push(RenderItem::Text(RenderText {
+            layer,
+            order,
+            x,
+            y,
+            value: value.to_string(),
+            font_path: font.to_string(),
+            font_size,
+            color,
+        }));
+    }
 }
 
 #[derive(Clone)]
 pub enum RenderItem {
     Rect(RenderRect),
     Sprite(RenderSprite),
+    Text(RenderText),
 }
 
 #[derive(Clone)]
@@ -250,6 +275,18 @@ pub struct RenderSprite {
     pub flip_x: bool,
     pub flip_y: bool,
     pub texture_path: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct RenderText {
+    pub layer: i32,
+    pub order: i32,
+    pub x: f32,
+    pub y: f32,
+    pub value: String,
+    pub font_path: String,
+    pub font_size: f32,
+    pub color: [f32; 4],
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -502,6 +539,7 @@ struct GpuState {
     bind_group_layout: wgpu::BindGroupLayout,
     white_texture: GpuTexture,
     texture_cache: HashMap<String, GpuTexture>,
+    font_cache: HashMap<String, fontdue::Font>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -588,6 +626,7 @@ impl GpuState {
             bind_group_layout,
             white_texture,
             texture_cache: HashMap::new(),
+            font_cache: HashMap::new(),
         })
     }
 
@@ -601,12 +640,10 @@ impl GpuState {
     }
 
     fn render(&mut self, frame_ctx: &SceneFrame) -> std::result::Result<(), wgpu::SurfaceError> {
-        let batches = build_batches(frame_ctx.size, &frame_ctx.items);
-        for batch in &batches {
-            if let Some(path) = batch.texture_path.as_deref() {
-                self.ensure_texture(path);
-            }
+        for item in &frame_ctx.items {
+            self.ensure_item_texture(item);
         }
+        let batches = build_batches(frame_ctx.size, &frame_ctx.items, &self.texture_cache);
 
         let frame = self.surface.get_current_texture()?;
         let view = frame
@@ -687,6 +724,99 @@ impl GpuState {
         }
     }
 
+    fn ensure_item_texture(&mut self, item: &RenderItem) {
+        match item {
+            RenderItem::Rect(_) => {}
+            RenderItem::Sprite(sprite) => {
+                if let Some(path) = sprite.texture_path.as_deref() {
+                    self.ensure_texture(path);
+                }
+            }
+            RenderItem::Text(text) => {
+                let key = text.texture_key();
+                if self.texture_cache.contains_key(&key) {
+                    return;
+                }
+                match self.rasterize_text(text) {
+                    Some((width, height, rgba)) => {
+                        let texture = GpuTexture::from_rgba(
+                            &self.device,
+                            &self.queue,
+                            &self.sampler,
+                            &self.bind_group_layout,
+                            width,
+                            height,
+                            &rgba,
+                        );
+                        self.texture_cache.insert(key, texture);
+                    }
+                    None => {
+                        self.texture_cache.insert(key, self.white_texture.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    fn rasterize_text(&mut self, text: &RenderText) -> Option<(u32, u32, Vec<u8>)> {
+        let font = self.load_font(&text.font_path)?;
+        let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
+        layout.reset(&LayoutSettings::default());
+        layout.append(&[font], &TextStyle::new(&text.value, text.font_size, 0));
+
+        let glyphs = layout.glyphs();
+        if glyphs.is_empty() {
+            return Some((1, 1, vec![255, 255, 255, 0]));
+        }
+
+        let mut width = 0usize;
+        let mut height = 0usize;
+        for glyph in glyphs {
+            width = width.max((glyph.x + glyph.width as f32).ceil().max(0.0) as usize);
+            height = height.max((glyph.y + glyph.height as f32).ceil().max(0.0) as usize);
+        }
+        width = width.max(1);
+        height = height.max(1);
+
+        let mut rgba = vec![0u8; width * height * 4];
+        for glyph in glyphs {
+            let (metrics, bitmap) = font.rasterize_config(glyph.key);
+            let gx = glyph.x.round() as i32;
+            let gy = glyph.y.round() as i32;
+            for row in 0..metrics.height {
+                for col in 0..metrics.width {
+                    let dst_x = gx + col as i32;
+                    let dst_y = gy + row as i32;
+                    if dst_x < 0 || dst_y < 0 {
+                        continue;
+                    }
+                    let dst_x = dst_x as usize;
+                    let dst_y = dst_y as usize;
+                    if dst_x >= width || dst_y >= height {
+                        continue;
+                    }
+                    let alpha = bitmap[row * metrics.width + col];
+                    let idx = (dst_y * width + dst_x) * 4;
+                    rgba[idx] = 255;
+                    rgba[idx + 1] = 255;
+                    rgba[idx + 2] = 255;
+                    rgba[idx + 3] = alpha;
+                }
+            }
+        }
+
+        Some((width as u32, height as u32, rgba))
+    }
+
+    fn load_font(&mut self, path: &str) -> Option<&fontdue::Font> {
+        if !self.font_cache.contains_key(path) {
+            let bytes = std::fs::read(path).ok()?;
+            let font = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()?;
+            self.font_cache.insert(path.to_string(), font);
+        }
+        self.font_cache.get(path)
+    }
+
     fn texture_for_key(&self, path: Option<&str>) -> &GpuTexture {
         let Some(path) = path else {
             return &self.white_texture;
@@ -712,6 +842,7 @@ impl RenderItem {
         match self {
             RenderItem::Rect(rect) => rect.layer,
             RenderItem::Sprite(sprite) => sprite.layer,
+            RenderItem::Text(text) => text.layer,
         }
     }
 
@@ -719,20 +850,33 @@ impl RenderItem {
         match self {
             RenderItem::Rect(rect) => rect.order,
             RenderItem::Sprite(sprite) => sprite.order,
+            RenderItem::Text(text) => text.order,
         }
     }
 
-    fn texture_path(&self) -> Option<&str> {
+    fn texture_key(&self) -> Option<String> {
         match self {
             RenderItem::Rect(_) => None,
-            RenderItem::Sprite(sprite) => sprite.texture_path.as_deref(),
+            RenderItem::Sprite(sprite) => sprite.texture_path.clone(),
+            RenderItem::Text(text) => Some(text.texture_key()),
         }
+    }
+}
+
+impl RenderText {
+    fn texture_key(&self) -> String {
+        format!(
+            "text://{}:{}:{}",
+            self.font_path, self.font_size, self.value
+        )
     }
 }
 
 #[derive(Clone)]
 struct GpuTexture {
     bind_group: wgpu::BindGroup,
+    width: u32,
+    height: u32,
 }
 
 struct DrawBatch {
@@ -798,7 +942,11 @@ impl GpuTexture {
                 },
             ],
         });
-        Self { bind_group }
+        Self {
+            bind_group,
+            width: width.max(1),
+            height: height.max(1),
+        }
     }
 }
 
@@ -810,7 +958,11 @@ struct QuadVertex {
     uv: [f32; 2],
 }
 
-fn build_vertices(size: (u32, u32), rects: &[RenderItem]) -> Vec<QuadVertex> {
+fn build_vertices(
+    size: (u32, u32),
+    rects: &[RenderItem],
+    texture_cache: &HashMap<String, GpuTexture>,
+) -> Vec<QuadVertex> {
     let w = size.0.max(1) as f32;
     let h = size.1.max(1) as f32;
     let mut out = Vec::with_capacity(rects.len() * 6);
@@ -831,6 +983,11 @@ fn build_vertices(size: (u32, u32), rects: &[RenderItem]) -> Vec<QuadVertex> {
                 rect.flip_x,
                 rect.flip_y,
             ),
+            RenderItem::Text(text) => {
+                let key = text.texture_key();
+                let dims = texture_cache.get(&key).map(|texture| (texture.width as f32, texture.height as f32)).unwrap_or((1.0, 1.0));
+                (text.x, text.y, dims.0, dims.1, text.color, false, false)
+            }
         };
         let u0 = if flip_x { 1.0 } else { 0.0 };
         let u1 = if flip_x { 0.0 } else { 1.0 };
@@ -860,14 +1017,18 @@ fn build_vertices(size: (u32, u32), rects: &[RenderItem]) -> Vec<QuadVertex> {
     out
 }
 
-fn build_batches(size: (u32, u32), quads: &[RenderItem]) -> Vec<DrawBatch> {
+fn build_batches(
+    size: (u32, u32),
+    quads: &[RenderItem],
+    texture_cache: &HashMap<String, GpuTexture>,
+) -> Vec<DrawBatch> {
     let mut sorted: Vec<RenderItem> = quads.to_vec();
     sorted.sort_by_key(|item| (item.layer(), item.order()));
 
     let mut batches: Vec<DrawBatch> = Vec::new();
     for quad in &sorted {
-        let key = quad.texture_path().map(ToOwned::to_owned);
-        let vertices = build_vertices(size, std::slice::from_ref(quad));
+        let key = quad.texture_key();
+        let vertices = build_vertices(size, std::slice::from_ref(quad), texture_cache);
         match batches.last_mut() {
             Some(last) if last.texture_path == key => last.vertices.extend(vertices),
             _ => batches.push(DrawBatch {

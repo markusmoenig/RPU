@@ -50,6 +50,7 @@ Supported today:
 - numeric expressions
 - property reads and writes
 - local bindings with `let`
+- persistent per-entity script state with `state`
 - `if` / `else`
 - boolean conditions with `&&`, `||`, `!`
 - top-level reusable functions
@@ -67,6 +68,8 @@ Current readable/writable properties:
 - `self.size`
 - `self.color`
 - `self.texture` for sprites
+- `self.text` for text nodes
+- `self.some_state`
 - `Name.x`
 - `Name.y`
 - `Name.width`
@@ -75,6 +78,8 @@ Current readable/writable properties:
 - `Name.size`
 - `Name.color`
 - `Name.texture` for sprites
+- `Name.text` for text nodes
+- `Name.some_state`
 
 Example:
 
@@ -94,6 +99,31 @@ Mascot.x = next_x
 ```
 
 Locals are shared with nested `if` blocks and with called functions in the same handler execution.
+
+## Persistent state
+
+Scripts can declare persistent state that survives across frames on the bound runtime entity:
+
+```rpu
+state score = 0
+state lives = 3
+state invulnerable_until = 0
+```
+
+State values can be read as bare variables inside the same script:
+
+```rpu
+score = score + 10
+```
+
+They can also be accessed through entity properties:
+
+```rpu
+self.score = self.score + 10
+HudState.lives = HudState.lives - 1
+```
+
+Use `let` for temporary per-handler values and `state` for data that must persist between updates.
 
 ## Conditions
 
@@ -166,6 +196,10 @@ Current built-in runtime queries:
 - `key("Space")`
 - `exists("Name")`
 - `first_overlap("group")`
+- `lerp(a, b, t)`
+- `pulse(period)`
+- `smoothstep(edge0, edge1, x)`
+- `alpha(color, alpha)`
 - `time()`
 - `difficulty()`
 - `every(seconds)`
@@ -211,6 +245,14 @@ if exists(hit) {
     destroy(self)
 }
 ```
+
+`lerp(a, b, t)` linearly interpolates between two scalar values.
+
+`pulse(period)` returns a repeating `0..1` pulse over the given period in seconds.
+
+`smoothstep(edge0, edge1, x)` returns a smoothed `0..1` interpolation factor, useful for eased motion and fades.
+
+`alpha(color, alpha)` returns the given color with a replaced alpha channel.
 
 `difficulty()` is currently a simple time-based level that increases as the session runs.
 

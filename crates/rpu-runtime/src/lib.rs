@@ -2,7 +2,8 @@ use anyhow::Result;
 use rpu_core::{
     AnimationMode, AsciiMapNode, BinaryOp, BytecodeOp, CompareOp, CompiledProject, Condition,
     DestroyTarget, DrawCommand, Expr, MapLegendMeaning, OpCode, RectNode, ResizeMode,
-    RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget, SpriteNode, WindowConfig,
+    RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget, SpriteNode, TextNode,
+    WindowConfig,
 };
 use rpu_scenevm::{run_app, RpuSceneApp, RuntimeContext, SceneFrame};
 use std::collections::HashMap;
@@ -129,6 +130,36 @@ impl RpuSceneApp for RpuRuntimeApp {
                         self.session.query_state.elapsed_time,
                     );
                 }
+                RuntimeEntityKind::Text {
+                    value,
+                    font,
+                    font_size,
+                } => {
+                    let font_path = self
+                        .session
+                        .project
+                        .root()
+                        .join("assets")
+                        .join(font);
+                    let (x, y, _, _) = world_to_screen(
+                        &camera,
+                        &view,
+                        entity.pos[0],
+                        entity.pos[1],
+                        0.0,
+                        0.0,
+                    );
+                    frame.push_text(
+                        entity.layer,
+                        entity.z * 1000 + stable_order,
+                        x,
+                        y,
+                        value,
+                        &pathbuf_to_string(font_path),
+                        *font_size,
+                        entity.color,
+                    );
+                }
             }
         }
     }
@@ -174,6 +205,7 @@ struct RuntimeEntity {
     flip_x: bool,
     flip_y: bool,
     script: Option<String>,
+    script_state: HashMap<String, Value>,
     kind: RuntimeEntityKind,
 }
 
@@ -186,6 +218,11 @@ enum RuntimeEntityKind {
         animation_fps: f32,
         animation_mode: AnimationMode,
         destroy_on_animation_end: bool,
+    },
+    Text {
+        value: String,
+        font: String,
+        font_size: f32,
     },
 }
 
@@ -228,7 +265,7 @@ impl RuntimeSession {
         let compiled = project.compile()?;
         log_compilation("initial compile", &compiled);
         let world = RuntimeWorld::from_compiled(&compiled);
-        Ok(Self {
+        let mut session = Self {
             project,
             compiled,
             world,
@@ -242,7 +279,9 @@ impl RuntimeSession {
             every_state: HashMap::new(),
             rand_state: HashMap::new(),
             rng_state: 0x9E3779B97F4A7C15,
-        })
+        };
+        session.initialize_script_state_all();
+        Ok(session)
     }
 
     fn mark_initialized(&mut self, ctx: &RuntimeContext) {
@@ -329,6 +368,64 @@ impl RuntimeSession {
         low + sample * (high - low)
     }
 
+    fn initialize_script_state_all(&mut self) {
+        let names: Vec<String> = self
+            .world
+            .entities
+            .iter()
+            .map(|entity| entity.name.clone())
+            .collect();
+        for name in names {
+            if let Some(index) = self.world.find_entity_index(&name) {
+                self.initialize_entity_state(index);
+            }
+        }
+    }
+
+    fn initialize_entity_state(&mut self, entity_index: usize) {
+        let Some(entity) = self.world.entities.get(entity_index) else {
+            return;
+        };
+        let Some(script_name) = entity.script.as_deref() else {
+            return;
+        };
+        let script_path = PathBuf::from("scripts").join(script_name);
+        let Some(script) = self
+            .compiled
+            .bytecode_scripts
+            .iter()
+            .find(|script| script.path == script_path)
+            .cloned()
+        else {
+            return;
+        };
+        let entity_name = entity.name.clone();
+        let mut locals = HashMap::new();
+        for state in script.state {
+            let Some(value) = self.eval_expr(
+                entity_index,
+                &entity_name,
+                &script_path,
+                "state",
+                Some(state.line),
+                &state.init,
+                0.0,
+                &mut locals,
+                0,
+            ) else {
+                eprintln!(
+                    "rpu: script warning: failed to initialize state `{}` in {}:{} for {}",
+                    state.name,
+                    script_path.display(),
+                    state.line,
+                    entity_name,
+                );
+                continue;
+            };
+            self.write_state(entity_index, &state.name, value);
+        }
+    }
+
     fn maybe_reload(&mut self) {
         if self.last_reload_poll.elapsed() < Duration::from_millis(500) {
             return;
@@ -344,6 +441,7 @@ impl RuntimeSession {
                     log_compilation("hot reload", &compiled);
                     self.compiled = compiled;
                     self.world = RuntimeWorld::from_compiled(&self.compiled);
+                    self.initialize_script_state_all();
                     if self.initialized {
                         self.execute_event("ready", 0.0);
                     }
@@ -548,6 +646,30 @@ impl RuntimeSession {
                 locals.insert(name.clone(), value);
                 ExecSignal::Continue
             }
+            OpCode::StateSet(name, expr) => {
+                let Some(value) = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    Some(op.line),
+                    expr,
+                    dt,
+                    locals,
+                    call_depth,
+                ) else {
+                    eprintln!(
+                        "rpu: script warning: failed to evaluate state assignment in {}:{} for {}:{}",
+                        script_path.display(),
+                        op.line,
+                        entity_name,
+                        event
+                    );
+                    return ExecSignal::Continue;
+                };
+                self.write_state(entity_index, name, value);
+                ExecSignal::Continue
+            }
             OpCode::Assign(target, expr) => {
                 let Some(value) = self.eval_expr(
                     entity_index,
@@ -673,6 +795,7 @@ impl RuntimeSession {
                     self.query_state.elapsed_time,
                 )
                 {
+                    self.initialize_entity_state(spawned_index);
                     if self.initialized {
                         self.execute_entity_event(spawned_index, "ready", 0.0);
                     }
@@ -1104,7 +1227,10 @@ impl RuntimeSession {
             Expr::Number(value) => Some(Value::Scalar(*value)),
             Expr::Dt => Some(Value::Scalar(dt)),
             Expr::String(value) => Some(Value::String(value.clone())),
-            Expr::Variable(name) => locals.get(name).cloned(),
+            Expr::Variable(name) => locals
+                .get(name)
+                .cloned()
+                .or_else(|| self.read_state(entity_index, name)),
             Expr::Call(name, args) => self
                 .eval_builtin_query(entity_index, entity_name, script_path, event, line, name, args, dt, locals, call_depth)
                 .or_else(|| {
@@ -1223,6 +1349,155 @@ impl RuntimeSession {
             "age" if args.is_empty() => {
                 let entity = self.world.entities.get(entity_index)?;
                 Some(Value::Scalar((self.query_state.elapsed_time - entity.spawn_time).max(0.0)))
+            }
+            "lerp" if args.len() == 3 => {
+                let a = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[0],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let b = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[1],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let t = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[2],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                Some(Value::Scalar(a + (b - a) * t))
+            }
+            "pulse" if args.len() == 1 => {
+                let period = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[0],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let period = period.max(0.001);
+                let phase = (self.query_state.elapsed_time / period) * std::f32::consts::TAU;
+                Some(Value::Scalar(0.5 + 0.5 * phase.sin()))
+            }
+            "smoothstep" if args.len() == 3 => {
+                let edge0 = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[0],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let edge1 = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[1],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let x = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[2],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let t = if (edge1 - edge0).abs() < f32::EPSILON {
+                    0.0
+                } else {
+                    ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0)
+                };
+                Some(Value::Scalar(t * t * (3.0 - 2.0 * t)))
+            }
+            "alpha" if args.len() == 2 => {
+                let mut color = match self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[0],
+                    dt,
+                    locals,
+                    call_depth,
+                )? {
+                    Value::Color(color) => color,
+                    _ => return None,
+                };
+                let alpha = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[1],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                color[3] = alpha.clamp(0.0, 1.0);
+                Some(Value::Color(color))
+            }
+            "format_int" if args.len() == 2 => {
+                let value = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[0],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let digits = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[1],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let digits = digits.max(1.0).floor() as usize;
+                let value = value.max(0.0).floor() as i32;
+                Some(Value::String(format!("{value:0digits$}")))
             }
             "difficulty" if args.is_empty() => {
                 Some(Value::Scalar(1.0 + (self.query_state.elapsed_time / 12.0).floor()))
@@ -1361,8 +1636,15 @@ impl RuntimeSession {
                     *animation_mode = AnimationMode::Loop;
                     *destroy_on_animation_end = false;
                 }
-                RuntimeEntityKind::Rect => return false,
+                RuntimeEntityKind::Rect | RuntimeEntityKind::Text { .. } => return false,
             },
+            (ScriptProperty::Text, Value::String(value)) => match &mut entity.kind {
+                RuntimeEntityKind::Text { value: current, .. } => *current = value,
+                RuntimeEntityKind::Rect | RuntimeEntityKind::Sprite { .. } => return false,
+            },
+            (ScriptProperty::State(name), value) => {
+                entity.script_state.insert(name.clone(), value);
+            }
             _ => return false,
         }
 
@@ -1387,9 +1669,29 @@ impl RuntimeSession {
                 RuntimeEntityKind::Sprite { texture, .. } => {
                     Value::String(texture.clone().unwrap_or_default())
                 }
-                RuntimeEntityKind::Rect => return None,
+                RuntimeEntityKind::Rect | RuntimeEntityKind::Text { .. } => return None,
             },
+            ScriptProperty::Text => match &entity.kind {
+                RuntimeEntityKind::Text { value, .. } => Value::String(value.clone()),
+                RuntimeEntityKind::Rect | RuntimeEntityKind::Sprite { .. } => return None,
+            },
+            ScriptProperty::State(name) => entity.script_state.get(name)?.clone(),
         })
+    }
+
+    fn read_state(&self, entity_index: usize, name: &str) -> Option<Value> {
+        self.world
+            .entities
+            .get(entity_index)?
+            .script_state
+            .get(name)
+            .cloned()
+    }
+
+    fn write_state(&mut self, entity_index: usize, name: &str, value: Value) {
+        if let Some(entity) = self.world.entities.get_mut(entity_index) {
+            entity.script_state.insert(name.to_string(), value);
+        }
     }
 }
 
@@ -1413,6 +1715,14 @@ impl RuntimeWorld {
                 }
                 for sprite in &scene.sprites {
                     let entity = runtime_sprite_entity(sprite, &markers);
+                    if entity.template {
+                        templates.push(entity);
+                    } else {
+                        entities.push(entity);
+                    }
+                }
+                for text in &scene.texts {
+                    let entity = runtime_text_entity(text);
                     if entity.template {
                         templates.push(entity);
                     } else {
@@ -1473,6 +1783,7 @@ impl RuntimeWorld {
     fn remove_finished_animations(&mut self, elapsed_time: f32) {
         self.entities.retain(|entity| match &entity.kind {
             RuntimeEntityKind::Rect => true,
+            RuntimeEntityKind::Text { .. } => true,
             RuntimeEntityKind::Sprite {
                 frames,
                 animation_fps,
@@ -1627,6 +1938,7 @@ fn runtime_rect_entity(rect: &RectNode) -> RuntimeEntity {
         flip_x: false,
         flip_y: false,
         script: rect.visual.script_binding.clone(),
+        script_state: HashMap::new(),
         kind: RuntimeEntityKind::Rect,
     }
 }
@@ -1659,12 +1971,40 @@ fn runtime_sprite_entity(
         flip_x: sprite.flip_x,
         flip_y: sprite.flip_y,
         script: sprite.visual.script_binding.clone(),
+        script_state: HashMap::new(),
         kind: RuntimeEntityKind::Sprite {
             texture: sprite.textures.first().cloned(),
             frames: sprite.textures.clone(),
             animation_fps: sprite.animation_fps,
             animation_mode: sprite.animation_mode,
             destroy_on_animation_end: sprite.destroy_on_animation_end,
+        },
+    }
+}
+
+fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
+    RuntimeEntity {
+        name: text.name.clone(),
+        template: text.visual.template,
+        visible: text.visual.visible,
+        spawn_time: 0.0,
+        layer: text.visual.layer,
+        z: text.visual.z,
+        pos: text.visual.pos,
+        size: [0.0, 0.0],
+        color: text.visual.color,
+        group: text.visual.group.clone(),
+        scroll: [0.0, 0.0],
+        repeat_x: false,
+        repeat_y: false,
+        flip_x: false,
+        flip_y: false,
+        script: text.visual.script_binding.clone(),
+        script_state: HashMap::new(),
+        kind: RuntimeEntityKind::Text {
+            value: text.value.clone(),
+            font: text.font.clone(),
+            font_size: text.font_size,
         },
     }
 }
@@ -1770,6 +2110,20 @@ fn submit_draw_command(
                 sprite.flip_y,
                 texture_path.as_deref(),
                 0.0,
+            );
+        }
+        DrawCommand::Text(text) => {
+            let font_path = project.root().join("assets").join(&text.font);
+            let (x, y, _, _) = world_to_screen(camera, view, text.x, text.y, 0.0, 0.0);
+            frame.push_text(
+                text.layer,
+                text.z * 1000 + stable_order,
+                x,
+                y,
+                &text.value,
+                &pathbuf_to_string(font_path),
+                text.font_size,
+                text.color,
             );
         }
     }

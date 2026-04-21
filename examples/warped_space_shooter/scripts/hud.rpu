@@ -1,0 +1,28 @@
+state score = 0
+state lives = 3
+state invulnerable_until = 0
+state respawn_until = 0
+
+fn life_color(slot) {
+    if self.lives >= slot {
+        return #f4f8ff
+    }
+    return #f4f8ff26
+}
+
+on ready() {
+    // HudState now uses named persistent script state instead of geometry-property hacks.
+    ScoreValue.text = format_int(self.score, 4)
+    Life1.color = life_color(1.0)
+    Life2.color = life_color(2.0)
+    Life3.color = life_color(3.0)
+}
+
+on update(dt) {
+    let _ = dt
+    // Score is rendered as a fixed 4-digit readout.
+    ScoreValue.text = format_int(self.score, 4)
+    Life1.color = life_color(1.0)
+    Life2.color = life_color(2.0)
+    Life3.color = life_color(3.0)
+}

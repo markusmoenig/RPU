@@ -111,8 +111,16 @@ pub enum DiagnosticSeverity {
 #[derive(Debug, Clone)]
 pub struct BytecodeScript {
     pub path: PathBuf,
+    pub state: Vec<BytecodeState>,
     pub handlers: Vec<BytecodeHandler>,
     pub functions: Vec<BytecodeFunction>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BytecodeState {
+    pub name: String,
+    pub init: Expr,
+    pub line: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +152,8 @@ pub enum ScriptProperty {
     Size,
     Color,
     Texture,
+    Text,
+    State(String),
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +212,7 @@ pub enum OpCode {
     Call(String, Vec<Expr>),
     Return(Expr),
     Let(String, Expr),
+    StateSet(String, Expr),
     Assign(ScriptTarget, Expr),
     If(Condition, Vec<BytecodeOp>, Vec<BytecodeOp>),
     Spawn(String, Option<String>, Expr, Expr),
@@ -241,6 +252,7 @@ pub struct SceneNode {
     pub maps: Vec<AsciiMapNode>,
     pub rects: Vec<RectNode>,
     pub sprites: Vec<SpriteNode>,
+    pub texts: Vec<TextNode>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -276,6 +288,15 @@ pub struct CameraNode {
     pub pos: [f32; 2],
     pub zoom: f32,
     pub background: [f32; 4],
+}
+
+#[derive(Debug, Clone)]
+pub struct TextNode {
+    pub name: String,
+    pub visual: VisualNode,
+    pub value: String,
+    pub font: String,
+    pub font_size: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -325,6 +346,7 @@ pub enum MapLegendMeaning {
 pub enum DrawCommand {
     Rect(SceneRect),
     Sprite(SceneSprite),
+    Text(SceneText),
 }
 
 #[derive(Debug, Clone)]
@@ -357,6 +379,19 @@ pub struct SceneSprite {
     pub repeat_y: bool,
     pub flip_x: bool,
     pub flip_y: bool,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SceneText {
+    pub layer: i32,
+    pub z: i32,
+    pub x: f32,
+    pub y: f32,
+    pub color: [f32; 4],
+    pub value: String,
+    pub font: String,
+    pub font_size: f32,
     pub visible: bool,
 }
 
@@ -440,6 +475,7 @@ impl RpuProject {
         let script_references = extract_script_references(&parsed_scenes);
         let external_script_references = extract_external_script_references(&parsed_scenes);
         let texture_references = extract_texture_references(&parsed_scenes);
+        let font_references = extract_font_references(&parsed_scenes);
         if !scenes.is_empty() && script_references.is_empty() {
             diagnostics.push(Diagnostic::warning(
                 "scene files do not reference any script files",
@@ -469,6 +505,16 @@ impl RpuProject {
             if !assets.iter().any(|asset| asset == &expected) {
                 diagnostics.push(Diagnostic::error(
                     format!("referenced sprite texture is missing: {}", texture_name),
+                    Some(expected),
+                ));
+            }
+        }
+
+        for font_name in &font_references {
+            let expected = PathBuf::from("assets").join(font_name);
+            if !assets.iter().any(|asset| asset == &expected) {
+                diagnostics.push(Diagnostic::error(
+                    format!("referenced text font is missing: {}", font_name),
                     Some(expected),
                 ));
             }
@@ -813,6 +859,7 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
     let mut current_map: Option<AsciiMapNode> = None;
     let mut current_rect: Option<RectNode> = None;
     let mut current_sprite: Option<SpriteNode> = None;
+    let mut current_text: Option<TextNode> = None;
     let mut inline_script_capture: Option<(usize, Vec<String>)> = None;
     let mut in_meta = false;
     let mut in_legend = false;
@@ -843,6 +890,8 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                     append_inline_script(&mut rect.visual, &source);
                 } else if let Some(sprite) = current_sprite.as_mut() {
                     append_inline_script(&mut sprite.visual, &source);
+                } else if let Some(text) = current_text.as_mut() {
+                    append_inline_script(&mut text.visual, &source);
                 }
                 inline_script_capture = None;
             }
@@ -864,6 +913,7 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 maps: Vec::new(),
                 rects: Vec::new(),
                 sprites: Vec::new(),
+                texts: Vec::new(),
             });
             continue;
         }
@@ -975,6 +1025,25 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             continue;
         }
 
+        if let Some(name) = parse_block_start(line, "text") {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("text block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_text = Some(TextNode {
+                name,
+                visual: default_visual_node(2, [1.0, 1.0], [1.0, 1.0, 1.0, 1.0]),
+                value: String::new(),
+                font: String::new(),
+                font_size: 16.0,
+            });
+            continue;
+        }
+
         if let Some(name) = parse_block_start(line, "camera") {
             if current_scene.is_none() {
                 diagnostics.push(Diagnostic::warning_at(
@@ -993,7 +1062,7 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             continue;
         }
 
-        if (current_rect.is_some() || current_sprite.is_some())
+        if (current_rect.is_some() || current_sprite.is_some() || current_text.is_some())
             && (line.starts_with("on ") || line.starts_with("fn "))
             && line.ends_with('{')
         {
@@ -1027,6 +1096,18 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                         &sprite.name,
                     );
                     scene_node.sprites.push(sprite);
+                }
+                continue;
+            }
+            if let Some(mut text) = current_text.take() {
+                if let Some(scene_node) = current_scene.as_mut() {
+                    finalize_visual_script_binding(
+                        &mut text.visual,
+                        &scene.relative_path,
+                        &scene_node.name,
+                        &text.name,
+                    );
+                    scene_node.texts.push(text);
                 }
                 continue;
             }
@@ -1110,6 +1191,19 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             continue;
         }
 
+        if let Some(text) = current_text.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_text_property(
+                    text,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
         if let Some(map) = current_map.as_mut() {
             if let Some(property) = parse_property(line) {
                 apply_map_property(map, &property, index + 1, &scene.relative_path, diagnostics);
@@ -1136,6 +1230,8 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             append_inline_script(&mut rect.visual, &source);
         } else if let Some(sprite) = current_sprite.as_mut() {
             append_inline_script(&mut sprite.visual, &source);
+        } else if let Some(text) = current_text.as_mut() {
+            append_inline_script(&mut text.visual, &source);
         }
     }
     if let Some(camera) = current_camera.take() {
@@ -1157,6 +1253,17 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 &sprite.name,
             );
             scene_node.sprites.push(sprite);
+        }
+    }
+    if let Some(mut text) = current_text.take() {
+        if let Some(scene_node) = current_scene.as_mut() {
+            finalize_visual_script_binding(
+                &mut text.visual,
+                &scene.relative_path,
+                &scene_node.name,
+                &text.name,
+            );
+            scene_node.texts.push(text);
         }
     }
     if let Some(mut rect) = current_rect.take() {
@@ -1187,6 +1294,7 @@ fn extract_script_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
                 .iter()
                 .filter_map(|rect| rect.visual.script_binding.clone())
                 .chain(scene.sprites.iter().filter_map(|sprite| sprite.visual.script_binding.clone()))
+                .chain(scene.texts.iter().filter_map(|text| text.visual.script_binding.clone()))
         })
         .collect()
 }
@@ -1210,6 +1318,15 @@ fn extract_texture_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
         .iter()
         .flat_map(|document| document.scenes.iter())
         .flat_map(|scene| scene.sprites.iter().flat_map(|sprite| sprite.textures.iter().cloned()))
+        .collect()
+}
+
+fn extract_font_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
+    parsed_scenes
+        .iter()
+        .flat_map(|document| document.scenes.iter())
+        .flat_map(|scene| scene.texts.iter().map(|text| text.font.clone()))
+        .filter(|font| !font.is_empty())
         .collect()
 }
 
@@ -1240,6 +1357,13 @@ fn collect_inline_script_sources(
             for sprite in &scene.sprites {
                 if let Some(source) =
                     compile_inline_visual_script(&document.path, scene, &sprite.name, &sprite.visual, &scene_modified, &script_sources)
+                {
+                    generated.push(source);
+                }
+            }
+            for text in &scene.texts {
+                if let Some(source) =
+                    compile_inline_visual_script(&document.path, scene, &text.name, &text.visual, &scene_modified, &script_sources)
                 {
                     generated.push(source);
                 }
@@ -1338,6 +1462,19 @@ fn compile_scene_draw_commands(parsed_scenes: &[SceneDocument]) -> Vec<DrawComma
                         flip_x: sprite.flip_x,
                         flip_y: sprite.flip_y,
                         visible: sprite.visual.visible,
+                    })
+                }))
+                .chain(scene.texts.iter().filter(|text| text.visual.visible && !text.visual.template).map(|text| {
+                    DrawCommand::Text(SceneText {
+                        layer: text.visual.layer,
+                        z: text.visual.z,
+                        x: text.visual.pos[0],
+                        y: text.visual.pos[1],
+                        color: text.visual.color,
+                        value: text.value.clone(),
+                        font: text.font.clone(),
+                        font_size: text.font_size,
+                        visible: text.visual.visible,
                     })
                 }))
         })
@@ -1474,6 +1611,20 @@ const SPRITE_SCHEMA: &[SchemaEntry] = &[
     SchemaEntry { key: "z", kind: PropertyKind::I32 },
     SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
     SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "color", kind: PropertyKind::Color },
+    SchemaEntry { key: "script", kind: PropertyKind::String },
+];
+
+const TEXT_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry { key: "value", kind: PropertyKind::String },
+    SchemaEntry { key: "font", kind: PropertyKind::String },
+    SchemaEntry { key: "font_size", kind: PropertyKind::F32 },
+    SchemaEntry { key: "visible", kind: PropertyKind::Bool },
+    SchemaEntry { key: "template", kind: PropertyKind::Bool },
+    SchemaEntry { key: "group", kind: PropertyKind::String },
+    SchemaEntry { key: "layer", kind: PropertyKind::I32 },
+    SchemaEntry { key: "z", kind: PropertyKind::I32 },
+    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
     SchemaEntry { key: "color", kind: PropertyKind::Color },
     SchemaEntry { key: "script", kind: PropertyKind::String },
 ];
@@ -1809,6 +1960,32 @@ fn apply_sprite_property(
     }
 }
 
+fn apply_text_property(
+    text: &mut TextNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) =
+        parse_schema_value(TEXT_SCHEMA, property, line, "text", path, diagnostics)
+    {
+        match (key, value) {
+            ("value", PropertyValue::String(value)) => text.value = value,
+            ("font", PropertyValue::String(font)) => text.font = font,
+            ("font_size", PropertyValue::F32(size)) => text.font_size = size.max(1.0),
+            _ => apply_visual_property(
+                &mut text.visual,
+                property,
+                line,
+                "text",
+                path,
+                diagnostics,
+            ),
+        }
+    }
+}
+
 fn apply_map_property(
     map: &mut AsciiMapNode,
     property: &Property<'_>,
@@ -2082,15 +2259,20 @@ fn compile_script(script: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -> Byt
     for (index, raw) in script.contents.lines().enumerate() {
         let line_no = index + 1;
         let line = raw.trim_end_matches('\r');
-        if line.trim() == "} else {" {
+        let trimmed = line.trim();
+        if trimmed == "} else {" {
             lines.push((line_no, "}".to_string()));
             lines.push((line_no, "else {".to_string()));
+        } else if let Some(rest) = trimmed.strip_prefix("} else if ") {
+            lines.push((line_no, "}".to_string()));
+            lines.push((line_no, format!("else if {rest}")));
         } else {
             lines.push((line_no, line.to_string()));
         }
     }
     let mut handlers = Vec::new();
     let mut functions = Vec::new();
+    let mut state = Vec::new();
     let mut index = 0usize;
 
     while index < lines.len() {
@@ -2137,6 +2319,25 @@ fn compile_script(script: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -> Byt
             continue;
         }
 
+        if let Some(rest) = line.strip_prefix("state ") {
+            let Some((name, init)) = parse_state_declaration(rest) else {
+                diagnostics.push(Diagnostic::warning_at(
+                    "invalid state declaration",
+                    Some(script.relative_path.clone()),
+                    *line_no,
+                ));
+                index += 1;
+                continue;
+            };
+            state.push(BytecodeState {
+                name,
+                init,
+                line: *line_no,
+            });
+            index += 1;
+            continue;
+        }
+
         diagnostics.push(Diagnostic::warning_at(
             "script statement is outside of an event block",
             Some(script.relative_path.clone()),
@@ -2154,6 +2355,7 @@ fn compile_script(script: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -> Byt
 
     BytecodeScript {
         path: script.relative_path.clone(),
+        state,
         handlers,
         functions,
     }
@@ -2185,14 +2387,7 @@ fn compile_script_block(
             *index += 1;
             if let Some(condition) = parse_condition(condition_text.trim()) {
                 let body = compile_script_block(lines, index, script, diagnostics);
-                let mut else_body = Vec::new();
-                if *index < lines.len() {
-                    let else_line = lines[*index].1.trim();
-                    if else_line == "else {" {
-                        *index += 1;
-                        else_body = compile_script_block(lines, index, script, diagnostics);
-                    }
-                }
+                let else_body = compile_else_branch(lines, index, script, diagnostics);
                 ops.push(BytecodeOp {
                     line: *line_no,
                     op: OpCode::If(condition, body, else_body),
@@ -2224,6 +2419,46 @@ fn compile_script_block(
     }
 
     ops
+}
+
+fn compile_else_branch(
+    lines: &[(usize, String)],
+    index: &mut usize,
+    script: &SourceFile,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<BytecodeOp> {
+    if *index >= lines.len() {
+        return Vec::new();
+    }
+
+    let (line_no, raw_line) = &lines[*index];
+    let line = raw_line.trim();
+
+    if line == "else {" {
+        *index += 1;
+        return compile_script_block(lines, index, script, diagnostics);
+    }
+
+    if let Some(condition_text) = line.strip_prefix("else if ").and_then(|rest| rest.strip_suffix('{')) {
+        *index += 1;
+        if let Some(condition) = parse_condition(condition_text.trim()) {
+            let body = compile_script_block(lines, index, script, diagnostics);
+            let else_body = compile_else_branch(lines, index, script, diagnostics);
+            return vec![BytecodeOp {
+                line: *line_no,
+                op: OpCode::If(condition, body, else_body),
+            }];
+        }
+
+        diagnostics.push(Diagnostic::warning_at(
+            "invalid else-if condition",
+            Some(script.relative_path.clone()),
+            *line_no,
+        ));
+        let _ = compile_script_block(lines, index, script, diagnostics);
+    }
+
+    Vec::new()
 }
 
 fn compile_statement(line: &str) -> Option<OpCode> {
@@ -2261,12 +2496,38 @@ fn compile_statement(line: &str) -> Option<OpCode> {
     if let Some((left, right)) = line.split_once('=') {
         let left = left.trim();
         let right = right.trim();
+        if is_state_identifier(left) {
+            return Some(OpCode::StateSet(left.to_string(), parse_expr(right)?));
+        }
+    }
+
+    if let Some((left, right)) = line.split_once('=') {
+        let left = left.trim();
+        let right = right.trim();
         if let (Some(target), Some(expr)) = (parse_script_target(left), parse_expr(right)) {
             return Some(OpCode::Assign(target, expr));
         }
     }
 
     Some(compile_op(line))
+}
+
+fn parse_state_declaration(value: &str) -> Option<(String, Expr)> {
+    let (name, init) = value.split_once('=')?;
+    let name = name.trim();
+    if !is_state_identifier(name) {
+        return None;
+    }
+    Some((name.to_string(), parse_expr(init.trim())?))
+}
+
+fn is_state_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(ch) if ch.is_ascii_alphabetic() || ch == '_' => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn parse_spawn_statement(value: &str) -> Option<(String, Option<String>, Expr, Expr)> {
@@ -2350,6 +2611,8 @@ fn parse_script_target(value: &str) -> Option<ScriptTarget> {
         "size" => ScriptProperty::Size,
         "color" => ScriptProperty::Color,
         "texture" => ScriptProperty::Texture,
+        "text" => ScriptProperty::Text,
+        other if is_state_identifier(other) => ScriptProperty::State(other.to_string()),
         _ => return None,
     };
 
@@ -2512,7 +2775,11 @@ fn tokenize_expr(value: &str) -> Option<Vec<ExprToken>> {
                                 | ExprToken::Comma
                         )
                 );
-                if unary_context {
+                let next_is_number = chars
+                    .peek()
+                    .map(|(_, next_ch)| next_ch.is_ascii_digit() || *next_ch == '.')
+                    .unwrap_or(false);
+                if unary_context && next_is_number {
                     let start = index;
                     let mut end = index + ch.len_utf8();
                     while let Some((next_index, next_ch)) = chars.peek().copied() {
@@ -2608,6 +2875,11 @@ fn parse_expr_bp(tokens: &[ExprToken], index: &mut usize, min_bp: u8) -> Option<
         ExprToken::Number(value) => {
             *index += 1;
             Expr::Number(*value)
+        }
+        ExprToken::Minus => {
+            *index += 1;
+            let rhs = parse_expr_bp(tokens, index, 5)?;
+            Expr::Binary(Box::new(Expr::Number(0.0)), BinaryOp::Sub, Box::new(rhs))
         }
         ExprToken::Dt => {
             *index += 1;

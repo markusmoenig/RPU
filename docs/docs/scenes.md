@@ -31,6 +31,7 @@ Current scene nodes:
 - `camera`
 - `rect`
 - `sprite`
+- `text`
 - `map`
 
 ## Visual node properties
@@ -111,6 +112,38 @@ texture = ["shoot1.png", "shoot2.png"]
 `animation_mode = "once"` plays the frame list once and then holds on the last frame.
 
 `destroy_on_animation_end = true` removes a runtime sprite instance automatically when a `once` animation finishes. This is useful for short-lived effects such as explosions.
+
+## Text
+
+`text` nodes render strings using a font file from `assets/`.
+
+Current text properties:
+
+- `value`
+- `font`
+- `font_size`
+- `visible`
+- `template`
+- `group`
+- `layer`
+- `z`
+- `pos`
+- `color`
+- `script`
+
+Example:
+
+```rpu
+text Score {
+    pos = (12, 8)
+    value = "SCORE 000000"
+    font = "BetterPixels.ttf"
+    font_size = 16.0
+    color = #f4f8ff
+}
+```
+
+The `font` property should point to a `.ttf` file in `assets/`.
 
 Visual nodes can also embed script functions and handlers directly:
 

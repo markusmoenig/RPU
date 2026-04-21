@@ -1,4 +1,10 @@
 fn player_tint() {
+    if time() < HudState.respawn_until {
+        return #ffffff00
+    }
+    if time() < HudState.invulnerable_until {
+        return alpha(#f4f8ff, lerp(0.28, 0.92, pulse(0.14)))
+    }
     if input_action() {
         return #ff9e7a
     }
@@ -22,26 +28,64 @@ on ready() {
 }
 
 on update(dt) {
-    let speed = 70.0 * dt
+    let intro_t = smoothstep(0.0, 1.0, time() / 0.75)
+    let intro_target_x = screen_width() * 0.33
+    let respawn_y = clamp(screen_height() * 0.5 - self.height * 0.5, 10.0, screen_height() - 32.0)
+    let respawn_start_x = -self.width - 48.0
+    let respawn_target_x = 20.0
+    let respawn_t = smoothstep(0.0, 1.0, (time() - HudState.respawn_until) / 0.45)
 
-    if input_left() {
-        self.x = self.x - speed
-    }
-    if input_right() {
-        self.x = self.x + speed
-    }
-    if input_up() {
-        self.y = self.y - speed
-    }
-    if input_down() {
-        self.y = self.y + speed
-    }
+    // First boot flies farther into frame than a later respawn.
+    if time() < 0.75 {
+        self.x = lerp(-self.width - 96.0, intro_target_x, intro_t)
+        self.y = clamp(self.y, 10.0, screen_height() - 32.0)
+    // After death the player stays offscreen for 2 seconds...
+    } else if time() < HudState.respawn_until {
+        self.x = respawn_start_x
+        self.y = respawn_y
+    // ...then quickly flies back in from the left.
+    } else if time() < HudState.respawn_until + 0.45 {
+        self.x = lerp(respawn_start_x, respawn_target_x, respawn_t)
+        self.y = respawn_y
+    } else {
+        if self.x < -self.width || self.x < respawn_target_x {
+            self.x = respawn_target_x
+            self.y = respawn_y
+        }
 
-    self.x = clamp(self.x, 10.0, screen_width() - self.width - 10.0)
-    self.y = clamp(self.y, 10.0, screen_height() - 32.0)
+        let speed = 70.0 * dt
 
-    if input_action() && every(0.18) {
-        spawn("BulletTemplate", self.x + self.width - 2.0, self.y + self.height * 0.5 - 1.5)
+        if input_left() {
+            self.x = self.x - speed
+        }
+        if input_right() {
+            self.x = self.x + speed
+        }
+        if input_up() {
+            self.y = self.y - speed
+        }
+        if input_down() {
+            self.y = self.y + speed
+        }
+
+        self.x = clamp(self.x, 10.0, screen_width() - self.width - 10.0)
+        self.y = clamp(self.y, 10.0, screen_height() - 32.0)
+
+        if input_action() && every(0.18) {
+            spawn("BulletTemplate", self.x + self.width - 2.0, self.y + self.height * 0.5 - 1.5)
+        }
+
+        // Ignore hits while invulnerable, then consume one life and start the death timer.
+        if time() >= HudState.invulnerable_until {
+            let hit = first_overlap("hostile")
+            if exists(hit) {
+                spawn("ExplosionTemplate", self.x - 6.0, self.y - 13.0)
+                destroy(hit)
+                HudState.lives = clamp(HudState.lives - 1.0, 0.0, 3.0)
+                HudState.respawn_until = time() + 2.0
+                HudState.invulnerable_until = HudState.respawn_until + 1.6
+            }
+        }
     }
 
     self.color = player_tint()

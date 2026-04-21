@@ -220,6 +220,33 @@ scene Main {
 }
 
 #[test]
+fn scene_parser_supports_text_nodes() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    text Score {
+        pos = (12, 8)
+        value = "SCORE 000000"
+        font = "BetterPixels.ttf"
+        font_size = 16.0
+        color = #f4f8ff
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let text = &parsed.scenes[0].texts[0];
+    assert_eq!(text.value, "SCORE 000000");
+    assert_eq!(text.font, "BetterPixels.ttf");
+    assert_eq!(text.font_size, 16.0);
+}
+
+#[test]
 fn sprite_size_defaults_from_texture_when_omitted() {
     let scene = source_file(
         "scenes/main.rpu",
@@ -274,6 +301,28 @@ fn expression_parser_respects_operator_precedence() {
 }
 
 #[test]
+fn expression_parser_supports_unary_minus_on_targets() {
+    let expr = parse_expr("-self.width - 14.0").expect("expression should parse");
+
+    match expr {
+        Expr::Binary(left, BinaryOp::Sub, right) => {
+            assert!(matches!(*right, Expr::Number(value) if (value - 14.0).abs() < f32::EPSILON));
+            match *left {
+                Expr::Binary(inner_left, BinaryOp::Sub, inner_right) => {
+                    assert!(matches!(*inner_left, Expr::Number(value) if value.abs() < f32::EPSILON));
+                    assert!(matches!(
+                        *inner_right,
+                        Expr::Target(ScriptTarget::SelfEntity(ScriptProperty::Width))
+                    ));
+                }
+                other => panic!("unexpected unary-minus left expr: {other:?}"),
+            }
+        }
+        other => panic!("unexpected expr shape: {other:?}"),
+    }
+}
+
+#[test]
 fn expression_parser_supports_string_call_args() {
     let expr = parse_expr(r#"key("Space")"#).expect("expression should parse");
 
@@ -292,6 +341,25 @@ fn script_target_supports_sprite_texture_property() {
     assert!(matches!(
         target,
         ScriptTarget::SelfEntity(ScriptProperty::Texture)
+    ));
+}
+
+#[test]
+fn script_target_supports_text_property() {
+    let target = parse_script_target("self.text").expect("text target should parse");
+    assert!(matches!(
+        target,
+        ScriptTarget::SelfEntity(ScriptProperty::Text)
+    ));
+}
+
+#[test]
+fn script_target_supports_named_state_property() {
+    let target = parse_script_target("HudState.score").expect("state target should parse");
+    assert!(matches!(
+        target,
+        ScriptTarget::NamedEntity(name, ScriptProperty::State(property))
+            if name == "HudState" && property == "score"
     ));
 }
 
@@ -405,6 +473,86 @@ on update(dt) {
             }
         }
         other => panic!("unexpected function op: {other:?}"),
+    }
+}
+
+#[test]
+fn script_compiler_supports_state_declarations_and_assignments() {
+    let script = source_file(
+        "scripts/main.rpu",
+        r#"
+state score = 0
+
+on update(dt) {
+    let _ = dt
+    score = score + 10.0
+    self.score = score
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let compiled = compile_script(&script, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    assert_eq!(compiled.state.len(), 1);
+    assert_eq!(compiled.state[0].name, "score");
+    assert_eq!(compiled.state[0].line, 2);
+    assert!(matches!(&compiled.state[0].init, Expr::Number(value) if *value == 0.0));
+    assert!(matches!(
+        &compiled.handlers[0].ops[1].op,
+        OpCode::StateSet(name, Expr::Binary(_, BinaryOp::Add, _)) if name == "score"
+    ));
+    assert!(matches!(
+        &compiled.handlers[0].ops[2].op,
+        OpCode::Assign(
+            ScriptTarget::SelfEntity(ScriptProperty::State(property)),
+            Expr::Variable(name)
+        ) if property == "score" && name == "score"
+    ));
+}
+
+#[test]
+fn script_compiler_supports_else_if_chains() {
+    let script = source_file(
+        "scripts/main.rpu",
+        r#"
+on update(dt) {
+    if time() < 0.75 {
+        self.x = 0.0
+    } else if time() < 2.0 {
+        self.x = 1.0
+    } else {
+        self.x = 2.0
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let compiled = compile_script(&script, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let ops = &compiled.handlers[0].ops;
+    assert_eq!(ops.len(), 1);
+    match &ops[0].op {
+        OpCode::If(_, then_body, else_body) => {
+            assert_eq!(then_body.len(), 1);
+            assert_eq!(else_body.len(), 1);
+            match &else_body[0].op {
+                OpCode::If(_, nested_then, nested_else) => {
+                    assert_eq!(nested_then.len(), 1);
+                    assert_eq!(nested_else.len(), 1);
+                    assert!(matches!(
+                        &nested_else[0].op,
+                        OpCode::Assign(ScriptTarget::SelfEntity(ScriptProperty::X), Expr::Number(value))
+                            if (*value - 2.0).abs() < f32::EPSILON
+                    ));
+                }
+                other => panic!("unexpected else-if op: {other:?}"),
+            }
+        }
+        other => panic!("unexpected top-level op: {other:?}"),
     }
 }
 

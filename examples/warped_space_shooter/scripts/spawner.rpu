@@ -1,5 +1,6 @@
 on update(dt) {
     let _ = dt
+    // The hidden Spawner rect defines the enemy entry lane.
     let spawn_x = self.x + self.width + rand(12.0, 96.0)
     let planet_spawn_x = screen_width() + 16.0
     let lane_min = self.y
@@ -29,6 +30,7 @@ on update(dt) {
         spawn("EnemyBasicTemplate", spawn_x + rand(40.0, 120.0), rand(lane_min, lane_max))
     }
 
+    // Planets are ambient layers: one per side, slower and much rarer than enemies.
     if time() > 1.0 && !exists("PlanetBottom") && every(5.5, 11.5) && rand(0.0, 1.0) > 0.25 {
         spawn("PlanetBottomTemplate", "PlanetBottom", planet_spawn_x, 0.0)
     }
