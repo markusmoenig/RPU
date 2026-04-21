@@ -1,0 +1,27 @@
+{
+  "name": "tree-sitter-rpu",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the RPU scene and scripting language",
+  "main": "bindings/node",
+  "keywords": [
+    "parser",
+    "tree-sitter",
+    "rpu",
+    "dsl",
+    "game"
+  ],
+  "license": "MIT",
+  "files": [
+    "grammar.js",
+    "queries/*",
+    "src/*",
+    "bindings/node/*"
+  ],
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.24.7"
+  }
+}

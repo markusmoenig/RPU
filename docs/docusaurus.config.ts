@@ -1,6 +1,7 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
+import rehypeTreeSitterRpu from './src/rehype/rehypeTreeSitterRpu';
 
 const config: Config = {
   title: 'RPU',
@@ -29,6 +30,7 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
           editUrl: 'https://github.com/markusmoenig/RPU/tree/main/docs/',
+          rehypePlugins: [rehypeTreeSitterRpu],
         },
         blog: false,
         theme: {
@@ -50,7 +52,7 @@ const config: Config = {
         href: '/',
       },
       items: [
-        {to: '/intro', label: 'Docs', position: 'left'},
+        {to: '/getting-started', label: 'Docs', position: 'left'},
         {to: '/examples', label: 'Examples', position: 'left'},
         {
           type: 'html',
@@ -67,18 +69,25 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Docs',
+          title: 'Social',
           items: [
-            {label: 'Overview', to: '/intro'},
-            {label: 'Scripts', to: '/scripts'},
+            {
+              html: '<a class="footer__link-item social-link" href="https://x.com/MarkusMoenig" target="_blank" rel="noopener noreferrer"><span class="social-icon">𝕏</span><span>X</span></a>',
+            },
+            {
+              html: '<a class="footer__link-item social-link" href="https://bsky.app/profile/markusmoenig.bsky.social" target="_blank" rel="noopener noreferrer"><span class="social-icon">☁</span><span>Bluesky</span></a>',
+            },
+            {
+              html: '<a class="footer__link-item social-link" href="https://github.com/markusmoenig/RPU" target="_blank" rel="noopener noreferrer"><span class="social-icon">⌘</span><span>GitHub Repo</span></a>',
+            },
           ],
         },
         {
-          title: 'Project',
+          title: 'Docs',
           items: [
-            {label: 'rpu-lang.org', href: 'https://rpu-lang.org'},
-            {label: 'GitHub', href: 'https://github.com/markusmoenig/RPU'},
-            {label: 'Examples', to: '/examples'},
+            {label: 'Getting Started', to: '/getting-started'},
+            {label: 'Scenes', to: '/scenes'},
+            {label: 'Scripts', to: '/scripts'},
           ],
         },
       ],

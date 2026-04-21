@@ -1,0 +1,130 @@
+==================
+Minimal scene
+==================
+
+scene Main {
+  sprite Player {
+    texture = "player1.png"
+    pos = (10, 20)
+  }
+}
+
+---
+
+(source_file
+  (scene_definition
+    name: (identifier)
+    (scene_block
+      (sprite_definition
+        name: (identifier)
+        (visual_block
+          (property_assignment
+            name: (identifier)
+            value: (expression
+              (string)))
+          (property_assignment
+            name: (identifier)
+            value: (expression
+              (tuple_expression
+                (expression
+                  (number))
+                (expression
+                  (number))))))))))
+
+==================
+State and assignment
+==================
+
+state score = 0
+
+on update(dt) {
+  score = score + 10
+}
+
+---
+
+(source_file
+  (state_declaration
+    name: (identifier)
+    value: (expression
+      (number)))
+  (event_handler
+    name: (identifier)
+    (parameter_list
+      (identifier))
+    (statement_block
+      (assignment_statement
+        left: (identifier)
+        right: (expression
+          (binary_expression
+            left: (expression
+              (identifier))
+            right: (expression
+              (number))))))))
+
+==================
+Property assignment in update
+==================
+
+on update(dt) {
+  self.x = self.x + 10.0 * dt
+}
+
+---
+
+(source_file
+  (event_handler
+    name: (identifier)
+    (parameter_list
+      (identifier))
+    (statement_block
+      (assignment_statement
+        left: (property_access
+          object: (self)
+          property: (identifier))
+        right: (expression
+          (binary_expression
+            left: (expression
+              (property_access
+                object: (self)
+                property: (identifier)))
+            right: (expression
+              (binary_expression
+                left: (expression
+                  (number))
+                right: (expression
+                  (identifier))))))))))
+
+==================
+Top level statement fragment
+==================
+
+if input_left() {
+  self.x = self.x - 120.0 * dt
+}
+
+---
+
+(source_file
+  (if_statement
+    condition: (expression
+      (call_expression
+        function: (identifier)
+        arguments: (argument_list)))
+    consequence: (statement_block
+      (assignment_statement
+        left: (property_access
+          object: (self)
+          property: (identifier))
+        right: (expression
+          (binary_expression
+            left: (expression
+              (property_access
+                object: (self)
+                property: (identifier)))
+            right: (expression
+              (binary_expression
+                left: (expression
+                  (number))
+                right: (expression
+                  (identifier))))))))))

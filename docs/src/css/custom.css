@@ -62,3 +62,89 @@
 [data-theme='dark'] .navbar-icon img:hover {
   filter: brightness(1) grayscale(0%);
 }
+
+.rpu-tree-sitter-highlight {
+  margin: 1rem 0;
+  overflow-x: auto;
+  border: 1px solid #252a3d;
+  border-radius: 14px;
+  background: #111827;
+  color: #cbd5e1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.rpu-tree-sitter-highlight .rpu-code-pre {
+  margin: 0;
+  padding: 0.95rem 0;
+  background: #111827 !important;
+  --prism-background-color: transparent;
+  --prism-color: #cbd5e1;
+  color: #cbd5e1 !important;
+}
+
+.rpu-tree-sitter-highlight .rpu-code {
+  display: block;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.94rem;
+  line-height: 1.55;
+  color: #cbd5e1;
+  text-align: left;
+}
+
+.rpu-tree-sitter-highlight pre,
+.rpu-tree-sitter-highlight code,
+.rpu-tree-sitter-highlight .codeBlockLines_e6Vv,
+.rpu-tree-sitter-highlight .rpu-line-content {
+  background: transparent !important;
+  color: #cbd5e1 !important;
+}
+
+.rpu-tree-sitter-highlight .rpu-code-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  min-width: max-content;
+}
+
+.rpu-tree-sitter-highlight .rpu-line-number {
+  display: block;
+  padding: 0 0.9rem;
+  color: #5f6b8b;
+  user-select: none;
+  text-align: right;
+  border-right: 1px solid #252a3d;
+}
+
+.rpu-tree-sitter-highlight .rpu-line-content {
+  display: block;
+  padding: 0 1rem;
+  white-space: pre;
+}
+
+.rpu-tree-sitter-highlight .rpu-token-keyword { color: #ff9e64; }
+.rpu-tree-sitter-highlight .rpu-token-function { color: #7aa2f7; }
+.rpu-tree-sitter-highlight .rpu-token-property { color: #7dcfff; }
+.rpu-tree-sitter-highlight .rpu-token-string { color: #9ece6a; }
+.rpu-tree-sitter-highlight .rpu-token-number { color: #e0af68; }
+.rpu-tree-sitter-highlight .rpu-token-variable { color: #d5def5; }
+.rpu-tree-sitter-highlight .rpu-token-builtin { color: #c4b5fd; font-weight: 700; }
+.rpu-tree-sitter-highlight .rpu-token-parameter { color: #f5c981; }
+.rpu-tree-sitter-highlight .rpu-token-punctuation { color: #8b93aa; }
+.rpu-tree-sitter-highlight .rpu-token-special { color: #f7768e; }
+.rpu-tree-sitter-highlight .rpu-token-operator { color: #89ddff; font-weight: 700; }
+.rpu-tree-sitter-highlight .rpu-token-comment { color: #6b7280; font-style: italic; }
+
+.social-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.social-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  color: var(--ifm-color-primary);
+  font-weight: 700;
+}

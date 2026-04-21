@@ -1,24 +1,33 @@
-.hero {
-  min-height: calc(100vh - 60px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.pageShell {
   background:
     radial-gradient(circle at top left, rgba(214, 77, 51, 0.18), transparent 40%),
     radial-gradient(circle at bottom right, rgba(38, 154, 189, 0.18), transparent 36%),
     linear-gradient(180deg, #fbf7f0 0%, #f4ede1 100%);
 }
 
-[data-theme='dark'] .hero {
+[data-theme='dark'] .pageShell {
   background:
     radial-gradient(circle at top left, rgba(241, 140, 89, 0.14), transparent 40%),
     radial-gradient(circle at bottom right, rgba(72, 154, 176, 0.18), transparent 36%),
     linear-gradient(180deg, #171717 0%, #101010 100%);
 }
 
+.hero {
+  min-height: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: transparent;
+}
+
 .inner {
   width: min(820px, calc(100% - 2rem));
-  padding: 4rem 0 5rem;
+  padding: 2.25rem 0 2rem;
+  border-bottom: 1px solid rgba(31, 35, 40, 0.08);
+}
+
+[data-theme='dark'] .inner {
+  border-bottom-color: rgba(246, 237, 226, 0.08);
 }
 
 .brandRow {
@@ -69,6 +78,93 @@
   gap: 0.8rem;
   flex-wrap: wrap;
   margin-top: 1.8rem;
+}
+
+.main {
+  display: flex;
+  justify-content: center;
+  padding: 0 0 4rem;
+  background: transparent;
+}
+
+.content {
+  width: min(820px, calc(100% - 2rem));
+  padding-top: 2rem;
+}
+
+.section {
+  max-width: 44rem;
+  margin-bottom: 3rem;
+}
+
+.section h2 {
+  margin: 0 0 0.85rem;
+}
+
+.section p,
+.section ol {
+  margin-bottom: 1rem;
+}
+
+.codeBlock {
+  margin: 1rem 0 1.25rem;
+  overflow-x: auto;
+  border: 1px solid #252a3d;
+  border-radius: 14px;
+  background: #111827;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.codePre {
+  margin: 0;
+  padding: 0.95rem 1rem;
+  background: transparent;
+}
+
+.code {
+  display: block;
+  color: #cbd5e1;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.codeLine {
+  display: block;
+  white-space: pre;
+}
+
+.kw {
+  color: #ff9e64;
+}
+
+.fn {
+  color: #7aa2f7;
+}
+
+.param {
+  color: #f5c981;
+}
+
+.num {
+  color: #e0af68;
+}
+
+.str {
+  color: #9ece6a;
+}
+
+.col {
+  color: #f7768e;
+}
+
+.pn {
+  color: #8b93aa;
+}
+
+.op {
+  color: #89ddff;
+  font-weight: 700;
 }
 
 @media (max-width: 640px) {

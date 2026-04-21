@@ -1,0 +1,39 @@
+{
+  "parser-directories": [
+    ".."
+  ],
+  "theme": {
+    "keyword": "#ff9e64",
+    "property": "#7dcfff",
+    "string": "#9ece6a",
+    "string.special": "#9ece6a",
+    "number": "#e0af68",
+    "comment": {
+      "color": "#6b7280",
+      "italic": true
+    },
+    "type": "#7dcfff",
+    "function": "#7aa2f7",
+    "function.call": "#7aa2f7",
+    "function.method": "#7aa2f7",
+    "variable": "#d5def5",
+    "variable.builtin": {
+      "color": "#c4b5fd",
+      "bold": true
+    },
+    "variable.member": "#7dcfff",
+    "variable.parameter": {
+      "color": "#f5c981"
+    },
+    "operator": {
+      "color": "#89ddff",
+      "bold": true
+    },
+    "punctuation.delimiter": "#8b93aa",
+    "constant.builtin.boolean": {
+      "color": "#e0af68",
+      "bold": true
+    },
+    "character": "#f7768e"
+  }
+}
