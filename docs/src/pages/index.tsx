@@ -29,7 +29,7 @@ function HomePageHeader() {
             Getting Started
           </Link>
           <Link className="button button--secondary button--lg" to="/examples">
-            See examples
+            See Examples
           </Link>
         </div>
       </div>
