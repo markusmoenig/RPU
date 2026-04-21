@@ -1,0 +1,244 @@
+scene Main {
+    meta {
+        title = "Warped Space Shooter"
+    }
+
+    camera MainCamera {
+        pos = (136, 80)
+        zoom = 1.0
+        background = #050b18
+    }
+
+    sprite BackgroundBack {
+        layer = -100
+        z = 0
+        pos = (0, 0)
+        color = (1.0, 1.0, 1.0, 1.0)
+        texture = "bg-back.png"
+    }
+
+    sprite BackgroundStars {
+        layer = -90
+        z = 1
+        pos = (0, 0)
+        color = (1.0, 1.0, 1.0, 1.0)
+        texture = "bg-stars.png"
+        scroll = (-8.0, 0.0)
+        repeat_x = true
+    }
+
+    rect NebulaTint {
+        visible = false
+        layer = -80
+        z = 0
+        pos = (0, 0)
+        size = (272, 160)
+        color = (0.07, 0.14, 0.26, 0.34)
+    }
+
+    rect HudRail {
+        visible = false
+        layer = -10
+        z = 0
+        pos = (8, 8)
+        size = (60, 144)
+        color = (0.05, 0.11, 0.20, 0.76)
+    }
+
+    rect DangerLane {
+        visible = false
+        layer = -10
+        z = 1
+        pos = (198, 8)
+        size = (66, 144)
+        color = (0.16, 0.07, 0.09, 0.26)
+    }
+
+    sprite Player {
+        layer = 20
+        z = 30
+        pos = (18, 68)
+        color = #f4f8ff
+        texture = "player1.png"
+        script = "player.rpu"
+    }
+
+    rect Spawner {
+        visible = false
+        pos = (204, 16)
+        size = (48, 116)
+        color = (0.0, 0.0, 0.0, 0.0)
+        script = "spawner.rpu"
+    }
+
+    sprite PlanetBottomTemplate {
+        visible = false
+        template = true
+        layer = -85
+        z = 2
+        pos = (0, 0)
+        color = (1.0, 1.0, 1.0, 1.0)
+        texture = "bg-planet.png"
+
+        on update(dt) {
+            self.x = self.x - 18.0 * dt
+            if self.x < -272.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite PlanetTopTemplate {
+        visible = false
+        template = true
+        layer = -85
+        z = 2
+        pos = (0, 0)
+        color = (1.0, 1.0, 1.0, 1.0)
+        texture = "bg-planet.png"
+        flip_y = true
+
+        on update(dt) {
+            self.x = self.x - 18.0 * dt
+            if self.x < -272.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite EnemyBasicTemplate {
+        visible = false
+        template = true
+        group = "hostile"
+        layer = 12
+        z = 23
+        pos = (0, 0)
+        color = #ffb36e
+        texture = "enemy.png"
+
+        on update(dt) {
+            self.x = self.x - 180.0 * dt
+            if self.x < -120.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite EnemyFastTemplate {
+        visible = false
+        template = true
+        group = "hostile"
+        layer = 12
+        z = 24
+        pos = (0, 0)
+        color = #9dd8ff
+        texture = "enemy.png"
+
+        on update(dt) {
+            self.x = self.x - 240.0 * dt
+            if self.x < -120.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite RockLargeTemplate {
+        visible = false
+        template = true
+        group = "hostile"
+        layer = 10
+        z = 10
+        pos = (0, 0)
+        color = #f0f4ff
+        texture = "asteroid.png"
+
+        on update(dt) {
+            self.x = self.x - 112.0 * dt
+            if self.x < -120.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite RockSmallTemplate {
+        visible = false
+        template = true
+        group = "hostile"
+        layer = 10
+        z = 11
+        pos = (0, 0)
+        color = #d8f3ff
+        texture = "asteroid-small.png"
+
+        on update(dt) {
+            self.x = self.x - 190.0 * dt
+            if self.x < -120.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite RockMidTemplate {
+        visible = false
+        template = true
+        group = "hostile"
+        layer = 10
+        z = 12
+        pos = (0, 0)
+        color = #ffe8b7
+        texture = "asteroid.png"
+
+        on update(dt) {
+            self.x = self.x - 136.0 * dt
+            if self.x < -120.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite BulletTemplate {
+        visible = false
+        template = true
+        group = "player_shot"
+        layer = 40
+        z = 60
+        pos = (0, 0)
+        color = #ffd95c
+        texture = ["shoot1.png", "shoot2.png"]
+        animation_fps = 18.0
+
+        on update(dt) {
+            self.x = self.x + 240.0 * dt
+            let hit = first_overlap("hostile")
+            if exists(hit) {
+                spawn("ExplosionTemplate", self.x - 6.0, self.y - 13.0)
+                destroy(hit)
+                destroy(self)
+            }
+            if self.x > screen_width() + 32.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite ExplosionTemplate {
+        visible = false
+        template = true
+        layer = 45
+        z = 70
+        pos = (0, 0)
+        color = #ffffff
+        texture = ["explosion1.png", "explosion2.png", "explosion3.png", "explosion4.png", "explosion5.png"]
+        animation_fps = 18.0
+        animation_mode = "once"
+        destroy_on_animation_end = true
+    }
+
+    rect ScannerBar {
+        layer = 30
+        z = 50
+        pos = (14, 22)
+        size = (42, 4)
+        color = #56f0c7
+    }
+}

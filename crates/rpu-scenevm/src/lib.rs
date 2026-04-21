@@ -1,6 +1,8 @@
 use anyhow::{Context as AnyhowContext, Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 #[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use wgpu::util::DeviceExt;
@@ -47,6 +49,7 @@ pub trait RpuSceneApp {
 pub struct RuntimeContext {
     window_size: (u32, u32),
     scale_factor: f32,
+    pressed_keys: HashSet<String>,
 }
 
 impl RuntimeContext {
@@ -54,6 +57,7 @@ impl RuntimeContext {
         Self {
             window_size,
             scale_factor,
+            pressed_keys: HashSet::new(),
         }
     }
 
@@ -65,12 +69,52 @@ impl RuntimeContext {
         self.scale_factor
     }
 
+    pub fn is_key_pressed(&self, key: &str) -> bool {
+        self.pressed_keys.contains(&normalize_key_name(key))
+    }
+
+    pub fn input_left(&self) -> bool {
+        self.is_key_pressed("ArrowLeft") || self.is_key_pressed("A")
+    }
+
+    pub fn input_right(&self) -> bool {
+        self.is_key_pressed("ArrowRight") || self.is_key_pressed("D")
+    }
+
+    pub fn input_up(&self) -> bool {
+        self.is_key_pressed("ArrowUp") || self.is_key_pressed("W")
+    }
+
+    pub fn input_down(&self) -> bool {
+        self.is_key_pressed("ArrowDown") || self.is_key_pressed("S")
+    }
+
+    pub fn input_action(&self) -> bool {
+        self.is_key_pressed("Space")
+            || self.is_key_pressed("Enter")
+            || self.is_key_pressed("Z")
+            || self.is_key_pressed("X")
+    }
+
+    pub fn pressed_keys(&self) -> HashSet<String> {
+        self.pressed_keys.clone()
+    }
+
     fn set_window_size(&mut self, window_size: (u32, u32)) {
         self.window_size = window_size;
     }
 
     fn set_scale_factor(&mut self, scale_factor: f32) {
         self.scale_factor = scale_factor;
+    }
+
+    fn set_key_pressed(&mut self, key: &str, pressed: bool) {
+        let key = normalize_key_name(key);
+        if pressed {
+            self.pressed_keys.insert(key);
+        } else {
+            self.pressed_keys.remove(&key);
+        }
     }
 }
 
@@ -129,6 +173,8 @@ impl SceneFrame {
         width: f32,
         height: f32,
         mut color: [f32; 4],
+        flip_x: bool,
+        flip_y: bool,
         texture: Option<&str>,
     ) {
         color[3] = color[3].min(0.96);
@@ -140,6 +186,8 @@ impl SceneFrame {
             width,
             height,
             color,
+            flip_x,
+            flip_y,
             texture,
         );
     }
@@ -153,6 +201,8 @@ impl SceneFrame {
         width: f32,
         height: f32,
         mut color: [f32; 4],
+        flip_x: bool,
+        flip_y: bool,
         texture: Option<&str>,
     ) {
         color[3] = color[3].min(0.96);
@@ -164,6 +214,8 @@ impl SceneFrame {
             width,
             height,
             color,
+            flip_x,
+            flip_y,
             texture_path: texture.map(ToOwned::to_owned),
         }));
     }
@@ -195,6 +247,8 @@ pub struct RenderSprite {
     pub width: f32,
     pub height: f32,
     pub color: [f32; 4],
+    pub flip_x: bool,
+    pub flip_y: bool,
     pub texture_path: Option<String>,
 }
 
@@ -315,6 +369,11 @@ pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
                     };
                     self.app.scroll(ctx, dx, dy);
                 }
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if let Some(key_name) = key_name_from_event(&event.logical_key) {
+                        ctx.set_key_pressed(&key_name, event.state == ElementState::Pressed);
+                    }
+                }
                 WindowEvent::RedrawRequested => {
                     self.app.update(ctx);
                     let mut frame = SceneFrame::new(ctx.window_size());
@@ -390,6 +449,46 @@ pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
     };
     event_loop.run_app(&mut runner)?;
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn key_name_from_event(key: &winit::keyboard::Key) -> Option<String> {
+    match key {
+        winit::keyboard::Key::Character(value) => Some(value.to_uppercase()),
+        winit::keyboard::Key::Named(named) => match named {
+            winit::keyboard::NamedKey::ArrowLeft => Some("ArrowLeft".to_string()),
+            winit::keyboard::NamedKey::ArrowRight => Some("ArrowRight".to_string()),
+            winit::keyboard::NamedKey::ArrowUp => Some("ArrowUp".to_string()),
+            winit::keyboard::NamedKey::ArrowDown => Some("ArrowDown".to_string()),
+            winit::keyboard::NamedKey::Space => Some("Space".to_string()),
+            winit::keyboard::NamedKey::Enter => Some("Enter".to_string()),
+            winit::keyboard::NamedKey::Shift => Some("Shift".to_string()),
+            winit::keyboard::NamedKey::Control => Some("Control".to_string()),
+            winit::keyboard::NamedKey::Alt => Some("Alt".to_string()),
+            winit::keyboard::NamedKey::Escape => Some("Escape".to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn normalize_key_name(key: &str) -> String {
+    match key.trim() {
+        "Left" => "ArrowLeft".to_string(),
+        "Right" => "ArrowRight".to_string(),
+        "Up" => "ArrowUp".to_string(),
+        "Down" => "ArrowDown".to_string(),
+        other => other.to_uppercase().replace("ARROWLEFT", "ArrowLeft")
+            .replace("ARROWRIGHT", "ArrowRight")
+            .replace("ARROWUP", "ArrowUp")
+            .replace("ARROWDOWN", "ArrowDown")
+            .replace("SPACE", "Space")
+            .replace("ENTER", "Enter")
+            .replace("SHIFT", "Shift")
+            .replace("CONTROL", "Control")
+            .replace("ALT", "Alt")
+            .replace("ESCAPE", "Escape"),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -716,8 +815,8 @@ fn build_vertices(size: (u32, u32), rects: &[RenderItem]) -> Vec<QuadVertex> {
     let h = size.1.max(1) as f32;
     let mut out = Vec::with_capacity(rects.len() * 6);
     for rect in rects {
-        let (x, y, width, height, color) = match rect {
-            RenderItem::Rect(rect) => (rect.x, rect.y, rect.width, rect.height, rect.color),
+        let (x, y, width, height, color, flip_x, flip_y) = match rect {
+            RenderItem::Rect(rect) => (rect.x, rect.y, rect.width, rect.height, rect.color, false, false),
             RenderItem::Sprite(rect) => (
                 rect.x,
                 rect.y,
@@ -729,8 +828,18 @@ fn build_vertices(size: (u32, u32), rects: &[RenderItem]) -> Vec<QuadVertex> {
                     (rect.color[2] * 1.05).min(1.0),
                     rect.color[3],
                 ],
+                rect.flip_x,
+                rect.flip_y,
             ),
         };
+        let u0 = if flip_x { 1.0 } else { 0.0 };
+        let u1 = if flip_x { 0.0 } else { 1.0 };
+        let v0 = if flip_y { 1.0 } else { 0.0 };
+        let v1 = if flip_y { 0.0 } else { 1.0 };
+        let uv0 = [u0, v0];
+        let uv1 = [u1, v0];
+        let uv2 = [u1, v1];
+        let uv3 = [u0, v1];
         let x0 = x;
         let y0 = y;
         let x1 = x + width;
@@ -740,12 +849,12 @@ fn build_vertices(size: (u32, u32), rects: &[RenderItem]) -> Vec<QuadVertex> {
         let p2 = to_ndc(x1, y1, w, h);
         let p3 = to_ndc(x0, y1, w, h);
         out.extend_from_slice(&[
-            QuadVertex { position: p0, color, uv: [0.0, 0.0] },
-            QuadVertex { position: p1, color, uv: [1.0, 0.0] },
-            QuadVertex { position: p2, color, uv: [1.0, 1.0] },
-            QuadVertex { position: p0, color, uv: [0.0, 0.0] },
-            QuadVertex { position: p2, color, uv: [1.0, 1.0] },
-            QuadVertex { position: p3, color, uv: [0.0, 1.0] },
+            QuadVertex { position: p0, color, uv: uv0 },
+            QuadVertex { position: p1, color, uv: uv1 },
+            QuadVertex { position: p2, color, uv: uv2 },
+            QuadVertex { position: p0, color, uv: uv0 },
+            QuadVertex { position: p2, color, uv: uv2 },
+            QuadVertex { position: p3, color, uv: uv3 },
         ]);
     }
     out

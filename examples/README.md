@@ -10,3 +10,6 @@ Use them as smoke-test projects while evolving the DSL and renderer.
 
 `terrain_playground`
 - Terrain-focused example for embedded `map`, `legend`, `ascii`, marker placement, and sprite spawning via `symbol`.
+
+`warped_space_shooter`
+- Small game-focused example for keyboard movement, runtime query calls, textured sprites, and a concrete “progress target” built from the bundled shooter art reference.

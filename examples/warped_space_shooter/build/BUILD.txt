@@ -1,0 +1,17 @@
+RPU build placeholder
+project = Warped Space Shooter
+version = 0.1.0
+root = examples/warped_space_shooter
+scene_defs = 1
+scene_files = 1
+scripts = 10
+cameras = 1
+rects = 1
+sprites = 3
+handlers = 11
+ops = 68
+assets = 18
+warnings = 0
+errors = 0
+
+none

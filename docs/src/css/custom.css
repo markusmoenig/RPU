@@ -1,0 +1,64 @@
+:root {
+  --ifm-color-primary: #d64d33;
+  --ifm-color-primary-dark: #c0462e;
+  --ifm-color-primary-darker: #b5422b;
+  --ifm-color-primary-darkest: #953624;
+  --ifm-color-primary-light: #df5a42;
+  --ifm-color-primary-lighter: #e46a54;
+  --ifm-color-primary-lightest: #eb8574;
+  --ifm-code-font-size: 94%;
+  --ifm-background-color: #fbf7f0;
+  --ifm-heading-color: #1f2328;
+  --docusaurus-highlighted-code-line-bg: rgba(214, 77, 51, 0.12);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #f18c59;
+  --ifm-color-primary-dark: #ee7a3f;
+  --ifm-color-primary-darker: #ed7131;
+  --ifm-color-primary-darkest: #cf5614;
+  --ifm-color-primary-light: #f49e73;
+  --ifm-color-primary-lighter: #f5a781;
+  --ifm-color-primary-lightest: #f8c2a7;
+  --ifm-background-color: #171717;
+  --ifm-heading-color: #f6ede2;
+  --docusaurus-highlighted-code-line-bg: rgba(241, 140, 89, 0.18);
+}
+
+.navbar-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ifm-navbar-link-color);
+  transition: all 0.2s ease;
+  padding: 4px 2px;
+  border-radius: 6px;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.navbar-icon:hover {
+  color: var(--ifm-color-primary);
+  background-color: var(--ifm-background-surface-color);
+  text-decoration: none;
+}
+
+.navbar-icon img {
+  filter: grayscale(20%);
+  transition: all 0.2s ease;
+  vertical-align: middle;
+  display: inline-block;
+  margin-top: 4px;
+}
+
+.navbar-icon img:hover {
+  filter: grayscale(0%);
+  opacity: 0.9;
+}
+
+[data-theme='dark'] .navbar-icon img {
+  filter: brightness(0.9) grayscale(20%);
+}
+
+[data-theme='dark'] .navbar-icon img:hover {
+  filter: brightness(1) grayscale(0%);
+}

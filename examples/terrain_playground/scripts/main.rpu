@@ -4,6 +4,30 @@ on ready() {
 }
 
 on update(dt) {
-    let _ = dt
-    move_by_dt(18.0, 0.0)
+    let speed = 180.0 * dt
+
+    if input_left() {
+        self.x = self.x - speed
+    }
+
+    if input_right() {
+        self.x = self.x + speed
+    }
+
+    if input_up() {
+        self.y = self.y - speed
+    }
+
+    if input_down() {
+        self.y = self.y + speed
+    }
+
+    if input_action() {
+        self.color = #ff8899
+    } else {
+        self.color = #fff1a8
+    }
+
+    self.x = clamp(self.x, 80.0, screen_width() - 160.0)
+    self.y = clamp(self.y, 96.0, screen_height() - 160.0)
 }

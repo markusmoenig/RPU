@@ -1,0 +1,82 @@
+.hero {
+  min-height: calc(100vh - 60px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at top left, rgba(214, 77, 51, 0.18), transparent 40%),
+    radial-gradient(circle at bottom right, rgba(38, 154, 189, 0.18), transparent 36%),
+    linear-gradient(180deg, #fbf7f0 0%, #f4ede1 100%);
+}
+
+[data-theme='dark'] .hero {
+  background:
+    radial-gradient(circle at top left, rgba(241, 140, 89, 0.14), transparent 40%),
+    radial-gradient(circle at bottom right, rgba(72, 154, 176, 0.18), transparent 36%),
+    linear-gradient(180deg, #171717 0%, #101010 100%);
+}
+
+.inner {
+  width: min(820px, calc(100% - 2rem));
+  padding: 4rem 0 5rem;
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.logo {
+  width: min(92px, 18vw);
+  height: auto;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.eyebrow {
+  margin: 0 0 1rem;
+  color: var(--ifm-color-primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(3rem, 10vw, 5.4rem);
+  line-height: 0.95;
+}
+
+.tagline {
+  margin: 1rem 0 0;
+  max-width: 40rem;
+  font-size: 1.2rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.copy {
+  margin: 1.2rem 0 0;
+  max-width: 42rem;
+  font-size: 1rem;
+  color: var(--ifm-color-emphasis-800);
+}
+
+.actions {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin-top: 1.8rem;
+}
+
+@media (max-width: 640px) {
+  .brandRow {
+    gap: 0.75rem;
+  }
+
+  .logo {
+    width: min(72px, 18vw);
+  }
+}

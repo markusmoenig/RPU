@@ -1,0 +1,9 @@
+[project]
+name = "Warped Space Shooter"
+version = "0.1.0"
+
+[window]
+width = 272
+height = 160
+default_scale = 4.0
+resize = "letterbox"

@@ -1,0 +1,49 @@
+fn player_tint() {
+    if input_action() {
+        return #ff9e7a
+    }
+    return #f4f8ff
+}
+
+fn player_texture() {
+    if input_up() {
+        return "player3.png"
+    }
+    if input_down() {
+        return "player2.png"
+    }
+    return "player1.png"
+}
+
+on ready() {
+    log("warped_space_shooter ready")
+    self.color = player_tint()
+    self.texture = player_texture()
+}
+
+on update(dt) {
+    let speed = 70.0 * dt
+
+    if input_left() {
+        self.x = self.x - speed
+    }
+    if input_right() {
+        self.x = self.x + speed
+    }
+    if input_up() {
+        self.y = self.y - speed
+    }
+    if input_down() {
+        self.y = self.y + speed
+    }
+
+    self.x = clamp(self.x, 10.0, screen_width() - self.width - 10.0)
+    self.y = clamp(self.y, 10.0, screen_height() - 32.0)
+
+    if input_action() && every(0.18) {
+        spawn("BulletTemplate", self.x + self.width - 2.0, self.y + self.height * 0.5 - 1.5)
+    }
+
+    self.color = player_tint()
+    self.texture = player_texture()
+}
