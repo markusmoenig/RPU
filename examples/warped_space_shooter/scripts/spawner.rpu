@@ -6,27 +6,19 @@ on update(dt) {
     let lane_min = self.y
     let lane_max = self.y + self.height
 
-    if every(1.7, 2.5) {
+    if every(2.8, 3.9) {
         spawn("EnemyBasicTemplate", spawn_x, rand(lane_min, lane_max))
     }
 
-    if difficulty() > 1.0 && every(2.4, 3.4) {
+    if difficulty() > 1.0 && every(4.4, 6.0) {
         spawn("RockLargeTemplate", spawn_x + rand(18.0, 54.0), rand(lane_min, lane_max))
     }
 
-    if difficulty() > 2.0 && every(1.2, 1.9) {
+    if difficulty() > 2.0 && every(2.2, 3.2) {
         spawn("EnemyFastTemplate", spawn_x + rand(24.0, 72.0), rand(lane_min, lane_max))
     }
 
-    if difficulty() > 3.0 && every(1.4, 2.0) {
-        spawn("RockSmallTemplate", spawn_x + rand(4.0, 36.0), rand(lane_min, lane_max))
-    }
-
-    if difficulty() > 4.0 && every(1.6, 2.4) {
-        spawn("RockMidTemplate", spawn_x + rand(28.0, 88.0), rand(lane_min, lane_max))
-    }
-
-    if difficulty() > 5.0 && every(0.9, 1.3) {
+    if difficulty() > 5.0 && every(1.8, 2.5) {
         spawn("EnemyBasicTemplate", spawn_x + rand(40.0, 120.0), rand(lane_min, lane_max))
     }
 

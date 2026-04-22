@@ -98,7 +98,7 @@ scene Game {
     sprite EnemyBasicTemplate {
         visible = false
         template = true
-        group = "hostile"
+        group = "enemy"
         layer = 12
         z = 23
         pos = (0, 0)
@@ -107,7 +107,7 @@ scene Game {
         animation_fps = 14.0
 
         on update(dt) {
-            self.x = self.x - 180.0 * dt
+            self.x = self.x - 136.0 * dt
             if self.x < -120.0 {
                 destroy(self)
             }
@@ -117,7 +117,7 @@ scene Game {
     sprite EnemyFastTemplate {
         visible = false
         template = true
-        group = "hostile"
+        group = "enemy"
         layer = 12
         z = 24
         pos = (0, 0)
@@ -126,7 +126,7 @@ scene Game {
         animation_fps = 18.0
 
         on update(dt) {
-            self.x = self.x - 240.0 * dt
+            self.x = self.x - 176.0 * dt
             if self.x < -120.0 {
                 destroy(self)
             }
@@ -136,51 +136,97 @@ scene Game {
     sprite RockLargeTemplate {
         visible = false
         template = true
-        group = "hostile"
+        group = "asteroid"
         layer = 10
         z = 10
         pos = (0, 0)
         color = #f0f4ff
         texture = "asteroid.png"
 
+        state hp = 2
+
+        on ready() {
+            hp = 2
+            self.rotation = rand(-0.4, 0.4)
+        }
+
         on update(dt) {
-            self.x = self.x - 112.0 * dt
+            self.x = self.x - 68.0 * dt
+            self.rotation = self.rotation - 1.0 * dt
+            let shot = first_overlap("player_shot")
+            if exists(shot) {
+                destroy(shot)
+                hp = hp - 1.0
+                call play_sound("hit.wav")
+                if hp <= 0.0 {
+                    HudState.score = HudState.score + 20.0
+                    spawn("RockSmallUpTemplate", self.x + 4.0, self.y - 6.0)
+                    spawn("RockSmallDownTemplate", self.x + 4.0, self.y + 6.0)
+                    destroy(self)
+                }
+            }
             if self.x < -120.0 {
                 destroy(self)
             }
         }
     }
 
-    sprite RockSmallTemplate {
+    sprite RockSmallUpTemplate {
         visible = false
         template = true
-        group = "hostile"
+        group = "asteroid"
         layer = 10
         z = 11
         pos = (0, 0)
         color = #d8f3ff
         texture = "asteroid-small.png"
 
+        on ready() {
+            self.rotation = rand(-0.6, 0.6)
+        }
+
         on update(dt) {
-            self.x = self.x - 190.0 * dt
+            self.x = self.x - 104.0 * dt
+            self.y = self.y - 24.0 * dt
+            self.rotation = self.rotation - 2.4 * dt
+            let shot = first_overlap("player_shot")
+            if exists(shot) {
+                destroy(shot)
+                HudState.score = HudState.score + 10.0
+                call play_sound("hit.wav")
+                destroy(self)
+            }
             if self.x < -120.0 {
                 destroy(self)
             }
         }
     }
 
-    sprite RockMidTemplate {
+    sprite RockSmallDownTemplate {
         visible = false
         template = true
-        group = "hostile"
+        group = "asteroid"
         layer = 10
         z = 12
         pos = (0, 0)
         color = #ffe8b7
-        texture = "asteroid.png"
+        texture = "asteroid-small.png"
+
+        on ready() {
+            self.rotation = rand(-0.6, 0.6)
+        }
 
         on update(dt) {
-            self.x = self.x - 136.0 * dt
+            self.x = self.x - 104.0 * dt
+            self.y = self.y + 24.0 * dt
+            self.rotation = self.rotation + 2.4 * dt
+            let shot = first_overlap("player_shot")
+            if exists(shot) {
+                destroy(shot)
+                HudState.score = HudState.score + 10.0
+                call play_sound("hit.wav")
+                destroy(self)
+            }
             if self.x < -120.0 {
                 destroy(self)
             }
@@ -200,14 +246,38 @@ scene Game {
 
         on update(dt) {
             self.x = self.x + 240.0 * dt
-            let hit = first_overlap("hostile")
+            let hit = first_overlap("enemy")
             if exists(hit) {
                 HudState.score = HudState.score + 10.0
                 spawn("ExplosionTemplate", self.x - 6.0, self.y - 13.0)
+                call play_sound("explosion.wav")
                 destroy(hit)
                 destroy(self)
             }
             if self.x > screen_width() + 32.0 {
+                destroy(self)
+            }
+        }
+    }
+
+    sprite MuzzleFlashTemplate {
+        visible = false
+        template = true
+        layer = 41
+        z = 61
+        pos = (0, 0)
+        color = #ffffff
+        texture = "flash.png"
+        size = (8, 8)
+
+        state die_at = 0
+
+        on ready() {
+            die_at = time() + 0.06
+        }
+
+        on update(dt) {
+            if time() >= die_at {
                 destroy(self)
             }
         }

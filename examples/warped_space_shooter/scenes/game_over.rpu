@@ -103,6 +103,7 @@ scene GameOver {
 
         on ready() {
             HudState.menu_return_at = 0
+            call stop_music()
         }
 
         on update(dt) {

@@ -102,13 +102,14 @@ scene Menu {
         color = #00000000
 
         on ready() {
-            HudState.menu_return_at = 0
+            HudState.menu_return_at = time() + 0.35
+            call play_music("music-game.ogg")
         }
 
         on update(dt) {
             let _ = dt
             StartLabel.color = alpha(#ffd95c, lerp(0.45, 1.0, pulse(0.7)))
-            if input_action() {
+            if time() >= HudState.menu_return_at && input_action() {
                 HudState.score = 0
                 HudState.lives = 3
                 HudState.invulnerable_until = 0

@@ -59,7 +59,7 @@ on update(dt) {
             self.y = respawn_y
         }
 
-        let speed = 70.0 * dt
+        let speed = 92.0 * dt
 
         if input_left() {
             self.x = self.x - speed
@@ -78,20 +78,37 @@ on update(dt) {
         self.y = clamp(self.y, 10.0, screen_height() - 32.0)
 
         if input_action() && every(0.18) {
+            call play_sound("shot.wav")
+            spawn("MuzzleFlashTemplate", self.x + self.width - 1.0, self.y + self.height * 0.5 - 4.0)
             spawn("BulletTemplate", self.x + self.width - 2.0, self.y + self.height * 0.5 - 1.5)
         }
 
         if time() >= HudState.invulnerable_until && HudState.lives > 0 {
-            let hit = first_overlap("hostile")
-            if exists(hit) {
+            let enemy_hit = first_overlap("enemy")
+            if exists(enemy_hit) {
                 spawn("ExplosionTemplate", self.x - 6.0, self.y - 13.0)
-                destroy(hit)
+                call play_sound("explosion.wav")
+                destroy(enemy_hit)
                 HudState.lives = clamp(HudState.lives - 1.0, 0.0, 3.0)
                 if HudState.lives <= 0.0 {
                     HudState.game_over_at = time() + 1.0
                 } else {
                     HudState.respawn_until = time() + 1.0
                     HudState.invulnerable_until = HudState.respawn_until + 1.6
+                }
+            } else {
+                let asteroid_hit = first_overlap("asteroid")
+                if exists(asteroid_hit) {
+                    spawn("ExplosionTemplate", self.x - 6.0, self.y - 13.0)
+                    call play_sound("explosion.wav")
+                    destroy(asteroid_hit)
+                    HudState.lives = clamp(HudState.lives - 1.0, 0.0, 3.0)
+                    if HudState.lives <= 0.0 {
+                        HudState.game_over_at = time() + 1.0
+                    } else {
+                        HudState.respawn_until = time() + 1.0
+                        HudState.invulnerable_until = HudState.respawn_until + 1.6
+                    }
                 }
             }
         }

@@ -4,13 +4,13 @@ version = 0.1.0
 root = examples/warped_space_shooter
 scene_defs = 3
 scene_files = 3
-scripts = 14
+scripts = 15
 cameras = 3
 rects = 0
 sprites = 10
-handlers = 19
-ops = 148
-assets = 24
+handlers = 24
+ops = 195
+assets = 29
 warnings = 1
 errors = 0
 

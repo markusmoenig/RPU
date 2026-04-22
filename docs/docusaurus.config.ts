@@ -9,6 +9,17 @@ const config: Config = {
   favicon: 'img/favicon.png',
   future: {
     v4: true,
+    faster: {
+      swcJsLoader: false,
+      swcJsMinimizer: false,
+      swcHtmlMinimizer: false,
+      lightningCssMinimizer: false,
+      mdxCrossCompilerCache: false,
+      rspackBundler: false,
+      rspackPersistentCache: false,
+      ssgWorkerThreads: false,
+      gitEagerVcs: false,
+    },
   },
   url: 'https://rpu-lang.org',
   baseUrl: '/',

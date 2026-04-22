@@ -1,5 +1,6 @@
 on ready() {
     HudState.game_over_at = 0
+    call play_music("music-game.ogg")
 }
 
 on update(dt) {

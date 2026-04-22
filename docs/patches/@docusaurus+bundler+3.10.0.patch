@@ -1,0 +1,19 @@
+diff --git a/node_modules/@docusaurus/bundler/lib/currentBundler.js b/node_modules/@docusaurus/bundler/lib/currentBundler.js
+index d665a23..40c693d 100644
+--- a/node_modules/@docusaurus/bundler/lib/currentBundler.js
++++ b/node_modules/@docusaurus/bundler/lib/currentBundler.js
+@@ -69,7 +69,13 @@ async function getProgressBarPlugin({ currentBundler, }) {
+         }
+         return CustomRspackProgressPlugin;
+     }
+-    return webpackbar_1.default;
++    class NoopProgressPlugin {
++        constructor(_options) { }
++        apply(_compiler) {
++            // noop
++        }
++    }
++    return NoopProgressPlugin;
+ }
+ async function registerBundlerTracing({ currentBundler, }) {
+     if (currentBundler.name === 'rspack') {

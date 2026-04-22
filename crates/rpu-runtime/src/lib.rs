@@ -64,6 +64,13 @@ impl RpuSceneApp for RpuRuntimeApp {
 
     fn update(&mut self, _ctx: &mut RuntimeContext) {
         self.session.tick(_ctx);
+        for command in self.session.drain_audio_commands() {
+            match command {
+                AudioCommand::PlaySound(path) => _ctx.play_sound(&path),
+                AudioCommand::PlayMusic(path) => _ctx.play_music(&path),
+                AudioCommand::StopMusic => _ctx.stop_music(),
+            }
+        }
     }
 
     fn render(&mut self, _ctx: &mut RuntimeContext, frame: &mut SceneFrame) {
@@ -143,6 +150,7 @@ impl RpuSceneApp for RpuRuntimeApp {
                         entity.pos[1],
                         entity.size[0],
                         entity.size[1],
+                        entity.rotation,
                         entity.color,
                         entity.scroll,
                         entity.repeat_x,
@@ -205,6 +213,7 @@ struct RuntimeSession {
     rng_state: u64,
     persisted_entity_state: HashMap<String, HashMap<String, Value>>,
     high_scores: HighScoreTable,
+    pending_audio: Vec<AudioCommand>,
 }
 
 struct RuntimeWorld {
@@ -225,6 +234,7 @@ struct RuntimeEntity {
     z: i32,
     pos: [f32; 2],
     size: [f32; 2],
+    rotation: f32,
     color: [f32; 4],
     scroll: [f32; 2],
     repeat_x: bool,
@@ -299,6 +309,12 @@ struct HighScoreTable {
     entries: Vec<HighScoreEntry>,
 }
 
+enum AudioCommand {
+    PlaySound(String),
+    PlayMusic(String),
+    StopMusic,
+}
+
 impl RuntimeSession {
     fn new_native(project: RpuProject) -> Result<Self> {
         let compiled = project.compile()?;
@@ -325,6 +341,7 @@ impl RuntimeSession {
             rng_state: 0x9E3779B97F4A7C15,
             persisted_entity_state: HashMap::new(),
             high_scores: HighScoreTable::default(),
+            pending_audio: Vec::new(),
         };
         session.initialize_script_state_all();
         Ok(session)
@@ -355,6 +372,7 @@ impl RuntimeSession {
             rng_state: 0x9E3779B97F4A7C15,
             persisted_entity_state: HashMap::new(),
             high_scores: HighScoreTable::default(),
+            pending_audio: Vec::new(),
         };
         session.initialize_script_state_all();
         Ok(session)
@@ -381,6 +399,10 @@ impl RuntimeSession {
             self.capture_persistent_entity_state();
         }
         self.maybe_reload();
+    }
+
+    fn drain_audio_commands(&mut self) -> Vec<AudioCommand> {
+        std::mem::take(&mut self.pending_audio)
     }
 
     fn refresh_query_state(&mut self, ctx: &RuntimeContext) {
@@ -1222,6 +1244,48 @@ impl RuntimeSession {
                 self.high_scores.submit(&name, score);
                 Some(ExecSignal::Continue)
             }
+            "play_sound" if args.len() == 1 => {
+                let asset_name = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_string()?
+                    .to_string();
+                self.pending_audio
+                    .push(AudioCommand::PlaySound(self.asset_path(&asset_name)));
+                Some(ExecSignal::Continue)
+            }
+            "play_music" if args.len() == 1 => {
+                let asset_name = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_string()?
+                    .to_string();
+                self.pending_audio
+                    .push(AudioCommand::PlayMusic(self.asset_path(&asset_name)));
+                Some(ExecSignal::Continue)
+            }
+            "stop_music" if args.is_empty() => {
+                self.pending_audio.push(AudioCommand::StopMusic);
+                Some(ExecSignal::Continue)
+            }
             _ => None,
         }
     }
@@ -1878,6 +1942,7 @@ impl RuntimeSession {
             (ScriptProperty::Height, Value::Scalar(value)) => entity.size[1] = value,
             (ScriptProperty::Pos, Value::Vec2(value)) => entity.pos = value,
             (ScriptProperty::Size, Value::Vec2(value)) => entity.size = value,
+            (ScriptProperty::Rotation, Value::Scalar(value)) => entity.rotation = value,
             (ScriptProperty::Color, Value::Color(value)) => entity.color = value,
             (ScriptProperty::Texture, Value::String(value)) => match &mut entity.kind {
                 RuntimeEntityKind::Sprite {
@@ -1921,6 +1986,7 @@ impl RuntimeSession {
             ScriptProperty::Height => Value::Scalar(entity.size[1]),
             ScriptProperty::Pos => Value::Vec2(entity.pos),
             ScriptProperty::Size => Value::Vec2(entity.size),
+            ScriptProperty::Rotation => Value::Scalar(entity.rotation),
             ScriptProperty::Color => Value::Color(entity.color),
             ScriptProperty::Texture => match &entity.kind {
                 RuntimeEntityKind::Sprite { texture, .. } => {
@@ -2264,6 +2330,7 @@ fn runtime_rect_entity(rect: &RectNode) -> RuntimeEntity {
         z: rect.visual.z,
         pos: rect.visual.pos,
         size: rect.visual.size,
+        rotation: 0.0,
         color: rect.visual.color,
         group: rect.visual.group.clone(),
         scroll: [0.0, 0.0],
@@ -2298,6 +2365,7 @@ fn runtime_sprite_entity(
         z: sprite.visual.z,
         pos,
         size: sprite.visual.size,
+        rotation: sprite.rotation,
         color: sprite.visual.color,
         group: sprite.visual.group.clone(),
         scroll: sprite.scroll,
@@ -2328,6 +2396,7 @@ fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
         z: text.visual.z,
         pos: text.visual.pos,
         size: [0.0, 0.0],
+        rotation: 0.0,
         color: text.visual.color,
         group: text.visual.group.clone(),
         scroll: [0.0, 0.0],
@@ -2454,6 +2523,7 @@ fn submit_draw_command(
                     sy,
                     sw,
                     sh,
+                    sprite.rotation,
                     sprite.color,
                     sprite.flip_x,
                     sprite.flip_y,
@@ -2470,6 +2540,7 @@ fn submit_draw_command(
                     sprite.y,
                     sprite.width,
                     sprite.height,
+                    sprite.rotation,
                     sprite.color,
                     sprite.scroll,
                     sprite.repeat_x,
@@ -2719,6 +2790,7 @@ fn submit_sprite(
     y: f32,
     width: f32,
     height: f32,
+    rotation: f32,
     color: [f32; 4],
     scroll: [f32; 2],
     repeat_x: bool,
@@ -2734,7 +2806,19 @@ fn submit_sprite(
     if !repeat_x && !repeat_y {
         let (sx, sy, sw, sh) =
             screen_rect_for_anchor(Anchor::World, camera, view, scrolled_x, scrolled_y, width, height);
-        frame.push_sprite(layer, order, sx, sy, sw, sh, color, flip_x, flip_y, texture_path);
+        frame.push_sprite(
+            layer,
+            order,
+            sx,
+            sy,
+            sw,
+            sh,
+            rotation,
+            color,
+            flip_x,
+            flip_y,
+            texture_path,
+        );
         return;
     }
 
@@ -2770,7 +2854,19 @@ fn submit_sprite(
         let mut tile_x = start_x;
         while tile_x < max_x {
             let (sx, sy, sw, sh) = view.map_rect(tile_x, tile_y, virtual_w, virtual_h);
-            frame.push_sprite(layer, order, sx, sy, sw, sh, color, flip_x, flip_y, texture_path);
+            frame.push_sprite(
+                layer,
+                order,
+                sx,
+                sy,
+                sw,
+                sh,
+                rotation,
+                color,
+                flip_x,
+                flip_y,
+                texture_path,
+            );
             if !repeat_x {
                 break;
             }

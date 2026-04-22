@@ -55,9 +55,10 @@ This currently emits:
 - `index.html`
 - wasm-bindgen JS glue
 - `.wasm`
+- copied/bundled project scenes, scripts, and assets through the generated launcher
 - a generated hidden launcher crate under `build/web/.app`
 
-The generated web build is self-contained and suitable for embedding into a website later.
+The generated web build is self-contained and suitable for local preview or embedding into a website.
 
 ## `rpu serve-web`
 
@@ -70,6 +71,12 @@ rpu serve-web examples/warped_space_shooter --port 8123
 ```
 
 This is useful for checking wasm/browser behavior without wiring your own local server.
+
+The local server:
+
+- serves the generated `build/web/` output
+- uses the authored project resolution and responsive browser fitting
+- is the easiest way to validate web input, rendering, and audio behavior during development
 
 ## `rpu build`
 

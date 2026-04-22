@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+base64 = "0.22"
 bytemuck.workspace = true
 console_error_panic_hook = "0.1"
 fontdue.workspace = true
@@ -14,5 +15,8 @@ rpu-core = { path = "../rpu-core" }
 wasm-bindgen = "=0.2.100"
 wasm-bindgen-futures = "=0.4.50"
 wgpu.workspace = true
-web-sys = { version = "=0.3.77", features = ["Document", "DomRect", "Element", "EventTarget", "HtmlCanvasElement", "HtmlElement", "KeyboardEvent", "MouseEvent", "WheelEvent", "Window", "CssStyleDeclaration", "console"] }
+web-sys = { version = "=0.3.77", features = ["Document", "DomRect", "Element", "EventTarget", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "KeyboardEvent", "MouseEvent", "WheelEvent", "Window", "CssStyleDeclaration", "console"] }
 winit.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rodio = "0.20"

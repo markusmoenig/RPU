@@ -151,6 +151,7 @@ Sprites also support:
 - `animation_mode`
 - `destroy_on_animation_end`
 - `symbol`
+- `rotation`
 - `scroll`
 - `repeat_x`
 - `repeat_y`
@@ -186,6 +187,8 @@ texture = ["shoot1.png", "shoot2.png"]
 `animation_mode = "once"` plays the frame list once and then holds on the last frame.
 
 `destroy_on_animation_end = true` removes a runtime sprite instance automatically when a `once` animation finishes. This is useful for short-lived effects such as explosions.
+
+`rotation = 1.57` rotates the sprite in radians around its center. Rotation is also script-visible through `self.rotation` and `Name.rotation`.
 
 ## Text
 
@@ -230,6 +233,43 @@ The `font` property should point to a `.ttf` file in `assets/`.
 - `right`
 
 This is especially useful with anchored HUD/menu text.
+
+## High Score
+
+`highscore` is a built-in UI node backed by the runtime high-score table. It renders a compact name/score list without requiring one text node per row.
+
+Current highscore properties:
+
+- `font`
+- `font_size`
+- `items`
+- `gap`
+- `score_digits`
+- `visible`
+- `layer`
+- `z`
+- `pos`
+- `size`
+- `color`
+- `anchor`
+
+Example:
+
+```rpu
+highscore HighScoreTable {
+    anchor = top
+    pos = (0, 64)
+    size = (96, 72)
+    color = #f4f8ff
+    font = "BetterPixels.ttf"
+    font_size = 8.0
+    items = 8
+    gap = 8.0
+    score_digits = 4
+}
+```
+
+The runtime table currently starts with placeholder `UNKNOWN / 0000` rows until scores are submitted.
 
 Visual nodes can also embed script functions and handlers directly:
 

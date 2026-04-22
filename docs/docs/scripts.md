@@ -55,6 +55,7 @@ Supported today:
 - boolean conditions with `&&`, `||`, `!`
 - top-level reusable functions
 - runtime query calls like `input_left()`, `input_action()`, and `key("Space")`
+- action builtins like `play_sound(...)`, `play_music(...)`, and `stop_music()`
 
 ## Properties
 
@@ -66,6 +67,7 @@ Current readable/writable properties:
 - `self.height`
 - `self.pos`
 - `self.size`
+- `self.rotation`
 - `self.color`
 - `self.texture` for sprites
 - `self.text` for text nodes
@@ -76,6 +78,7 @@ Current readable/writable properties:
 - `Name.height`
 - `Name.pos`
 - `Name.size`
+- `Name.rotation`
 - `Name.color`
 - `Name.texture` for sprites
 - `Name.text` for text nodes
@@ -87,6 +90,7 @@ Example:
 Accent.color = #7ce0ff
 self.pos = Mascot.pos
 self.width = 96.0
+self.rotation = self.rotation + 1.6 * dt
 ```
 
 ## Locals
@@ -178,6 +182,22 @@ Called as a statement:
 call sync_accent(next_x)
 ```
 
+Audio actions use the same `call ...` statement form:
+
+```rpu
+call play_sound("shot.wav")
+call play_music("music-game.ogg")
+call stop_music()
+```
+
+`play_sound(...)` is intended for short one-shot effects.
+
+`play_music(...)` starts looping background music and replaces any currently playing music.
+
+`stop_music()` stops the current music track.
+
+These actions work on both native and wasm/web. On the web, browsers may delay music start until the first user interaction because of autoplay rules.
+
 Called as an expression:
 
 ```rpu
@@ -196,6 +216,8 @@ Current built-in runtime queries:
 - `key("Space")`
 - `exists("Name")`
 - `first_overlap("group")`
+- `high_score_name(index)`
+- `high_score_value(index)`
 - `lerp(a, b, t)`
 - `pulse(period)`
 - `smoothstep(edge0, edge1, x)`
@@ -246,6 +268,8 @@ if exists(hit) {
 }
 ```
 
+`high_score_name(index)` and `high_score_value(index)` read from the runtime high-score table using 1-based indices.
+
 `lerp(a, b, t)` linearly interpolates between two scalar values.
 
 `pulse(period)` returns a repeating `0..1` pulse over the given period in seconds.
@@ -283,6 +307,16 @@ on update(dt) {
     ScoutOne.x = ScoutOne.x - 180.0 * dt
 }
 ```
+
+## High scores
+
+Scripts can submit scores to the runtime high-score table:
+
+```rpu
+call submit_score("UNKNOWN", HudState.score)
+```
+
+This updates the internal table used by `highscore` scene nodes and the `high_score_name(...)` / `high_score_value(...)` queries.
 
 Current limitations:
 

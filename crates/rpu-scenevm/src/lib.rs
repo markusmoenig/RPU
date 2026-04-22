@@ -1,15 +1,21 @@
 use anyhow::{Context as AnyhowContext, Result, anyhow};
+#[cfg(target_arch = "wasm32")]
+use base64::Engine;
 use bytemuck::{Pod, Zeroable};
 use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
 use rpu_core::{Anchor, TextAlign};
+#[cfg(not(target_arch = "wasm32"))]
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::collections::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Cursor;
 use wgpu::util::DeviceExt;
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 #[cfg(target_arch = "wasm32")]
-use web_sys::{HtmlCanvasElement, KeyboardEvent, MouseEvent, WheelEvent};
+use web_sys::{HtmlAudioElement, HtmlCanvasElement, KeyboardEvent, MouseEvent, WheelEvent};
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -66,11 +72,11 @@ pub trait RpuSceneApp {
     fn scroll(&mut self, _ctx: &mut RuntimeContext, _dx: f32, _dy: f32) {}
 }
 
-#[derive(Debug, Clone)]
 pub struct RuntimeContext {
     window_size: (u32, u32),
     scale_factor: f32,
     pressed_keys: HashSet<String>,
+    audio: AudioState,
 }
 
 impl RuntimeContext {
@@ -79,6 +85,7 @@ impl RuntimeContext {
             window_size,
             scale_factor,
             pressed_keys: HashSet::new(),
+            audio: AudioState::new(),
         }
     }
 
@@ -121,6 +128,18 @@ impl RuntimeContext {
         self.pressed_keys.clone()
     }
 
+    pub fn play_sound(&mut self, asset_path: &str) {
+        self.audio.play_sound(asset_path);
+    }
+
+    pub fn play_music(&mut self, asset_path: &str) {
+        self.audio.play_music(asset_path);
+    }
+
+    pub fn stop_music(&mut self) {
+        self.audio.stop_music();
+    }
+
     #[allow(dead_code)]
     fn set_window_size(&mut self, window_size: (u32, u32)) {
         self.window_size = window_size;
@@ -135,9 +154,194 @@ impl RuntimeContext {
         let key = normalize_key_name(key);
         if pressed {
             self.pressed_keys.insert(key);
+            self.audio.activate();
         } else {
             self.pressed_keys.remove(&key);
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct AudioState {
+    output_stream: Option<OutputStream>,
+    output_handle: Option<OutputStreamHandle>,
+    music_sink: Option<Sink>,
+    current_music: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AudioState {
+    fn new() -> Self {
+        match OutputStream::try_default() {
+            Ok((output_stream, output_handle)) => Self {
+                output_stream: Some(output_stream),
+                output_handle: Some(output_handle),
+                music_sink: None,
+                current_music: None,
+            },
+            Err(_) => Self {
+                output_stream: None,
+                output_handle: None,
+                music_sink: None,
+                current_music: None,
+            },
+        }
+    }
+
+    fn play_sound(&mut self, asset_path: &str) {
+        let Some(bytes) = std::fs::read(asset_path).ok() else {
+            return;
+        };
+        let Some(handle) = self.output_handle.as_ref() else {
+            return;
+        };
+        let Ok(decoder) = Decoder::new(Cursor::new(bytes)) else {
+            return;
+        };
+        let Ok(sink) = Sink::try_new(handle) else {
+            return;
+        };
+        sink.append(decoder);
+        sink.detach();
+    }
+
+    fn play_music(&mut self, asset_path: &str) {
+        let normalized = asset_path.trim_start_matches('/').to_string();
+        if self.current_music.as_deref() == Some(normalized.as_str()) {
+            return;
+        }
+        let Some(bytes) = std::fs::read(asset_path).ok() else {
+            return;
+        };
+        let Some(handle) = self.output_handle.as_ref() else {
+            return;
+        };
+        let Ok(decoder) = Decoder::new(Cursor::new(bytes)) else {
+            return;
+        };
+        let Ok(sink) = Sink::try_new(handle) else {
+            return;
+        };
+        sink.append(decoder.repeat_infinite());
+        self.stop_music();
+        self.music_sink = Some(sink);
+        self.current_music = Some(normalized);
+    }
+
+    fn stop_music(&mut self) {
+        if let Some(sink) = self.music_sink.take() {
+            sink.stop();
+        }
+        self.current_music = None;
+    }
+
+    fn activate(&mut self) {
+        let _ = self.output_stream.as_ref();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct AudioState {
+    music: Option<HtmlAudioElement>,
+    cached_data_urls: HashMap<String, String>,
+    pending_music: Option<String>,
+    current_music: Option<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl AudioState {
+    fn new() -> Self {
+        Self {
+            music: None,
+            cached_data_urls: HashMap::new(),
+            pending_music: None,
+            current_music: None,
+        }
+    }
+
+    fn play_sound(&mut self, asset_path: &str) {
+        let Some(src) = self.asset_data_url(asset_path) else {
+            return;
+        };
+        let Ok(audio) = HtmlAudioElement::new_with_src(&src) else {
+            return;
+        };
+        audio.set_loop(false);
+        let _ = audio.play();
+    }
+
+    fn play_music(&mut self, asset_path: &str) {
+        let normalized = asset_path.trim_start_matches('/').to_string();
+        if self.current_music.as_deref() == Some(normalized.as_str())
+            || self.pending_music.as_deref() == Some(normalized.as_str())
+        {
+            return;
+        }
+        self.pending_music = Some(normalized);
+        self.try_start_pending_music();
+    }
+
+    fn stop_music(&mut self) {
+        self.pending_music = None;
+        if let Some(audio) = self.music.take() {
+            audio.pause().ok();
+            audio.set_current_time(0.0);
+        }
+        self.current_music = None;
+    }
+
+    fn activate(&mut self) {
+        self.try_start_pending_music();
+    }
+
+    fn try_start_pending_music(&mut self) {
+        let Some(asset_path) = self.pending_music.clone() else {
+            return;
+        };
+        let Some(src) = self.asset_data_url(&asset_path) else {
+            return;
+        };
+        let Ok(audio) = HtmlAudioElement::new_with_src(&src) else {
+            return;
+        };
+        audio.set_loop(true);
+        match audio.play() {
+            Ok(_) => {
+                if let Some(old_audio) = self.music.replace(audio) {
+                    old_audio.pause().ok();
+                }
+                self.current_music = Some(asset_path);
+                self.pending_music = None;
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn asset_data_url(&mut self, asset_path: &str) -> Option<String> {
+        let key = asset_path.trim_start_matches('/').to_string();
+        if let Some(url) = self.cached_data_urls.get(&key) {
+            return Some(url.clone());
+        }
+        let bytes = WEB_ASSETS.with(|assets| assets.borrow().get(&key).cloned())?;
+        let mime = audio_mime_type_for(&key);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        let url = format!("data:{mime};base64,{encoded}");
+        self.cached_data_urls.insert(key, url.clone());
+        Some(url)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn audio_mime_type_for(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".ogg") {
+        "audio/ogg"
+    } else if lower.ends_with(".mp3") {
+        "audio/mpeg"
+    } else if lower.ends_with(".wav") {
+        "audio/wav"
+    } else {
+        "application/octet-stream"
     }
 }
 
@@ -195,6 +399,7 @@ impl SceneFrame {
         y: f32,
         width: f32,
         height: f32,
+        rotation: f32,
         color: [f32; 4],
         flip_x: bool,
         flip_y: bool,
@@ -207,6 +412,7 @@ impl SceneFrame {
             y,
             width,
             height,
+            rotation,
             color,
             flip_x,
             flip_y,
@@ -222,6 +428,7 @@ impl SceneFrame {
         y: f32,
         width: f32,
         height: f32,
+        rotation: f32,
         color: [f32; 4],
         flip_x: bool,
         flip_y: bool,
@@ -234,6 +441,7 @@ impl SceneFrame {
             y,
             width,
             height,
+            rotation,
             color,
             flip_x,
             flip_y,
@@ -295,6 +503,7 @@ pub struct RenderSprite {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub rotation: f32,
     pub color: [f32; 4],
     pub flip_x: bool,
     pub flip_y: bool,
@@ -1175,13 +1384,12 @@ fn register_web_resize_handler<A: RpuSceneApp + 'static>(
         };
         let mut runner = runner.borrow_mut();
         let pixel_size = (canvas.width().max(1), canvas.height().max(1));
-        runner.ctx.set_window_size(pixel_size);
-        runner.ctx.set_scale_factor(device_scale);
-        runner.app.set_scale(device_scale);
-        let mut ctx = runner.ctx.clone();
-        runner.app.resize(&mut ctx, pixel_size);
-        runner.ctx = ctx;
-        runner.gpu.resize(pixel_size.0, pixel_size.1);
+        let WebRunner { app, gpu, ctx, .. } = &mut *runner;
+        ctx.set_window_size(pixel_size);
+        ctx.set_scale_factor(device_scale);
+        app.set_scale(device_scale);
+        app.resize(ctx, pixel_size);
+        gpu.resize(pixel_size.0, pixel_size.1);
     }) as Box<dyn FnMut()>);
     window
         .add_event_listener_with_callback("resize", resize.as_ref().unchecked_ref())
@@ -1428,13 +1636,14 @@ fn build_vertices(
     let h = size.1.max(1) as f32;
     let mut out = Vec::with_capacity(rects.len() * 6);
     for rect in rects {
-        let (x, y, width, height, color, flip_x, flip_y) = match rect {
-            RenderItem::Rect(rect) => (rect.x, rect.y, rect.width, rect.height, rect.color, false, false),
+        let (x, y, width, height, rotation, color, flip_x, flip_y) = match rect {
+            RenderItem::Rect(rect) => (rect.x, rect.y, rect.width, rect.height, 0.0, rect.color, false, false),
             RenderItem::Sprite(rect) => (
                 rect.x,
                 rect.y,
                 rect.width,
                 rect.height,
+                rect.rotation,
                 [
                     (rect.color[0] * 0.92).min(1.0),
                     (rect.color[1] * 0.98).min(1.0),
@@ -1451,7 +1660,7 @@ fn build_vertices(
                     .map(|texture| (texture.width as f32, texture.height as f32))
                     .unwrap_or((1.0, 1.0));
                 let (tx, ty) = anchored_text_position(size, text, dims.0, dims.1);
-                (tx, ty, dims.0, dims.1, text.color, false, false)
+                (tx, ty, dims.0, dims.1, 0.0, text.color, false, false)
             }
         };
         let u0 = if flip_x { 1.0 } else { 0.0 };
@@ -1462,14 +1671,20 @@ fn build_vertices(
         let uv1 = [u1, v0];
         let uv2 = [u1, v1];
         let uv3 = [u0, v1];
-        let x0 = x;
-        let y0 = y;
-        let x1 = x + width;
-        let y1 = y + height;
-        let p0 = to_ndc(x0, y0, w, h);
-        let p1 = to_ndc(x1, y0, w, h);
-        let p2 = to_ndc(x1, y1, w, h);
-        let p3 = to_ndc(x0, y1, w, h);
+        let center_x = x + width * 0.5;
+        let center_y = y + height * 0.5;
+        let half_w = width * 0.5;
+        let half_h = height * 0.5;
+        let (sin_r, cos_r) = rotation.sin_cos();
+        let rotate = |local_x: f32, local_y: f32| -> [f32; 2] {
+            let world_x = center_x + local_x * cos_r - local_y * sin_r;
+            let world_y = center_y + local_x * sin_r + local_y * cos_r;
+            to_ndc(world_x, world_y, w, h)
+        };
+        let p0 = rotate(-half_w, -half_h);
+        let p1 = rotate(half_w, -half_h);
+        let p2 = rotate(half_w, half_h);
+        let p3 = rotate(-half_w, half_h);
         out.extend_from_slice(&[
             QuadVertex { position: p0, color, uv: uv0 },
             QuadVertex { position: p1, color, uv: uv1 },
