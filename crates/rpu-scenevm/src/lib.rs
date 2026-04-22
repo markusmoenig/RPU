@@ -1,12 +1,32 @@
 use anyhow::{Context as AnyhowContext, Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashSet;
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
+use rpu_core::{Anchor, TextAlign};
+use std::collections::{HashMap, HashSet};
 use wgpu::util::DeviceExt;
+#[cfg(target_arch = "wasm32")]
+use std::{cell::RefCell, rc::Rc};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{JsCast, closure::Closure};
+#[cfg(target_arch = "wasm32")]
+use web_sys::{HtmlCanvasElement, KeyboardEvent, MouseEvent, WheelEvent};
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static WEB_ASSETS: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn register_web_asset(path: &str, bytes: &[u8]) {
+    WEB_ASSETS.with(|assets| {
+        assets
+            .borrow_mut()
+            .insert(path.trim_start_matches('/').to_string(), bytes.to_vec());
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn register_web_asset(_path: &str, _bytes: &[u8]) {}
 
 pub trait RpuSceneApp {
     fn initial_window_size(&self) -> Option<(u32, u32)> {
@@ -101,10 +121,12 @@ impl RuntimeContext {
         self.pressed_keys.clone()
     }
 
+    #[allow(dead_code)]
     fn set_window_size(&mut self, window_size: (u32, u32)) {
         self.window_size = window_size;
     }
 
+    #[allow(dead_code)]
     fn set_scale_factor(&mut self, scale_factor: f32) {
         self.scale_factor = scale_factor;
     }
@@ -173,12 +195,11 @@ impl SceneFrame {
         y: f32,
         width: f32,
         height: f32,
-        mut color: [f32; 4],
+        color: [f32; 4],
         flip_x: bool,
         flip_y: bool,
         texture: Option<&str>,
     ) {
-        color[3] = color[3].min(0.96);
         self.push_sprite(
             0,
             self.items.len() as i32,
@@ -201,12 +222,11 @@ impl SceneFrame {
         y: f32,
         width: f32,
         height: f32,
-        mut color: [f32; 4],
+        color: [f32; 4],
         flip_x: bool,
         flip_y: bool,
         texture: Option<&str>,
     ) {
-        color[3] = color[3].min(0.96);
         self.items.push(RenderItem::Sprite(RenderSprite {
             layer,
             order,
@@ -231,6 +251,8 @@ impl SceneFrame {
         font: &str,
         font_size: f32,
         color: [f32; 4],
+        anchor: Anchor,
+        align: TextAlign,
     ) {
         self.items.push(RenderItem::Text(RenderText {
             layer,
@@ -241,6 +263,8 @@ impl SceneFrame {
             font_path: font.to_string(),
             font_size,
             color,
+            anchor,
+            align,
         }));
     }
 }
@@ -287,6 +311,50 @@ pub struct RenderText {
     pub font_path: String,
     pub font_size: f32,
     pub color: [f32; 4],
+    pub anchor: Anchor,
+    pub align: TextAlign,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct WebRunner<A: RpuSceneApp> {
+    app: A,
+    gpu: GpuState,
+    ctx: RuntimeContext,
+    canvas: HtmlCanvasElement,
+    target_frame_ms: Option<f64>,
+    last_frame_ms: Option<f64>,
+    last_cursor: (f32, f32),
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<A: RpuSceneApp> WebRunner<A> {
+    fn update_and_render(&mut self) {
+        self.app.update(&mut self.ctx);
+        let mut frame = SceneFrame::new(self.ctx.window_size());
+        self.app.render(&mut self.ctx, &mut frame);
+        if let Err(error) = self.gpu.render(&frame) {
+            web_sys::console::error_1(&format!("rpu-scenevm web render failed: {error:?}").into());
+        }
+    }
+
+    fn mouse_move(&mut self, x: f32, y: f32) {
+        self.last_cursor = (x, y);
+        self.app.mouse_move(&mut self.ctx, x, y);
+    }
+
+    fn mouse_down(&mut self) {
+        let (x, y) = self.last_cursor;
+        self.app.mouse_down(&mut self.ctx, x, y);
+    }
+
+    fn mouse_up(&mut self) {
+        let (x, y) = self.last_cursor;
+        self.app.mouse_up(&mut self.ctx, x, y);
+    }
+
+    fn scroll(&mut self, dx: f32, dy: f32) {
+        self.app.scroll(&mut self.ctx, dx, dy);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -515,6 +583,7 @@ fn normalize_key_name(key: &str) -> String {
         "Right" => "ArrowRight".to_string(),
         "Up" => "ArrowUp".to_string(),
         "Down" => "ArrowDown".to_string(),
+        "" | " " | "Spacebar" => "Space".to_string(),
         other => other.to_uppercase().replace("ARROWLEFT", "ArrowLeft")
             .replace("ARROWRIGHT", "ArrowRight")
             .replace("ARROWUP", "ArrowUp")
@@ -528,12 +597,13 @@ fn normalize_key_name(key: &str) -> String {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 struct GpuState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    #[allow(dead_code)]
     config: wgpu::SurfaceConfiguration,
+    surface_is_srgb: bool,
     quad_pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -542,8 +612,8 @@ struct GpuState {
     font_cache: HashMap<String, fontdue::Font>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl GpuState {
+    #[cfg(not(target_arch = "wasm32"))]
     async fn new(window: std::sync::Arc<winit::window::Window>) -> Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
@@ -587,8 +657,10 @@ impl GpuState {
             .ok_or_else(|| anyhow!("surface does not expose any present modes"))?;
         let alpha_mode = caps
             .alpha_modes
-            .first()
+            .iter()
             .copied()
+            .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
+            .or_else(|| caps.alpha_modes.first().copied())
             .unwrap_or(wgpu::CompositeAlphaMode::Opaque);
 
         let config = wgpu::SurfaceConfiguration {
@@ -602,6 +674,7 @@ impl GpuState {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+        let surface_is_srgb = config.format.is_srgb();
         let (quad_pipeline, bind_group_layout) = create_quad_pipeline(&device, config.format);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("rpu-texture-sampler"),
@@ -621,6 +694,7 @@ impl GpuState {
             device,
             queue,
             config,
+            surface_is_srgb,
             quad_pipeline,
             sampler,
             bind_group_layout,
@@ -630,6 +704,97 @@ impl GpuState {
         })
     }
 
+    #[cfg(target_arch = "wasm32")]
+    async fn new_canvas(canvas: HtmlCanvasElement) -> Result<Self> {
+        let instance = wgpu::Instance::default();
+        let surface = instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
+            .map_err(|error| anyhow!("failed to create web surface: {error}"))?;
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .context("failed to request GPU adapter")?;
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("rpu-device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::default(),
+            })
+            .await
+            .context("failed to request GPU device")?;
+
+        let caps = surface.get_capabilities(&adapter);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(wgpu::TextureFormat::is_srgb)
+            .or_else(|| caps.formats.first().copied())
+            .ok_or_else(|| anyhow!("surface does not expose any formats"))?;
+        let present_mode = caps
+            .present_modes
+            .iter()
+            .copied()
+            .find(|mode| *mode == wgpu::PresentMode::Fifo)
+            .or_else(|| caps.present_modes.first().copied())
+            .ok_or_else(|| anyhow!("surface does not expose any present modes"))?;
+        let alpha_mode = caps
+            .alpha_modes
+            .iter()
+            .copied()
+            .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
+            .or_else(|| caps.alpha_modes.first().copied())
+            .unwrap_or(wgpu::CompositeAlphaMode::Opaque);
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: canvas.width().max(1),
+            height: canvas.height().max(1),
+            present_mode,
+            desired_maximum_frame_latency: 2,
+            alpha_mode,
+            view_formats: vec![],
+        };
+        surface.configure(&device, &config);
+        let surface_is_srgb = config.format.is_srgb();
+        let (quad_pipeline, bind_group_layout) = create_quad_pipeline(&device, config.format);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("rpu-texture-sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        let white_texture =
+            GpuTexture::from_rgba(&device, &queue, &sampler, &bind_group_layout, 1, 1, &[255; 4]);
+
+        Ok(Self {
+            surface,
+            device,
+            queue,
+            config,
+            surface_is_srgb,
+            quad_pipeline,
+            sampler,
+            bind_group_layout,
+            white_texture,
+            texture_cache: HashMap::new(),
+            font_cache: HashMap::new(),
+        })
+    }
+
+    #[allow(dead_code)]
     fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
@@ -662,12 +827,10 @@ impl GpuState {
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: frame_ctx.clear_color[0] as f64,
-                            g: frame_ctx.clear_color[1] as f64,
-                            b: frame_ctx.clear_color[2] as f64,
-                            a: frame_ctx.clear_color[3] as f64,
-                        }),
+                        load: wgpu::LoadOp::Clear(clear_color_for_surface(
+                            frame_ctx.clear_color,
+                            self.surface_is_srgb,
+                        )),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -698,10 +861,19 @@ impl GpuState {
 
     fn ensure_texture(&mut self, path: &str) {
         if !self.texture_cache.contains_key(path) {
-            match std::fs::read(path)
+            #[cfg(not(target_arch = "wasm32"))]
+            let image = std::fs::read(path)
                 .ok()
-                .and_then(|bytes| image::load_from_memory(&bytes).ok())
-            {
+                .and_then(|bytes| image::load_from_memory(&bytes).ok());
+            #[cfg(target_arch = "wasm32")]
+            let image = WEB_ASSETS.with(|assets| {
+                assets
+                    .borrow()
+                    .get(path.trim_start_matches('/'))
+                    .cloned()
+                    .and_then(|bytes| image::load_from_memory(&bytes).ok())
+            });
+            match image {
                 Some(image) => {
                     let rgba = image.to_rgba8();
                     let (width, height) = rgba.dimensions();
@@ -810,7 +982,15 @@ impl GpuState {
 
     fn load_font(&mut self, path: &str) -> Option<&fontdue::Font> {
         if !self.font_cache.contains_key(path) {
+            #[cfg(not(target_arch = "wasm32"))]
             let bytes = std::fs::read(path).ok()?;
+            #[cfg(target_arch = "wasm32")]
+            let bytes = WEB_ASSETS.with(|assets| {
+                assets
+                    .borrow()
+                    .get(path.trim_start_matches('/'))
+                    .cloned()
+            })?;
             let font = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()?;
             self.font_cache.insert(path.to_string(), font);
         }
@@ -826,8 +1006,229 @@ impl GpuState {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn run_app<A: RpuSceneApp + 'static>(_app: A) -> Result<()> {
-    anyhow::bail!("wasm runner is not implemented yet")
+pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
+    console_error_panic_hook::set_once();
+    let window = web_sys::window().ok_or_else(|| anyhow!("missing browser window"))?;
+    let document = window
+        .document()
+        .ok_or_else(|| anyhow!("missing browser document"))?;
+    let canvas = document
+        .create_element("canvas")
+        .map_err(|error| anyhow!("failed to create canvas: {error:?}"))?
+        .dyn_into::<HtmlCanvasElement>()
+        .map_err(|_| anyhow!("failed to cast canvas element"))?;
+    let body = document
+        .body()
+        .ok_or_else(|| anyhow!("missing browser body"))?;
+
+    let initial_size = app.initial_window_size().unwrap_or((1280, 720));
+    let device_scale = window.device_pixel_ratio().max(1.0) as f32;
+    configure_canvas(&canvas, initial_size, device_scale)?;
+    body.append_child(&canvas)
+        .map_err(|error| anyhow!("failed to attach canvas: {error:?}"))?;
+
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(error) = start_web_app(app, canvas, initial_size, device_scale).await {
+            web_sys::console::error_1(&format!("rpu-scenevm web startup failed: {error:#}").into());
+        }
+    });
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn start_web_app<A: RpuSceneApp + 'static>(
+    mut app: A,
+    canvas: HtmlCanvasElement,
+    initial_size: (u32, u32),
+    device_scale: f32,
+) -> Result<()> {
+    let gpu = GpuState::new_canvas(canvas.clone()).await?;
+    let mut ctx = RuntimeContext::new(initial_size, device_scale);
+    app.set_native_mode(false);
+    app.set_scale(device_scale);
+    app.init(&mut ctx);
+
+    let runner = Rc::new(RefCell::new(WebRunner {
+        app,
+        gpu,
+        ctx,
+        canvas: canvas.clone(),
+        target_frame_ms: None,
+        last_frame_ms: None,
+        last_cursor: (0.0, 0.0),
+    }));
+
+    {
+        let mut runner_ref = runner.borrow_mut();
+        runner_ref.target_frame_ms = runner_ref
+            .app
+            .target_fps()
+            .and_then(|fps| (fps > 0.0).then_some(1000.0 / fps as f64));
+    }
+
+    register_web_input_handlers(&runner)?;
+
+    let animation = Rc::new(RefCell::new(None::<Closure<dyn FnMut(f64)>>));
+    let animation_clone = animation.clone();
+    let runner_clone = runner.clone();
+    *animation.borrow_mut() = Some(Closure::wrap(Box::new(move |timestamp_ms: f64| {
+        {
+            let mut runner = runner_clone.borrow_mut();
+            let should_draw = match runner.target_frame_ms {
+                Some(interval) => match runner.last_frame_ms {
+                    Some(last) => timestamp_ms - last >= interval,
+                    None => true,
+                },
+                None => true,
+            };
+            if should_draw {
+                runner.last_frame_ms = Some(timestamp_ms);
+                runner.update_and_render();
+            }
+        }
+        let window = web_sys::window().expect("window");
+        let _ = window.request_animation_frame(
+            animation_clone
+                .borrow()
+                .as_ref()
+                .expect("animation closure")
+                .as_ref()
+                .unchecked_ref(),
+        );
+    }) as Box<dyn FnMut(f64)>));
+
+    let window = web_sys::window().ok_or_else(|| anyhow!("missing browser window"))?;
+    window
+        .request_animation_frame(
+            animation
+                .borrow()
+                .as_ref()
+                .expect("animation closure")
+                .as_ref()
+                .unchecked_ref(),
+        )
+        .map_err(|error| anyhow!("requestAnimationFrame failed: {error:?}"))?;
+
+    std::mem::forget(animation);
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn configure_canvas(canvas: &HtmlCanvasElement, logical_size: (u32, u32), scale: f32) -> Result<()> {
+    let style = canvas.style();
+    style
+        .set_property("width", &format!("{}px", logical_size.0))
+        .map_err(|error| anyhow!("failed to style canvas width: {error:?}"))?;
+    style
+        .set_property("height", &format!("{}px", logical_size.1))
+        .map_err(|error| anyhow!("failed to style canvas height: {error:?}"))?;
+    style
+        .set_property("display", "block")
+        .map_err(|error| anyhow!("failed to style canvas display: {error:?}"))?;
+    canvas.set_width((logical_size.0 as f32 * scale).round().max(1.0) as u32);
+    canvas.set_height((logical_size.1 as f32 * scale).round().max(1.0) as u32);
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn register_web_input_handlers<A: RpuSceneApp + 'static>(
+    runner: &Rc<RefCell<WebRunner<A>>>,
+) -> Result<()> {
+    let window = web_sys::window().ok_or_else(|| anyhow!("missing browser window"))?;
+
+    {
+        let runner = runner.clone();
+        let keydown = Closure::wrap(Box::new(move |event: KeyboardEvent| {
+            let key = event.key();
+            if matches!(key.as_str(), " " | "Spacebar" | "Space" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Enter") {
+                event.prevent_default();
+            }
+            runner.borrow_mut().ctx.set_key_pressed(&key, true);
+        }) as Box<dyn FnMut(_)>);
+        window
+            .add_event_listener_with_callback("keydown", keydown.as_ref().unchecked_ref())
+            .map_err(|error| anyhow!("failed to register keydown: {error:?}"))?;
+        keydown.forget();
+    }
+
+    {
+        let runner = runner.clone();
+        let keyup = Closure::wrap(Box::new(move |event: KeyboardEvent| {
+            let key = event.key();
+            if matches!(key.as_str(), " " | "Spacebar" | "Space" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Enter") {
+                event.prevent_default();
+            }
+            runner.borrow_mut().ctx.set_key_pressed(&key, false);
+        }) as Box<dyn FnMut(_)>);
+        window
+            .add_event_listener_with_callback("keyup", keyup.as_ref().unchecked_ref())
+            .map_err(|error| anyhow!("failed to register keyup: {error:?}"))?;
+        keyup.forget();
+    }
+
+    {
+        let runner_for_listener = runner.clone();
+        let runner = runner.clone();
+        let mousemove = Closure::wrap(Box::new(move |event: MouseEvent| {
+            let mut runner = runner.borrow_mut();
+            let rect = runner.canvas.get_bounding_client_rect();
+            let x = ((event.client_x() as f64 - rect.left()) as f32).max(0.0);
+            let y = ((event.client_y() as f64 - rect.top()) as f32).max(0.0);
+            runner.mouse_move(x, y);
+        }) as Box<dyn FnMut(_)>);
+        runner_for_listener
+            .borrow()
+            .canvas
+            .add_event_listener_with_callback("mousemove", mousemove.as_ref().unchecked_ref())
+            .map_err(|error| anyhow!("failed to register mousemove: {error:?}"))?;
+        mousemove.forget();
+    }
+
+    {
+        let runner_for_listener = runner.clone();
+        let runner = runner.clone();
+        let mousedown = Closure::wrap(Box::new(move |_event: MouseEvent| {
+            runner.borrow_mut().mouse_down();
+        }) as Box<dyn FnMut(_)>);
+        runner_for_listener
+            .borrow()
+            .canvas
+            .add_event_listener_with_callback("mousedown", mousedown.as_ref().unchecked_ref())
+            .map_err(|error| anyhow!("failed to register mousedown: {error:?}"))?;
+        mousedown.forget();
+    }
+
+    {
+        let runner_for_listener = runner.clone();
+        let runner = runner.clone();
+        let mouseup = Closure::wrap(Box::new(move |_event: MouseEvent| {
+            runner.borrow_mut().mouse_up();
+        }) as Box<dyn FnMut(_)>);
+        runner_for_listener
+            .borrow()
+            .canvas
+            .add_event_listener_with_callback("mouseup", mouseup.as_ref().unchecked_ref())
+            .map_err(|error| anyhow!("failed to register mouseup: {error:?}"))?;
+        mouseup.forget();
+    }
+
+    {
+        let runner_for_listener = runner.clone();
+        let runner = runner.clone();
+        let wheel = Closure::wrap(Box::new(move |event: WheelEvent| {
+            runner
+                .borrow_mut()
+                .scroll(event.delta_x() as f32, event.delta_y() as f32);
+        }) as Box<dyn FnMut(_)>);
+        runner_for_listener
+            .borrow()
+            .canvas
+            .add_event_listener_with_callback("wheel", wheel.as_ref().unchecked_ref())
+            .map_err(|error| anyhow!("failed to register wheel: {error:?}"))?;
+        wheel.forget();
+    }
+
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -985,8 +1386,12 @@ fn build_vertices(
             ),
             RenderItem::Text(text) => {
                 let key = text.texture_key();
-                let dims = texture_cache.get(&key).map(|texture| (texture.width as f32, texture.height as f32)).unwrap_or((1.0, 1.0));
-                (text.x, text.y, dims.0, dims.1, text.color, false, false)
+                let dims = texture_cache
+                    .get(&key)
+                    .map(|texture| (texture.width as f32, texture.height as f32))
+                    .unwrap_or((1.0, 1.0));
+                let (tx, ty) = anchored_text_position(size, text, dims.0, dims.1);
+                (tx, ty, dims.0, dims.1, text.color, false, false)
             }
         };
         let u0 = if flip_x { 1.0 } else { 0.0 };
@@ -1017,6 +1422,32 @@ fn build_vertices(
     out
 }
 
+fn anchored_text_position(
+    size: (u32, u32),
+    text: &RenderText,
+    width: f32,
+    height: f32,
+) -> (f32, f32) {
+    let viewport_w = size.0 as f32;
+    let viewport_h = size.1 as f32;
+    let base_x = match text.anchor {
+        Anchor::TopLeft | Anchor::Left | Anchor::BottomLeft | Anchor::World => text.x,
+        Anchor::Top | Anchor::Center | Anchor::Bottom => viewport_w * 0.5 + text.x,
+        Anchor::TopRight | Anchor::Right | Anchor::BottomRight => viewport_w + text.x,
+    };
+    let final_x = match text.align {
+        TextAlign::Left => base_x,
+        TextAlign::Center => base_x - width * 0.5,
+        TextAlign::Right => base_x - width,
+    };
+    let final_y = match text.anchor {
+        Anchor::TopLeft | Anchor::Top | Anchor::TopRight | Anchor::World => text.y,
+        Anchor::Left | Anchor::Center | Anchor::Right => viewport_h * 0.5 - height * 0.5 + text.y,
+        Anchor::BottomLeft | Anchor::Bottom | Anchor::BottomRight => viewport_h - height + text.y,
+    };
+    (final_x, final_y)
+}
+
 fn build_batches(
     size: (u32, u32),
     quads: &[RenderItem],
@@ -1044,6 +1475,25 @@ fn to_ndc(x: f32, y: f32, width: f32, height: f32) -> [f32; 2] {
     [(x / width) * 2.0 - 1.0, 1.0 - (y / height) * 2.0]
 }
 
+fn srgb_encode(channel: f32) -> f32 {
+    channel.clamp(0.0, 1.0).powf(1.0 / 2.2)
+}
+
+fn clear_color_for_surface(color: [f32; 4], surface_is_srgb: bool) -> wgpu::Color {
+    let [r, g, b, a] = color;
+    let (r, g, b) = if surface_is_srgb {
+        (r, g, b)
+    } else {
+        (srgb_encode(r), srgb_encode(g), srgb_encode(b))
+    };
+    wgpu::Color {
+        r: r as f64,
+        g: g as f64,
+        b: b as f64,
+        a: a as f64,
+    }
+}
+
 fn create_quad_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -1069,41 +1519,46 @@ fn create_quad_pipeline(
             },
         ],
     });
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("rpu-quad-shader"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
-            r#"
-struct VertexIn {
+    let fragment = if format.is_srgb() {
+        "    return texel * v.color;\n"
+    } else {
+        "    let out_color = texel * v.color;\n    return vec4<f32>(pow(out_color.rgb, vec3<f32>(1.0 / 2.2)), out_color.a);\n"
+    };
+    let shader_source = format!(
+        r#"
+struct VertexIn {{
     @location(0) position: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) uv: vec2<f32>,
-};
+}};
 
-struct VertexOut {
+struct VertexOut {{
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) uv: vec2<f32>,
-};
+}};
 
 @group(0) @binding(0) var quad_tex: texture_2d<f32>;
 @group(0) @binding(1) var quad_sampler: sampler;
 
 @vertex
-fn vs_main(v: VertexIn) -> VertexOut {
+fn vs_main(v: VertexIn) -> VertexOut {{
     var out: VertexOut;
     out.position = vec4<f32>(v.position, 0.0, 1.0);
     out.color = v.color;
     out.uv = v.uv;
     return out;
-}
+}}
 
 @fragment
-fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {
+fn fs_main(v: VertexOut) -> @location(0) vec4<f32> {{
     let texel = textureSample(quad_tex, quad_sampler, v.uv);
-    return texel * v.color;
-}
-"#,
-        )),
+{fragment}}}
+"#
+    );
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("rpu-quad-shader"),
+        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(shader_source)),
     });
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

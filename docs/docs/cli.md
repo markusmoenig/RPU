@@ -14,6 +14,8 @@ Current commands:
 rpu new my_app
 rpu run path/to/project
 rpu build path/to/project
+rpu build-web path/to/project
+rpu serve-web path/to/project --port 8123
 rpu export-xcode path/to/project --output /tmp/apple-export
 ```
 
@@ -37,6 +39,37 @@ Current behavior:
 - opens a window
 - renders the scene
 - polls for source changes and hot reloads
+
+## `rpu build-web`
+
+Builds a browser export for a project.
+
+Current output goes to:
+
+```text
+build/web/
+```
+
+This currently emits:
+
+- `index.html`
+- wasm-bindgen JS glue
+- `.wasm`
+- a generated hidden launcher crate under `build/web/.app`
+
+The generated web build is self-contained and suitable for embedding into a website later.
+
+## `rpu serve-web`
+
+Builds the web export and serves it locally.
+
+Example:
+
+```bash
+rpu serve-web examples/warped_space_shooter --port 8123
+```
+
+This is useful for checking wasm/browser behavior without wiring your own local server.
 
 ## `rpu build`
 

@@ -32,6 +32,8 @@ Current scene nodes:
 - `rect`
 - `sprite`
 - `text`
+- `stack`
+- `highscore`
 - `map`
 
 ## Visual node properties
@@ -41,6 +43,9 @@ Current scene nodes:
 - `visible`
 - `template`
 - `group`
+- `parent`
+- `order`
+- `anchor`
 - `layer`
 - `z`
 - `pos`
@@ -67,6 +72,75 @@ rect Hero {
 `template = true` marks a visual node as a runtime spawn template. Template nodes are not part of the initial rendered world; scripts can instantiate them later with `spawn(...)`.
 
 `group = "name"` assigns the node to a logical runtime group. This is useful for gameplay queries such as overlap checks against all `hostile` entities.
+
+`parent = "StackName"` attaches the node to a `stack` layout container.
+
+`order = 10` defines the node order inside that stack.
+
+`anchor` controls viewport-relative placement for UI-style nodes. Current values are:
+
+- `world`
+- `top_left`
+- `top`
+- `top_right`
+- `left`
+- `center`
+- `right`
+- `bottom_left`
+- `bottom`
+- `bottom_right`
+
+`anchor = "world"` is the default and keeps the current gameplay/world-space behavior.
+
+Non-`world` anchors place the node relative to the authored virtual window size, with `pos` acting as an offset from that anchor.
+
+## Stack Layout
+
+`stack` is a lightweight layout container for menus and HUDs.
+
+Current stack properties:
+
+- `anchor`
+- `pos`
+- `size`
+- `direction`
+- `gap`
+- `align`
+
+Example:
+
+```rpu
+stack MenuContent {
+    anchor = top
+    pos = (-80, 18)
+    size = (160, 128)
+    direction = vertical
+    gap = 6.0
+    align = center
+}
+
+text TitleLabel {
+    parent = "MenuContent"
+    order = 0
+    value = "WARPED SPACE SHOOTER"
+    font = "BetterPixels.ttf"
+    font_size = 14.0
+    color = #f4f8ff
+}
+```
+
+Current stack directions:
+
+- `vertical`
+- `horizontal`
+
+Current stack alignment values:
+
+- `start`
+- `center`
+- `end`
+
+Stacks are intentionally small. They help with menu and HUD composition, but they are not a full retained UI system.
 
 For `sprite` nodes, `size` is optional. If a sprite has a `texture` and no explicit `size`, RPU uses the texture's natural pixel dimensions. If you do declare `size`, that overrides the texture size.
 
@@ -130,12 +204,16 @@ Current text properties:
 - `pos`
 - `color`
 - `script`
+- `anchor`
+- `align`
 
 Example:
 
 ```rpu
 text Score {
-    pos = (12, 8)
+    anchor = top_right
+    align = right
+    pos = (-12, 8)
     value = "SCORE 000000"
     font = "BetterPixels.ttf"
     font_size = 16.0
@@ -144,6 +222,14 @@ text Score {
 ```
 
 The `font` property should point to a `.ttf` file in `assets/`.
+
+`align` currently supports:
+
+- `left`
+- `center`
+- `right`
+
+This is especially useful with anchored HUD/menu text.
 
 Visual nodes can also embed script functions and handlers directly:
 
@@ -188,3 +274,34 @@ Current camera properties:
 - `background`
 
 The runtime currently uses the first available camera as the active camera.
+
+## High Scores
+
+`highscore` is a built-in scene object backed by the runtime high-score table.
+
+Current highscore properties:
+
+- `font`
+- `font_size`
+- `items`
+- `gap`
+- `score_digits`
+- normal visual properties such as `anchor`, `pos`, `size`, `layer`, `z`, and `color`
+
+Example:
+
+```rpu
+highscore HighScoreTable {
+    anchor = top
+    pos = (-40, 64)
+    size = (80, 72)
+    color = #f4f8ff
+    font = "BetterPixels.ttf"
+    font_size = 8.0
+    items = 8
+    gap = 8.0
+    score_digits = 4
+}
+```
+
+This is driven by the internal runtime high-score struct. You do not need to create one text node per row.

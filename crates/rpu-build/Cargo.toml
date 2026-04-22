@@ -7,4 +7,4 @@ edition = "2024"
 anyhow.workspace = true
 rpu-core = { path = "../rpu-core" }
 rpu-runtime = { path = "../rpu-runtime" }
-
+tiny_http = "0.12"

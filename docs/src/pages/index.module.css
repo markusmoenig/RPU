@@ -30,15 +30,20 @@
   border-bottom-color: rgba(246, 237, 226, 0.08);
 }
 
-.brandRow {
+.heroRow {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  margin: 0 0 0.75rem;
+  justify-content: space-between;
+  gap: 2rem;
 }
 
-.logo {
-  width: min(92px, 18vw);
+.heroText {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.heroLogo {
+  width: min(300px, 38vw);
   height: auto;
   display: block;
   flex: 0 0 auto;
@@ -54,7 +59,7 @@
 }
 
 .title {
-  margin: 0;
+  margin: 0 0 0.2rem;
   font-size: clamp(3rem, 10vw, 5.4rem);
   line-height: 0.95;
 }
@@ -168,11 +173,13 @@
 }
 
 @media (max-width: 640px) {
-  .brandRow {
-    gap: 0.75rem;
+  .heroRow {
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    gap: 1rem;
   }
 
-  .logo {
-    width: min(72px, 18vw);
+  .heroLogo {
+    width: min(220px, 62vw);
   }
 }

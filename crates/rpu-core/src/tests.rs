@@ -247,6 +247,41 @@ scene Main {
 }
 
 #[test]
+fn scene_parser_supports_anchor_and_text_align() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    sprite Logo {
+        anchor = top
+        pos = (0, 12)
+        texture = "logo.png"
+    }
+
+    text Title {
+        anchor = top_right
+        align = right
+        pos = (-8, 8)
+        value = "RPU"
+        font = "BetterPixels.ttf"
+        font_size = 20.0
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let sprite = &parsed.scenes[0].sprites[0];
+    let text = &parsed.scenes[0].texts[0];
+    assert_eq!(sprite.visual.anchor, Anchor::Top);
+    assert_eq!(text.visual.anchor, Anchor::TopRight);
+    assert_eq!(text.align, TextAlign::Right);
+}
+
+#[test]
 fn sprite_size_defaults_from_texture_when_omitted() {
     let scene = source_file(
         "scenes/main.rpu",

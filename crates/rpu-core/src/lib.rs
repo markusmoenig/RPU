@@ -17,6 +17,8 @@ pub struct ProjectInfo {
     pub name: String,
     #[serde(default = "default_version")]
     pub version: String,
+    #[serde(default = "default_start_scene")]
+    pub start_scene: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,9 +74,24 @@ pub struct SourceFile {
 }
 
 #[derive(Debug, Clone)]
+pub struct BundledAsset {
+    pub relative_path: PathBuf,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BundledProject {
+    manifest: ProjectManifest,
+    scenes: Vec<SourceFile>,
+    scripts: Vec<SourceFile>,
+    assets: Vec<BundledAsset>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CompiledProject {
     pub name: String,
     pub version: String,
+    pub start_scene: String,
     pub window: WindowConfig,
     pub scenes: Vec<SourceFile>,
     pub parsed_scenes: Vec<SceneDocument>,
@@ -250,9 +267,11 @@ pub struct SceneNode {
     pub meta: SceneMeta,
     pub camera: Option<CameraNode>,
     pub maps: Vec<AsciiMapNode>,
+    pub stacks: Vec<StackNode>,
     pub rects: Vec<RectNode>,
     pub sprites: Vec<SpriteNode>,
     pub texts: Vec<TextNode>,
+    pub high_scores: Vec<HighScoreNode>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -265,6 +284,9 @@ pub struct VisualNode {
     pub visible: bool,
     pub template: bool,
     pub group: Option<String>,
+    pub parent: Option<String>,
+    pub order: i32,
+    pub anchor: Anchor,
     pub layer: i32,
     pub z: i32,
     pub pos: [f32; 2],
@@ -297,6 +319,29 @@ pub struct TextNode {
     pub value: String,
     pub font: String,
     pub font_size: f32,
+    pub align: TextAlign,
+}
+
+#[derive(Debug, Clone)]
+pub struct HighScoreNode {
+    pub name: String,
+    pub visual: VisualNode,
+    pub font: String,
+    pub font_size: f32,
+    pub items: usize,
+    pub gap: f32,
+    pub score_digits: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackNode {
+    pub name: String,
+    pub anchor: Anchor,
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
+    pub direction: LayoutDirection,
+    pub gap: f32,
+    pub align: StackAlign,
 }
 
 #[derive(Debug, Clone)]
@@ -319,6 +364,52 @@ pub struct SpriteNode {
 pub enum AnimationMode {
     Loop,
     Once,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Anchor {
+    World,
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Center,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+impl Default for Anchor {
+    fn default() -> Self {
+        Self::World
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+impl Default for TextAlign {
+    fn default() -> Self {
+        Self::Left
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutDirection {
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackAlign {
+    Start,
+    Center,
+    End,
 }
 
 #[derive(Debug, Clone)]
@@ -347,10 +438,12 @@ pub enum DrawCommand {
     Rect(SceneRect),
     Sprite(SceneSprite),
     Text(SceneText),
+    HighScore(SceneHighScore),
 }
 
 #[derive(Debug, Clone)]
 pub struct SceneRect {
+    pub anchor: Anchor,
     pub layer: i32,
     pub z: i32,
     pub x: f32,
@@ -363,6 +456,7 @@ pub struct SceneRect {
 
 #[derive(Debug, Clone)]
 pub struct SceneSprite {
+    pub anchor: Anchor,
     pub layer: i32,
     pub z: i32,
     pub x: f32,
@@ -384,6 +478,8 @@ pub struct SceneSprite {
 
 #[derive(Debug, Clone)]
 pub struct SceneText {
+    pub anchor: Anchor,
+    pub align: TextAlign,
     pub layer: i32,
     pub z: i32,
     pub x: f32,
@@ -392,6 +488,23 @@ pub struct SceneText {
     pub value: String,
     pub font: String,
     pub font_size: f32,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SceneHighScore {
+    pub anchor: Anchor,
+    pub layer: i32,
+    pub z: i32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub color: [f32; 4],
+    pub font: String,
+    pub font_size: f32,
+    pub items: usize,
+    pub gap: f32,
+    pub score_digits: usize,
     pub visible: bool,
 }
 
@@ -412,6 +525,7 @@ impl RpuProject {
             project: ProjectInfo {
                 name: name.to_string(),
                 version: default_version(),
+                start_scene: default_start_scene(),
             },
             window: WindowConfig::default(),
         };
@@ -448,110 +562,21 @@ impl RpuProject {
         let paths = self.paths();
         let scenes = collect_source_files(&paths.scenes, &self.root)?;
         let scripts = collect_source_files(&paths.scripts, &self.root)?;
-        let assets = collect_asset_files(&paths.assets, &self.root)?;
+        let assets = collect_asset_files(&paths.assets, &self.root)?
+            .into_iter()
+            .map(|relative_path| BundledAsset {
+                bytes: fs::read(self.root.join(&relative_path)).unwrap_or_default(),
+                relative_path,
+            })
+            .collect::<Vec<_>>();
 
-        let mut diagnostics = Vec::new();
-
-        if scenes.is_empty() {
-            diagnostics.push(Diagnostic::error(
-                "project does not contain any scene files",
-                Some(PathBuf::from("scenes")),
-            ));
-        }
-
-        let mut parsed_scenes = parse_scene_documents(&scenes, &mut diagnostics);
-        let has_main_scene = parsed_scenes.iter().any(|document| {
-            document.path == PathBuf::from("scenes/main.rpu")
-                || document.scenes.iter().any(|scene| scene.name == "Main")
-        });
-        if !has_main_scene {
-            diagnostics.push(Diagnostic::warning(
-                "no main scene detected; expected scenes/main.rpu or `scene Main`",
-                Some(PathBuf::from("scenes")),
-            ));
-        }
-
-        let inline_scripts = collect_inline_script_sources(&parsed_scenes, &scenes, &scripts);
-        let script_references = extract_script_references(&parsed_scenes);
-        let external_script_references = extract_external_script_references(&parsed_scenes);
-        let texture_references = extract_texture_references(&parsed_scenes);
-        let font_references = extract_font_references(&parsed_scenes);
-        if !scenes.is_empty() && script_references.is_empty() {
-            diagnostics.push(Diagnostic::warning(
-                "scene files do not reference any script files",
-                Some(PathBuf::from("scenes")),
-            ));
-        }
-
-        if scripts.is_empty() && inline_scripts.is_empty() {
-            diagnostics.push(Diagnostic::warning(
-                "project does not contain any script files",
-                Some(PathBuf::from("scripts")),
-            ));
-        }
-
-        for script_name in &external_script_references {
-            let expected = PathBuf::from("scripts").join(script_name);
-            if !scripts.iter().any(|script| script.relative_path == expected) {
-                diagnostics.push(Diagnostic::error(
-                    format!("referenced script is missing: {}", script_name),
-                    Some(expected),
-                ));
-            }
-        }
-
-        for texture_name in &texture_references {
-            let expected = PathBuf::from("assets").join(texture_name);
-            if !assets.iter().any(|asset| asset == &expected) {
-                diagnostics.push(Diagnostic::error(
-                    format!("referenced sprite texture is missing: {}", texture_name),
-                    Some(expected),
-                ));
-            }
-        }
-
-        for font_name in &font_references {
-            let expected = PathBuf::from("assets").join(font_name);
-            if !assets.iter().any(|asset| asset == &expected) {
-                diagnostics.push(Diagnostic::error(
-                    format!("referenced text font is missing: {}", font_name),
-                    Some(expected),
-                ));
-            }
-        }
-
-        resolve_sprite_texture_sizes(&self.root, &assets, &mut parsed_scenes, &mut diagnostics);
-
-        let draw_commands = compile_scene_draw_commands(&parsed_scenes);
-
-        let mut all_script_sources = scripts.clone();
-        all_script_sources.extend(inline_scripts);
-        let bytecode_scripts = compile_scripts(&all_script_sources, &mut diagnostics);
-
-        let latest_modified = scenes
-            .iter()
-            .chain(scripts.iter())
-            .filter_map(|file| file.modified)
-            .max();
-
-        Ok(CompiledProject {
-            name: self.manifest.project.name.clone(),
-            version: self.manifest.project.version.clone(),
-            window: self.manifest.window.clone(),
+        compile_project_sources(
+            &self.manifest,
             scenes,
-            parsed_scenes,
             scripts,
-            bytecode_scripts,
-            draw_commands,
             assets,
-            diagnostics,
-            script_references,
-            texture_references,
-            fingerprint: ProjectFingerprint {
-                latest_modified,
-                source_file_count: self.source_file_count()?,
-            },
-        })
+            self.source_file_count()?,
+        )
     }
 
     pub fn has_source_changes_since(&self, since: Option<SystemTime>) -> Result<bool> {
@@ -573,6 +598,10 @@ impl RpuProject {
 
     pub fn version(&self) -> &str {
         &self.manifest.project.version
+    }
+
+    pub fn start_scene(&self) -> &str {
+        &self.manifest.project.start_scene
     }
 
     pub fn window(&self) -> &WindowConfig {
@@ -600,6 +629,51 @@ impl RpuProject {
     fn source_file_count(&self) -> Result<usize> {
         let paths = self.paths();
         Ok(count_source_files(&paths.scenes)? + count_source_files(&paths.scripts)?)
+    }
+}
+
+impl BundledProject {
+    pub fn new(
+        manifest_toml: &str,
+        scenes: Vec<(PathBuf, String)>,
+        scripts: Vec<(PathBuf, String)>,
+        assets: Vec<(PathBuf, Vec<u8>)>,
+    ) -> Result<Self> {
+        let manifest: ProjectManifest =
+            toml::from_str(manifest_toml).context("failed to parse bundled rpu.toml")?;
+        Ok(Self {
+            manifest,
+            scenes: scenes
+                .into_iter()
+                .map(|(relative_path, contents)| SourceFile {
+                    relative_path,
+                    contents,
+                    modified: None,
+                })
+                .collect(),
+            scripts: scripts
+                .into_iter()
+                .map(|(relative_path, contents)| SourceFile {
+                    relative_path,
+                    contents,
+                    modified: None,
+                })
+                .collect(),
+            assets: assets
+                .into_iter()
+                .map(|(relative_path, bytes)| BundledAsset { relative_path, bytes })
+                .collect(),
+        })
+    }
+
+    pub fn compile(&self) -> Result<CompiledProject> {
+        compile_project_sources(
+            &self.manifest,
+            self.scenes.clone(),
+            self.scripts.clone(),
+            self.assets.clone(),
+            self.scenes.len() + self.scripts.len(),
+        )
     }
 }
 
@@ -650,6 +724,21 @@ impl CompiledProject {
         self.parsed_scenes.iter().map(|document| document.scenes.len()).sum()
     }
 
+    pub fn scene_exists(&self, name: &str) -> bool {
+        self.parsed_scenes
+            .iter()
+            .flat_map(|document| document.scenes.iter())
+            .any(|scene| scene.name == name)
+    }
+
+    pub fn first_scene_name(&self) -> Option<&str> {
+        self.parsed_scenes
+            .iter()
+            .flat_map(|document| document.scenes.iter())
+            .map(|scene| scene.name.as_str())
+            .next()
+    }
+
     pub fn sprite_count(&self) -> usize {
         self.draw_commands
             .iter()
@@ -666,10 +755,15 @@ impl CompiledProject {
     }
 
     pub fn active_camera(&self) -> SceneCamera {
+        self.active_camera_for(&self.start_scene)
+    }
+
+    pub fn active_camera_for(&self, scene_name: &str) -> SceneCamera {
         self.parsed_scenes
             .iter()
             .flat_map(|document| document.scenes.iter())
-            .find_map(|scene| scene.camera.as_ref())
+            .find(|scene| scene.name == scene_name)
+            .and_then(|scene| scene.camera.as_ref())
             .map(|camera| SceneCamera {
                 x: camera.pos[0],
                 y: camera.pos[1],
@@ -735,6 +829,122 @@ impl Diagnostic {
             line: Some(line),
         }
     }
+}
+
+fn compile_project_sources(
+    manifest: &ProjectManifest,
+    scenes: Vec<SourceFile>,
+    scripts: Vec<SourceFile>,
+    assets: Vec<BundledAsset>,
+    source_file_count: usize,
+) -> Result<CompiledProject> {
+    let mut diagnostics = Vec::new();
+    let asset_paths = assets
+        .iter()
+        .map(|asset| asset.relative_path.clone())
+        .collect::<Vec<_>>();
+
+    if scenes.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "project does not contain any scene files",
+            Some(PathBuf::from("scenes")),
+        ));
+    }
+
+    let mut parsed_scenes = parse_scene_documents(&scenes, &mut diagnostics);
+    let has_main_scene = parsed_scenes.iter().any(|document| {
+        document.path == PathBuf::from("scenes/main.rpu")
+            || document.scenes.iter().any(|scene| scene.name == "Main")
+    });
+    if !has_main_scene {
+        diagnostics.push(Diagnostic::warning(
+            "no main scene detected; expected scenes/main.rpu or `scene Main`",
+            Some(PathBuf::from("scenes")),
+        ));
+    }
+
+    let inline_scripts = collect_inline_script_sources(&parsed_scenes, &scenes, &scripts);
+    let script_references = extract_script_references(&parsed_scenes);
+    let external_script_references = extract_external_script_references(&parsed_scenes);
+    let texture_references = extract_texture_references(&parsed_scenes);
+    let font_references = extract_font_references(&parsed_scenes);
+    if !scenes.is_empty() && script_references.is_empty() {
+        diagnostics.push(Diagnostic::warning(
+            "scene files do not reference any script files",
+            Some(PathBuf::from("scenes")),
+        ));
+    }
+
+    if scripts.is_empty() && inline_scripts.is_empty() {
+        diagnostics.push(Diagnostic::warning(
+            "project does not contain any script files",
+            Some(PathBuf::from("scripts")),
+        ));
+    }
+
+    for script_name in &external_script_references {
+        let expected = PathBuf::from("scripts").join(script_name);
+        if !scripts.iter().any(|script| script.relative_path == expected) {
+            diagnostics.push(Diagnostic::error(
+                format!("referenced script is missing: {}", script_name),
+                Some(expected),
+            ));
+        }
+    }
+
+    for texture_name in &texture_references {
+        let expected = PathBuf::from("assets").join(texture_name);
+        if !asset_paths.iter().any(|asset| asset == &expected) {
+            diagnostics.push(Diagnostic::error(
+                format!("referenced sprite texture is missing: {}", texture_name),
+                Some(expected),
+            ));
+        }
+    }
+
+    for font_name in &font_references {
+        let expected = PathBuf::from("assets").join(font_name);
+        if !asset_paths.iter().any(|asset| asset == &expected) {
+            diagnostics.push(Diagnostic::error(
+                format!("referenced text font is missing: {}", font_name),
+                Some(expected),
+            ));
+        }
+    }
+
+    resolve_sprite_texture_sizes_from_assets(&assets, &mut parsed_scenes, &mut diagnostics);
+
+    let draw_commands = compile_scene_draw_commands(&parsed_scenes);
+
+    let mut all_script_sources = scripts.clone();
+    all_script_sources.extend(inline_scripts);
+    let bytecode_scripts = compile_scripts(&all_script_sources, &mut diagnostics);
+
+    let latest_modified = scenes
+        .iter()
+        .chain(scripts.iter())
+        .filter_map(|file| file.modified)
+        .max();
+
+    Ok(CompiledProject {
+        name: manifest.project.name.clone(),
+        version: manifest.project.version.clone(),
+        start_scene: manifest.project.start_scene.clone(),
+        window: manifest.window.clone(),
+        scenes,
+        parsed_scenes,
+        scripts,
+        bytecode_scripts,
+        draw_commands,
+        assets: asset_paths,
+        diagnostics,
+        script_references,
+        texture_references,
+        fingerprint: ProjectFingerprint {
+            latest_modified,
+            source_file_count,
+        },
+    })
 }
 
 fn collect_source_files(dir: &Path, root: &Path) -> Result<Vec<SourceFile>> {
@@ -857,9 +1067,11 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
     let mut current_scene: Option<SceneNode> = None;
     let mut current_camera: Option<CameraNode> = None;
     let mut current_map: Option<AsciiMapNode> = None;
+    let mut current_stack: Option<StackNode> = None;
     let mut current_rect: Option<RectNode> = None;
     let mut current_sprite: Option<SpriteNode> = None;
     let mut current_text: Option<TextNode> = None;
+    let mut current_high_score: Option<HighScoreNode> = None;
     let mut inline_script_capture: Option<(usize, Vec<String>)> = None;
     let mut in_meta = false;
     let mut in_legend = false;
@@ -911,9 +1123,11 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 meta: SceneMeta::default(),
                 camera: None,
                 maps: Vec::new(),
+                stacks: Vec::new(),
                 rects: Vec::new(),
                 sprites: Vec::new(),
                 texts: Vec::new(),
+                high_scores: Vec::new(),
             });
             continue;
         }
@@ -945,6 +1159,27 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 cell: [32.0, 32.0],
                 legend: Vec::new(),
                 rows: Vec::new(),
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "stack") {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("stack block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_stack = Some(StackNode {
+                name,
+                anchor: Anchor::World,
+                pos: [0.0, 0.0],
+                size: [120.0, 120.0],
+                direction: LayoutDirection::Vertical,
+                gap: 8.0,
+                align: StackAlign::Center,
             });
             continue;
         }
@@ -1040,6 +1275,28 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 value: String::new(),
                 font: String::new(),
                 font_size: 16.0,
+                align: TextAlign::Left,
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "highscore") {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("highscore block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_high_score = Some(HighScoreNode {
+                name,
+                visual: default_visual_node(2, [112.0, 64.0], [1.0, 1.0, 1.0, 1.0]),
+                font: String::new(),
+                font_size: 12.0,
+                items: 8,
+                gap: 12.0,
+                score_digits: 4,
             });
             continue;
         }
@@ -1062,7 +1319,10 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             continue;
         }
 
-        if (current_rect.is_some() || current_sprite.is_some() || current_text.is_some())
+        if (current_rect.is_some()
+            || current_sprite.is_some()
+            || current_text.is_some()
+            || current_high_score.is_some())
             && (line.starts_with("on ") || line.starts_with("fn "))
             && line.ends_with('{')
         {
@@ -1078,6 +1338,12 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             if let Some(map) = current_map.take() {
                 if let Some(scene_node) = current_scene.as_mut() {
                     scene_node.maps.push(normalize_ascii_map(map));
+                }
+                continue;
+            }
+            if let Some(stack) = current_stack.take() {
+                if let Some(scene_node) = current_scene.as_mut() {
+                    scene_node.stacks.push(stack);
                 }
                 continue;
             }
@@ -1108,6 +1374,12 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                         &text.name,
                     );
                     scene_node.texts.push(text);
+                }
+                continue;
+            }
+            if let Some(high_score) = current_high_score.take() {
+                if let Some(scene_node) = current_scene.as_mut() {
+                    scene_node.high_scores.push(high_score);
                 }
                 continue;
             }
@@ -1204,9 +1476,35 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             continue;
         }
 
+        if let Some(high_score) = current_high_score.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_high_score_property(
+                    high_score,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
         if let Some(map) = current_map.as_mut() {
             if let Some(property) = parse_property(line) {
                 apply_map_property(map, &property, index + 1, &scene.relative_path, diagnostics);
+            }
+            continue;
+        }
+
+        if let Some(stack) = current_stack.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_stack_property(
+                    stack,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
             }
             continue;
         }
@@ -1244,6 +1542,11 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             scene_node.maps.push(normalize_ascii_map(map));
         }
     }
+    if let Some(stack) = current_stack.take() {
+        if let Some(scene_node) = current_scene.as_mut() {
+            scene_node.stacks.push(stack);
+        }
+    }
     if let Some(mut sprite) = current_sprite.take() {
         if let Some(scene_node) = current_scene.as_mut() {
             finalize_visual_script_binding(
@@ -1264,6 +1567,11 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 &text.name,
             );
             scene_node.texts.push(text);
+        }
+    }
+    if let Some(high_score) = current_high_score.take() {
+        if let Some(scene_node) = current_scene.as_mut() {
+            scene_node.high_scores.push(high_score);
         }
     }
     if let Some(mut rect) = current_rect.take() {
@@ -1325,7 +1633,14 @@ fn extract_font_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
     parsed_scenes
         .iter()
         .flat_map(|document| document.scenes.iter())
-        .flat_map(|scene| scene.texts.iter().map(|text| text.font.clone()))
+        .flat_map(|scene| {
+            scene.texts.iter().map(|text| text.font.clone()).chain(
+                scene
+                    .high_scores
+                    .iter()
+                    .map(|high_score| high_score.font.clone()),
+            )
+        })
         .filter(|font| !font.is_empty())
         .collect()
 }
@@ -1409,76 +1724,214 @@ fn compile_inline_visual_script(
     })
 }
 
+fn estimate_text_width(text: &TextNode) -> f32 {
+    text.value.chars().count() as f32 * text.font_size * 0.6
+}
+
+fn estimate_text_height(text: &TextNode) -> f32 {
+    text.font_size * 1.2
+}
+
+pub fn apply_scene_layout(scene: &SceneNode) -> SceneNode {
+    let mut scene = scene.clone();
+    for stack in &scene.stacks.clone() {
+        let mut placements: Vec<(String, [f32; 2], Option<TextAlign>, Anchor)> = Vec::new();
+        let mut ordered: Vec<(String, i32, [f32; 2], bool)> = Vec::new();
+
+        for rect in &scene.rects {
+            if rect.visual.parent.as_deref() == Some(stack.name.as_str()) {
+                ordered.push((rect.name.clone(), rect.visual.order, rect.visual.size, false));
+            }
+        }
+        for sprite in &scene.sprites {
+            if sprite.visual.parent.as_deref() == Some(stack.name.as_str()) {
+                ordered.push((sprite.name.clone(), sprite.visual.order, sprite.visual.size, false));
+            }
+        }
+        for text in &scene.texts {
+            if text.visual.parent.as_deref() == Some(stack.name.as_str()) {
+                ordered.push((
+                    text.name.clone(),
+                    text.visual.order,
+                    [estimate_text_width(text), estimate_text_height(text)],
+                    true,
+                ));
+            }
+        }
+        for high_score in &scene.high_scores {
+            if high_score.visual.parent.as_deref() == Some(stack.name.as_str()) {
+                ordered.push((
+                    high_score.name.clone(),
+                    high_score.visual.order,
+                    high_score.visual.size,
+                    false,
+                ));
+            }
+        }
+
+        ordered.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        let mut cursor = 0.0;
+        for (name, _order, size, is_text) in ordered {
+            let (pos, align_override) = match stack.direction {
+                LayoutDirection::Vertical => {
+                    let x = match (stack.align, is_text) {
+                        (StackAlign::Start, true) => 0.0,
+                        (StackAlign::Center, true) => stack.size[0] * 0.5,
+                        (StackAlign::End, true) => stack.size[0],
+                        (StackAlign::Start, false) => 0.0,
+                        (StackAlign::Center, false) => (stack.size[0] - size[0]) * 0.5,
+                        (StackAlign::End, false) => stack.size[0] - size[0],
+                    };
+                    let align = if is_text {
+                        Some(match stack.align {
+                            StackAlign::Start => TextAlign::Left,
+                            StackAlign::Center => TextAlign::Center,
+                            StackAlign::End => TextAlign::Right,
+                        })
+                    } else {
+                        None
+                    };
+                    let pos = [stack.pos[0] + x, stack.pos[1] + cursor];
+                    cursor += size[1] + stack.gap;
+                    (pos, align)
+                }
+                LayoutDirection::Horizontal => {
+                    let y = match stack.align {
+                        StackAlign::Start => 0.0,
+                        StackAlign::Center => (stack.size[1] - size[1]) * 0.5,
+                        StackAlign::End => stack.size[1] - size[1],
+                    };
+                    let pos = [stack.pos[0] + cursor, stack.pos[1] + y];
+                    cursor += size[0] + stack.gap;
+                    (pos, None)
+                }
+            };
+            placements.push((name, pos, align_override, stack.anchor));
+        }
+
+        for (name, pos, align_override, anchor) in placements {
+            if let Some(rect) = scene.rects.iter_mut().find(|node| node.name == name) {
+                rect.visual.pos = pos;
+                rect.visual.anchor = anchor;
+                continue;
+            }
+            if let Some(sprite) = scene.sprites.iter_mut().find(|node| node.name == name) {
+                sprite.visual.pos = pos;
+                sprite.visual.anchor = anchor;
+                continue;
+            }
+            if let Some(text) = scene.texts.iter_mut().find(|node| node.name == name) {
+                text.visual.pos = pos;
+                text.visual.anchor = anchor;
+                if let Some(align) = align_override {
+                    text.align = align;
+                }
+                continue;
+            }
+            if let Some(high_score) = scene.high_scores.iter_mut().find(|node| node.name == name) {
+                high_score.visual.pos = pos;
+                high_score.visual.anchor = anchor;
+            }
+        }
+    }
+    scene
+}
+
 fn compile_scene_draw_commands(parsed_scenes: &[SceneDocument]) -> Vec<DrawCommand> {
-    parsed_scenes
-        .iter()
-        .flat_map(|document| document.scenes.iter())
-        .flat_map(|scene| {
+    let mut commands = Vec::new();
+    for document in parsed_scenes {
+        for scene in &document.scenes {
+            let scene = apply_scene_layout(scene);
             let markers = compile_map_markers(&scene.maps);
-            scene
-                .maps
-                .iter()
-                .flat_map(compile_map_rects)
-                .chain(
-                    scene
-                .rects
-                .iter()
-                .filter(|rect| rect.visual.visible && !rect.visual.template)
-                .map(|rect| {
-                    DrawCommand::Rect(SceneRect {
-                        layer: rect.visual.layer,
-                        z: rect.visual.z,
-                        x: rect.visual.pos[0],
-                        y: rect.visual.pos[1],
-                        width: rect.visual.size[0],
-                        height: rect.visual.size[1],
-                        color: rect.visual.color,
-                        visible: rect.visual.visible,
-                    })
-                })
-                )
-                .chain(scene.sprites.iter().filter(|sprite| sprite.visual.visible && !sprite.visual.template).map(move |sprite| {
-                    let pos = sprite
-                        .symbol
-                        .as_deref()
-                        .and_then(|symbol| markers.get(symbol))
-                        .copied()
-                        .unwrap_or(sprite.visual.pos);
-                    DrawCommand::Sprite(SceneSprite {
-                        layer: sprite.visual.layer,
-                        z: sprite.visual.z,
-                        x: pos[0],
-                        y: pos[1],
-                        width: sprite.visual.size[0],
-                        height: sprite.visual.size[1],
-                        color: sprite.visual.color,
-                        textures: sprite.textures.clone(),
-                        animation_fps: sprite.animation_fps,
-                        animation_mode: sprite.animation_mode,
-                        destroy_on_animation_end: sprite.destroy_on_animation_end,
-                        scroll: sprite.scroll,
-                        repeat_x: sprite.repeat_x,
-                        repeat_y: sprite.repeat_y,
-                        flip_x: sprite.flip_x,
-                        flip_y: sprite.flip_y,
-                        visible: sprite.visual.visible,
-                    })
-                }))
-                .chain(scene.texts.iter().filter(|text| text.visual.visible && !text.visual.template).map(|text| {
-                    DrawCommand::Text(SceneText {
-                        layer: text.visual.layer,
-                        z: text.visual.z,
-                        x: text.visual.pos[0],
-                        y: text.visual.pos[1],
-                        color: text.visual.color,
-                        value: text.value.clone(),
-                        font: text.font.clone(),
-                        font_size: text.font_size,
-                        visible: text.visual.visible,
-                    })
-                }))
-        })
-        .collect()
+            commands.extend(scene.maps.iter().flat_map(compile_map_rects));
+            for rect in &scene.rects {
+                if !rect.visual.visible || rect.visual.template {
+                    continue;
+                }
+                commands.push(DrawCommand::Rect(SceneRect {
+                    anchor: rect.visual.anchor,
+                    layer: rect.visual.layer,
+                    z: rect.visual.z,
+                    x: rect.visual.pos[0],
+                    y: rect.visual.pos[1],
+                    width: rect.visual.size[0],
+                    height: rect.visual.size[1],
+                    color: rect.visual.color,
+                    visible: rect.visual.visible,
+                }));
+            }
+            for sprite in &scene.sprites {
+                if !sprite.visual.visible || sprite.visual.template {
+                    continue;
+                }
+                let pos = sprite
+                    .symbol
+                    .as_deref()
+                    .and_then(|symbol| markers.get(symbol))
+                    .copied()
+                    .unwrap_or(sprite.visual.pos);
+                commands.push(DrawCommand::Sprite(SceneSprite {
+                    anchor: sprite.visual.anchor,
+                    layer: sprite.visual.layer,
+                    z: sprite.visual.z,
+                    x: pos[0],
+                    y: pos[1],
+                    width: sprite.visual.size[0],
+                    height: sprite.visual.size[1],
+                    color: sprite.visual.color,
+                    textures: sprite.textures.clone(),
+                    animation_fps: sprite.animation_fps,
+                    animation_mode: sprite.animation_mode,
+                    destroy_on_animation_end: sprite.destroy_on_animation_end,
+                    scroll: sprite.scroll,
+                    repeat_x: sprite.repeat_x,
+                    repeat_y: sprite.repeat_y,
+                    flip_x: sprite.flip_x,
+                    flip_y: sprite.flip_y,
+                    visible: sprite.visual.visible,
+                }));
+            }
+            for text in &scene.texts {
+                if !text.visual.visible || text.visual.template {
+                    continue;
+                }
+                commands.push(DrawCommand::Text(SceneText {
+                    anchor: text.visual.anchor,
+                    align: text.align,
+                    layer: text.visual.layer,
+                    z: text.visual.z,
+                    x: text.visual.pos[0],
+                    y: text.visual.pos[1],
+                    color: text.visual.color,
+                    value: text.value.clone(),
+                    font: text.font.clone(),
+                    font_size: text.font_size,
+                    visible: text.visual.visible,
+                }));
+            }
+            for high_score in &scene.high_scores {
+                if !high_score.visual.visible || high_score.visual.template {
+                    continue;
+                }
+                commands.push(DrawCommand::HighScore(SceneHighScore {
+                    anchor: high_score.visual.anchor,
+                    layer: high_score.visual.layer,
+                    z: high_score.visual.z,
+                    x: high_score.visual.pos[0],
+                    y: high_score.visual.pos[1],
+                    width: high_score.visual.size[0],
+                    color: high_score.visual.color,
+                    font: high_score.font.clone(),
+                    font_size: high_score.font_size,
+                    items: high_score.items,
+                    gap: high_score.gap,
+                    score_digits: high_score.score_digits,
+                    visible: high_score.visual.visible,
+                }));
+            }
+        }
+    }
+    commands
 }
 
 fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
@@ -1495,6 +1948,7 @@ fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
             }
             if let Some(MapLegendMeaning::Color(color)) = legend.get(&ch) {
                 commands.push(DrawCommand::Rect(SceneRect {
+                    anchor: Anchor::World,
                     layer: -10,
                     z: (row as i32) * 100 + col as i32,
                     x: map.origin[0] + col as f32 * map.cell[0],
@@ -1550,6 +2004,7 @@ struct Property<'a> {
 #[derive(Clone, Copy)]
 enum PropertyKind {
     String,
+    BareString,
     StringList,
     Bool,
     I32,
@@ -1585,6 +2040,9 @@ const VISUAL_SCHEMA: &[SchemaEntry] = &[
     SchemaEntry { key: "visible", kind: PropertyKind::Bool },
     SchemaEntry { key: "template", kind: PropertyKind::Bool },
     SchemaEntry { key: "group", kind: PropertyKind::String },
+    SchemaEntry { key: "parent", kind: PropertyKind::String },
+    SchemaEntry { key: "order", kind: PropertyKind::I32 },
+    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
     SchemaEntry { key: "layer", kind: PropertyKind::I32 },
     SchemaEntry { key: "z", kind: PropertyKind::I32 },
     SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
@@ -1607,6 +2065,9 @@ const SPRITE_SCHEMA: &[SchemaEntry] = &[
     SchemaEntry { key: "visible", kind: PropertyKind::Bool },
     SchemaEntry { key: "template", kind: PropertyKind::Bool },
     SchemaEntry { key: "group", kind: PropertyKind::String },
+    SchemaEntry { key: "parent", kind: PropertyKind::String },
+    SchemaEntry { key: "order", kind: PropertyKind::I32 },
+    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
     SchemaEntry { key: "layer", kind: PropertyKind::I32 },
     SchemaEntry { key: "z", kind: PropertyKind::I32 },
     SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
@@ -1619,14 +2080,46 @@ const TEXT_SCHEMA: &[SchemaEntry] = &[
     SchemaEntry { key: "value", kind: PropertyKind::String },
     SchemaEntry { key: "font", kind: PropertyKind::String },
     SchemaEntry { key: "font_size", kind: PropertyKind::F32 },
+    SchemaEntry { key: "align", kind: PropertyKind::BareString },
     SchemaEntry { key: "visible", kind: PropertyKind::Bool },
     SchemaEntry { key: "template", kind: PropertyKind::Bool },
     SchemaEntry { key: "group", kind: PropertyKind::String },
+    SchemaEntry { key: "parent", kind: PropertyKind::String },
+    SchemaEntry { key: "order", kind: PropertyKind::I32 },
+    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
     SchemaEntry { key: "layer", kind: PropertyKind::I32 },
     SchemaEntry { key: "z", kind: PropertyKind::I32 },
     SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
     SchemaEntry { key: "color", kind: PropertyKind::Color },
     SchemaEntry { key: "script", kind: PropertyKind::String },
+];
+
+const HIGHSCORE_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry { key: "font", kind: PropertyKind::String },
+    SchemaEntry { key: "font_size", kind: PropertyKind::F32 },
+    SchemaEntry { key: "items", kind: PropertyKind::I32 },
+    SchemaEntry { key: "gap", kind: PropertyKind::F32 },
+    SchemaEntry { key: "score_digits", kind: PropertyKind::I32 },
+    SchemaEntry { key: "visible", kind: PropertyKind::Bool },
+    SchemaEntry { key: "template", kind: PropertyKind::Bool },
+    SchemaEntry { key: "group", kind: PropertyKind::String },
+    SchemaEntry { key: "parent", kind: PropertyKind::String },
+    SchemaEntry { key: "order", kind: PropertyKind::I32 },
+    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
+    SchemaEntry { key: "layer", kind: PropertyKind::I32 },
+    SchemaEntry { key: "z", kind: PropertyKind::I32 },
+    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "color", kind: PropertyKind::Color },
+];
+
+const STACK_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
+    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
+    SchemaEntry { key: "direction", kind: PropertyKind::BareString },
+    SchemaEntry { key: "gap", kind: PropertyKind::F32 },
+    SchemaEntry { key: "align", kind: PropertyKind::BareString },
 ];
 
 const CAMERA_SCHEMA: &[SchemaEntry] = &[
@@ -1643,6 +2136,15 @@ const MAP_SCHEMA: &[SchemaEntry] = &[
 impl<'a> Property<'a> {
     fn as_string(&self) -> Option<String> {
         parse_string(self.raw)
+    }
+
+    fn as_bare_string(&self) -> Option<String> {
+        let value = self.raw.trim();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        }
     }
 
     fn as_bool(&self) -> Option<bool> {
@@ -1672,6 +2174,7 @@ impl<'a> Property<'a> {
     fn parse_as(&self, kind: PropertyKind) -> Option<PropertyValue> {
         match kind {
             PropertyKind::String => self.as_string().map(PropertyValue::String),
+            PropertyKind::BareString => self.as_bare_string().map(PropertyValue::String),
             PropertyKind::StringList => parse_string_list(self.raw).map(PropertyValue::StringList),
             PropertyKind::Bool => self.as_bool().map(PropertyValue::Bool),
             PropertyKind::I32 => self.as_i32().map(PropertyValue::I32),
@@ -1811,6 +2314,9 @@ fn default_visual_node(layer: i32, size: [f32; 2], color: [f32; 4]) -> VisualNod
         visible: true,
         template: false,
         group: None,
+        parent: None,
+        order: 0,
+        anchor: Anchor::World,
         layer,
         z: 0,
         pos: [0.0, 0.0],
@@ -1820,6 +2326,48 @@ fn default_visual_node(layer: i32, size: [f32; 2], color: [f32; 4]) -> VisualNod
         script: None,
         script_binding: None,
         inline_script: None,
+    }
+}
+
+fn parse_anchor(value: &str) -> Option<Anchor> {
+    match value {
+        "world" => Some(Anchor::World),
+        "top_left" => Some(Anchor::TopLeft),
+        "top" => Some(Anchor::Top),
+        "top_right" => Some(Anchor::TopRight),
+        "left" => Some(Anchor::Left),
+        "center" => Some(Anchor::Center),
+        "right" => Some(Anchor::Right),
+        "bottom_left" => Some(Anchor::BottomLeft),
+        "bottom" => Some(Anchor::Bottom),
+        "bottom_right" => Some(Anchor::BottomRight),
+        _ => None,
+    }
+}
+
+fn parse_text_align(value: &str) -> Option<TextAlign> {
+    match value {
+        "left" => Some(TextAlign::Left),
+        "center" => Some(TextAlign::Center),
+        "right" => Some(TextAlign::Right),
+        _ => None,
+    }
+}
+
+fn parse_layout_direction(value: &str) -> Option<LayoutDirection> {
+    match value {
+        "vertical" => Some(LayoutDirection::Vertical),
+        "horizontal" => Some(LayoutDirection::Horizontal),
+        _ => None,
+    }
+}
+
+fn parse_stack_align(value: &str) -> Option<StackAlign> {
+    match value {
+        "start" | "left" | "top" => Some(StackAlign::Start),
+        "center" => Some(StackAlign::Center),
+        "end" | "right" | "bottom" => Some(StackAlign::End),
+        _ => None,
     }
 }
 
@@ -1838,6 +2386,18 @@ fn apply_visual_property(
             ("visible", PropertyValue::Bool(visible)) => visual.visible = visible,
             ("template", PropertyValue::Bool(template)) => visual.template = template,
             ("group", PropertyValue::String(group)) => visual.group = Some(group),
+            ("parent", PropertyValue::String(parent)) => visual.parent = Some(parent),
+            ("order", PropertyValue::I32(order)) => visual.order = order,
+            ("anchor", PropertyValue::String(anchor)) => {
+                match parse_anchor(&anchor) {
+                    Some(anchor) => visual.anchor = anchor,
+                    None => diagnostics.push(Diagnostic::warning_at(
+                        format!("invalid {kind} anchor"),
+                        Some(path.to_path_buf()),
+                        line,
+                    )),
+                }
+            }
             ("layer", PropertyValue::I32(layer)) => visual.layer = layer,
             ("z", PropertyValue::I32(z)) => visual.z = z,
             ("pos", PropertyValue::Vec2(pos)) => visual.pos = pos,
@@ -1852,26 +2412,64 @@ fn apply_visual_property(
     }
 }
 
-fn resolve_sprite_texture_sizes(
-    root: &Path,
-    assets: &[PathBuf],
+fn apply_stack_property(
+    stack: &mut StackNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) =
+        parse_schema_value(STACK_SCHEMA, property, line, "stack", path, diagnostics)
+    {
+        match (key, value) {
+            ("anchor", PropertyValue::String(anchor)) => match parse_anchor(&anchor) {
+                Some(anchor) => stack.anchor = anchor,
+                None => diagnostics.push(Diagnostic::warning_at(
+                    "invalid stack anchor".to_string(),
+                    Some(path.to_path_buf()),
+                    line,
+                )),
+            },
+            ("pos", PropertyValue::Vec2(pos)) => stack.pos = pos,
+            ("size", PropertyValue::Vec2(size)) => stack.size = size,
+            ("direction", PropertyValue::String(direction)) => match parse_layout_direction(&direction)
+            {
+                Some(direction) => stack.direction = direction,
+                None => diagnostics.push(Diagnostic::warning_at(
+                    "invalid stack direction".to_string(),
+                    Some(path.to_path_buf()),
+                    line,
+                )),
+            },
+            ("gap", PropertyValue::F32(gap)) => stack.gap = gap.max(0.0),
+            ("align", PropertyValue::String(align)) => match parse_stack_align(&align) {
+                Some(align) => stack.align = align,
+                None => diagnostics.push(Diagnostic::warning_at(
+                    "invalid stack align".to_string(),
+                    Some(path.to_path_buf()),
+                    line,
+                )),
+            },
+            _ => {}
+        }
+    }
+}
+
+fn resolve_sprite_texture_sizes_from_assets(
+    assets: &[BundledAsset],
     parsed_scenes: &mut [SceneDocument],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut texture_sizes = std::collections::HashMap::new();
     for asset in assets {
-        let full_path = root.join(asset);
-        let Ok(reader) = image::ImageReader::open(&full_path) else {
+        let Ok(image) = image::load_from_memory(&asset.bytes) else {
             continue;
         };
-        let Ok(reader) = reader.with_guessed_format() else {
-            continue;
-        };
-        let Ok((width, height)) = reader.into_dimensions() else {
-            continue;
-        };
+        let width = image.width();
+        let height = image.height();
         texture_sizes.insert(
-            asset.clone(),
+            asset.relative_path.clone(),
             [width.max(1) as f32, height.max(1) as f32],
         );
     }
@@ -1974,11 +2572,51 @@ fn apply_text_property(
             ("value", PropertyValue::String(value)) => text.value = value,
             ("font", PropertyValue::String(font)) => text.font = font,
             ("font_size", PropertyValue::F32(size)) => text.font_size = size.max(1.0),
+            ("align", PropertyValue::String(align)) => {
+                match parse_text_align(&align) {
+                    Some(align) => text.align = align,
+                    None => diagnostics.push(Diagnostic::warning_at(
+                        "invalid text align".to_string(),
+                        Some(path.to_path_buf()),
+                        line,
+                    )),
+                }
+            }
             _ => apply_visual_property(
                 &mut text.visual,
                 property,
                 line,
                 "text",
+                path,
+                diagnostics,
+            ),
+        }
+    }
+}
+
+fn apply_high_score_property(
+    high_score: &mut HighScoreNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) =
+        parse_schema_value(HIGHSCORE_SCHEMA, property, line, "highscore", path, diagnostics)
+    {
+        match (key, value) {
+            ("font", PropertyValue::String(font)) => high_score.font = font,
+            ("font_size", PropertyValue::F32(size)) => high_score.font_size = size.max(1.0),
+            ("items", PropertyValue::I32(items)) => high_score.items = items.max(1) as usize,
+            ("gap", PropertyValue::F32(gap)) => high_score.gap = gap.max(1.0),
+            ("score_digits", PropertyValue::I32(digits)) => {
+                high_score.score_digits = digits.max(1) as usize
+            }
+            _ => apply_visual_property(
+                &mut high_score.visual,
+                property,
+                line,
+                "highscore",
                 path,
                 diagnostics,
             ),
@@ -3065,6 +3703,10 @@ fn max_system_time(a: Option<SystemTime>, b: Option<SystemTime>) -> Option<Syste
 
 fn default_version() -> String {
     "0.1.0".to_string()
+}
+
+fn default_start_scene() -> String {
+    "Main".to_string()
 }
 
 fn default_window_width() -> u32 {

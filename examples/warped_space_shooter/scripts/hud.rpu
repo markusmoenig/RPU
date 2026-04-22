@@ -2,6 +2,9 @@ state score = 0
 state lives = 3
 state invulnerable_until = 0
 state respawn_until = 0
+state final_score = 0
+state game_over_at = 0
+state menu_return_at = 0
 
 fn life_color(slot) {
     if self.lives >= slot {
@@ -11,18 +14,44 @@ fn life_color(slot) {
 }
 
 on ready() {
-    // HudState now uses named persistent script state instead of geometry-property hacks.
-    ScoreValue.text = format_int(self.score, 4)
-    Life1.color = life_color(1.0)
-    Life2.color = life_color(2.0)
-    Life3.color = life_color(3.0)
+    if exists("ScoreValue") {
+        ScoreValue.text = format_int(self.score, 4)
+    }
+    if exists("FinalScoreValue") {
+        FinalScoreValue.text = format_int(self.final_score, 4)
+    }
+    if exists("HighScoreValue") {
+        HighScoreValue.text = format_int(high_score_value(1.0), 4)
+    }
+    if exists("Life1") {
+        Life1.color = life_color(1.0)
+    }
+    if exists("Life2") {
+        Life2.color = life_color(2.0)
+    }
+    if exists("Life3") {
+        Life3.color = life_color(3.0)
+    }
 }
 
 on update(dt) {
     let _ = dt
-    // Score is rendered as a fixed 4-digit readout.
-    ScoreValue.text = format_int(self.score, 4)
-    Life1.color = life_color(1.0)
-    Life2.color = life_color(2.0)
-    Life3.color = life_color(3.0)
+    if exists("ScoreValue") {
+        ScoreValue.text = format_int(self.score, 4)
+    }
+    if exists("FinalScoreValue") {
+        FinalScoreValue.text = format_int(self.final_score, 4)
+    }
+    if exists("HighScoreValue") {
+        HighScoreValue.text = format_int(high_score_value(1.0), 4)
+    }
+    if exists("Life1") {
+        Life1.color = life_color(1.0)
+    }
+    if exists("Life2") {
+        Life2.color = life_color(2.0)
+    }
+    if exists("Life3") {
+        Life3.color = life_color(3.0)
+    }
 }

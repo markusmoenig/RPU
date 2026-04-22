@@ -1,6 +1,7 @@
 [project]
 name = "Warped Space Shooter"
 version = "0.1.0"
+start_scene = "Menu"
 
 [window]
 width = 272

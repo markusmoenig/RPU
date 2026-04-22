@@ -1,4 +1,4 @@
-scene Main {
+scene Game {
     meta {
         title = "Warped Space Shooter"
     }
@@ -13,7 +13,7 @@ scene Main {
         layer = -100
         z = 0
         pos = (0, 0)
-        color = (1.0, 1.0, 1.0, 1.0)
+        color = #ffffff
         texture = "bg-back.png"
     }
 
@@ -21,19 +21,10 @@ scene Main {
         layer = -90
         z = 1
         pos = (0, 0)
-        color = (1.0, 1.0, 1.0, 1.0)
+        color = #ffffff
         texture = "bg-stars.png"
         scroll = (-8.0, 0.0)
         repeat_x = true
-    }
-
-    rect NebulaTint {
-        visible = false
-        layer = -80
-        z = 0
-        pos = (0, 0)
-        size = (272, 160)
-        color = (0.07, 0.14, 0.26, 0.34)
     }
 
     sprite Player {
@@ -47,17 +38,25 @@ scene Main {
 
     rect HudState {
         visible = false
-        pos = (0, 3)
+        pos = (0, 0)
         size = (0, 0)
-        color = (0.0, 0.0, 0.0, 0.0)
+        color = #00000000
         script = "hud.rpu"
+    }
+
+    rect GameController {
+        visible = false
+        pos = (0, 0)
+        size = (0, 0)
+        color = #00000000
+        script = "game.rpu"
     }
 
     rect Spawner {
         visible = false
         pos = (204, 16)
         size = (48, 116)
-        color = (0.0, 0.0, 0.0, 0.0)
+        color = #00000000
         script = "spawner.rpu"
     }
 
@@ -67,7 +66,7 @@ scene Main {
         layer = -85
         z = 2
         pos = (0, 0)
-        color = (1.0, 1.0, 1.0, 1.0)
+        color = #ffffff
         texture = "bg-planet.png"
 
         on update(dt) {
@@ -84,7 +83,7 @@ scene Main {
         layer = -85
         z = 2
         pos = (0, 0)
-        color = (1.0, 1.0, 1.0, 1.0)
+        color = #ffffff
         texture = "bg-planet.png"
         flip_y = true
 
@@ -230,6 +229,7 @@ scene Main {
     sprite Life1 {
         layer = 50
         z = 80
+        anchor = top_left
         pos = (8, 8)
         color = #f4f8ff
         size = (13, 10.5)
@@ -239,6 +239,7 @@ scene Main {
     sprite Life2 {
         layer = 50
         z = 81
+        anchor = top_left
         pos = (24, 8)
         color = #f4f8ff
         size = (13, 10.5)
@@ -248,6 +249,7 @@ scene Main {
     sprite Life3 {
         layer = 50
         z = 82
+        anchor = top_left
         pos = (40, 8)
         color = #f4f8ff
         size = (13, 10.5)
@@ -257,10 +259,12 @@ scene Main {
     text ScoreValue {
         layer = 50
         z = 83
-        pos = (250, 4)
+        anchor = top_right
+        align = right
+        pos = (-10, 2)
         color = #f4f8ff
         value = "0000"
         font = "BetterPixels.ttf"
-        font_size = 36.0
+        font_size = 16.0
     }
 }

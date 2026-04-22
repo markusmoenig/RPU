@@ -1,0 +1,12 @@
+on ready() {
+    HudState.game_over_at = 0
+}
+
+on update(dt) {
+    let _ = dt
+    if HudState.game_over_at > 0.0 && time() >= HudState.game_over_at {
+        HudState.final_score = HudState.score
+        call submit_score("UNKNOWN", HudState.score)
+        call set_scene("GameOver")
+    }
+}

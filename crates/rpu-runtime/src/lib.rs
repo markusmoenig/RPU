@@ -1,17 +1,25 @@
 use anyhow::Result;
 use rpu_core::{
-    AnimationMode, AsciiMapNode, BinaryOp, BytecodeOp, CompareOp, CompiledProject, Condition,
-    DestroyTarget, DrawCommand, Expr, MapLegendMeaning, OpCode, RectNode, ResizeMode,
-    RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget, SpriteNode, TextNode,
-    WindowConfig,
+    apply_scene_layout, Anchor, AnimationMode, AsciiMapNode, BinaryOp, BundledProject, BytecodeOp,
+    CompareOp, CompiledProject, Condition, DestroyTarget, DrawCommand, Expr, MapLegendMeaning,
+    OpCode, RectNode, ResizeMode, RpuProject, SceneCamera, SceneRect, ScriptProperty,
+    ScriptTarget, SpriteNode, TextAlign, TextNode, WindowConfig,
 };
 use rpu_scenevm::{run_app, RpuSceneApp, RuntimeContext, SceneFrame};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 pub fn run(project: RpuProject) -> Result<()> {
     run_app(RpuRuntimeApp::new(project)?)
+}
+
+pub fn run_bundled(project: BundledProject, asset_base: &str) -> Result<()> {
+    run_app(RpuRuntimeApp::new_bundled(project, asset_base)?)
 }
 
 struct RpuRuntimeApp {
@@ -21,7 +29,13 @@ struct RpuRuntimeApp {
 impl RpuRuntimeApp {
     fn new(project: RpuProject) -> Result<Self> {
         Ok(Self {
-            session: RuntimeSession::new(project)?,
+            session: RuntimeSession::new_native(project)?,
+        })
+    }
+
+    fn new_bundled(project: BundledProject, asset_base: &str) -> Result<Self> {
+        Ok(Self {
+            session: RuntimeSession::new_bundled(project, asset_base)?,
         })
     }
 }
@@ -49,7 +63,10 @@ impl RpuSceneApp for RpuRuntimeApp {
 
     fn render(&mut self, _ctx: &mut RuntimeContext, frame: &mut SceneFrame) {
         frame.clear_color(self.current_clear_color());
-        let camera = self.session.compiled.active_camera();
+        let camera = self
+            .session
+            .compiled
+            .active_camera_for(&self.session.current_scene);
         let viewport = frame.size();
         let view = RenderView::new(&self.session.compiled.window, viewport);
 
@@ -60,7 +77,8 @@ impl RpuSceneApp for RpuRuntimeApp {
                 &view,
                 index as i32,
                 command,
-                &self.session.project,
+                &self.session.asset_base,
+                &self.session.high_scores,
                 self.session.query_state.elapsed_time,
             );
         }
@@ -71,7 +89,8 @@ impl RpuSceneApp for RpuRuntimeApp {
                 continue;
             }
             let stable_order = base_order + index as i32;
-            let (x, y, width, height) = world_to_screen(
+            let (x, y, width, height) = screen_rect_for_anchor(
+                entity.anchor,
                 &camera,
                 &view,
                 entity.pos[0],
@@ -108,8 +127,7 @@ impl RpuSceneApp for RpuRuntimeApp {
                     );
                     let texture_path = texture_name
                         .as_deref()
-                        .map(|texture| self.session.project.root().join("assets").join(texture))
-                        .map(pathbuf_to_string);
+                        .map(|texture| self.session.asset_path(texture));
                     submit_sprite(
                         frame,
                         &camera,
@@ -134,30 +152,27 @@ impl RpuSceneApp for RpuRuntimeApp {
                     value,
                     font,
                     font_size,
+                    align,
                 } => {
-                    let font_path = self
-                        .session
-                        .project
-                        .root()
-                        .join("assets")
-                        .join(font);
-                    let (x, y, _, _) = world_to_screen(
+                    let font_path = self.session.asset_path(font);
+                    let (tx, ty) = screen_point_for_anchor(
+                        entity.anchor,
                         &camera,
                         &view,
                         entity.pos[0],
                         entity.pos[1],
-                        0.0,
-                        0.0,
                     );
                     frame.push_text(
                         entity.layer,
                         entity.z * 1000 + stable_order,
-                        x,
-                        y,
+                        tx,
+                        ty,
                         value,
-                        &pathbuf_to_string(font_path),
-                        *font_size,
+                        &font_path,
+                        *font_size * view.scale.max(0.01),
                         entity.color,
+                        Anchor::World,
+                        *align,
                     );
                 }
             }
@@ -166,8 +181,12 @@ impl RpuSceneApp for RpuRuntimeApp {
 }
 
 struct RuntimeSession {
-    project: RpuProject,
+    project: Option<RpuProject>,
     compiled: CompiledProject,
+    asset_base: String,
+    hot_reload: bool,
+    current_scene: String,
+    pending_scene: Option<String>,
     world: RuntimeWorld,
     initialized: bool,
     ticks: u64,
@@ -179,6 +198,8 @@ struct RuntimeSession {
     every_state: HashMap<String, f32>,
     rand_state: HashMap<String, f32>,
     rng_state: u64,
+    persisted_entity_state: HashMap<String, HashMap<String, Value>>,
+    high_scores: HighScoreTable,
 }
 
 struct RuntimeWorld {
@@ -194,6 +215,7 @@ struct RuntimeEntity {
     visible: bool,
     spawn_time: f32,
     group: Option<String>,
+    anchor: Anchor,
     layer: i32,
     z: i32,
     pos: [f32; 2],
@@ -223,6 +245,7 @@ enum RuntimeEntityKind {
         value: String,
         font: String,
         font_size: f32,
+        align: TextAlign,
     },
 }
 
@@ -260,14 +283,30 @@ struct RenderView {
     resize: ResizeMode,
 }
 
+#[derive(Clone, Debug)]
+struct HighScoreEntry {
+    name: String,
+    score: i32,
+}
+
+#[derive(Clone, Debug)]
+struct HighScoreTable {
+    entries: Vec<HighScoreEntry>,
+}
+
 impl RuntimeSession {
-    fn new(project: RpuProject) -> Result<Self> {
+    fn new_native(project: RpuProject) -> Result<Self> {
         let compiled = project.compile()?;
         log_compilation("initial compile", &compiled);
-        let world = RuntimeWorld::from_compiled(&compiled);
+        let current_scene = resolve_scene_name(&compiled, compiled.start_scene.as_str());
+        let world = RuntimeWorld::from_compiled_scene(&compiled, &current_scene);
         let mut session = Self {
-            project,
+            asset_base: project.root().join("assets").display().to_string(),
+            project: Some(project),
             compiled,
+            hot_reload: true,
+            current_scene,
+            pending_scene: None,
             world,
             initialized: false,
             ticks: 0,
@@ -279,6 +318,38 @@ impl RuntimeSession {
             every_state: HashMap::new(),
             rand_state: HashMap::new(),
             rng_state: 0x9E3779B97F4A7C15,
+            persisted_entity_state: HashMap::new(),
+            high_scores: HighScoreTable::default(),
+        };
+        session.initialize_script_state_all();
+        Ok(session)
+    }
+
+    fn new_bundled(project: BundledProject, asset_base: &str) -> Result<Self> {
+        let compiled = project.compile()?;
+        log_compilation("initial compile", &compiled);
+        let current_scene = resolve_scene_name(&compiled, compiled.start_scene.as_str());
+        let world = RuntimeWorld::from_compiled_scene(&compiled, &current_scene);
+        let mut session = Self {
+            project: None,
+            compiled,
+            asset_base: asset_base.trim_end_matches('/').to_string(),
+            hot_reload: false,
+            current_scene,
+            pending_scene: None,
+            world,
+            initialized: false,
+            ticks: 0,
+            last_reload_poll: Instant::now(),
+            last_tick_instant: Instant::now(),
+            start_instant: Instant::now(),
+            query_state: RuntimeQueryState::default(),
+            spawn_serial: 0,
+            every_state: HashMap::new(),
+            rand_state: HashMap::new(),
+            rng_state: 0x9E3779B97F4A7C15,
+            persisted_entity_state: HashMap::new(),
+            high_scores: HighScoreTable::default(),
         };
         session.initialize_script_state_all();
         Ok(session)
@@ -302,6 +373,7 @@ impl RuntimeSession {
             self.execute_event("update", dt);
             self.world
                 .remove_finished_animations(self.query_state.elapsed_time);
+            self.capture_persistent_entity_state();
         }
         self.maybe_reload();
     }
@@ -402,6 +474,15 @@ impl RuntimeSession {
         let entity_name = entity.name.clone();
         let mut locals = HashMap::new();
         for state in script.state {
+            if self
+                .world
+                .entities
+                .get(entity_index)
+                .and_then(|entity| entity.script_state.get(&state.name))
+                .is_some()
+            {
+                continue;
+            }
             let Some(value) = self.eval_expr(
                 entity_index,
                 &entity_name,
@@ -427,21 +508,28 @@ impl RuntimeSession {
     }
 
     fn maybe_reload(&mut self) {
+        if !self.hot_reload {
+            return;
+        }
         if self.last_reload_poll.elapsed() < Duration::from_millis(500) {
             return;
         }
         self.last_reload_poll = Instant::now();
 
-        match self
-            .project
-            .has_source_changes_since(self.compiled.fingerprint.latest_modified)
+        let Some(project) = self.project.as_ref() else {
+            return;
+        };
+
+        match project.has_source_changes_since(self.compiled.fingerprint.latest_modified)
         {
-            Ok(true) => match self.project.compile() {
+            Ok(true) => match project.compile() {
                 Ok(compiled) => {
                     log_compilation("hot reload", &compiled);
+                    self.capture_persistent_entity_state();
                     self.compiled = compiled;
-                    self.world = RuntimeWorld::from_compiled(&self.compiled);
-                    self.initialize_script_state_all();
+                    self.current_scene =
+                        resolve_scene_name(&self.compiled, self.current_scene.as_str());
+                    self.rebuild_world_for_scene(false);
                     if self.initialized {
                         self.execute_event("ready", 0.0);
                     }
@@ -450,6 +538,15 @@ impl RuntimeSession {
             },
             Ok(false) => {}
             Err(error) => eprintln!("rpu: failed to poll project changes: {error:#}"),
+        }
+    }
+
+    fn asset_path(&self, asset_name: &str) -> String {
+        let asset_name = asset_name.trim_start_matches('/');
+        if self.asset_base.is_empty() {
+            asset_name.to_string()
+        } else {
+            format!("{}/{}", self.asset_base, asset_name)
         }
     }
 
@@ -494,6 +591,9 @@ impl RuntimeSession {
                 &mut locals,
                 0,
             );
+            if self.apply_pending_scene_change() {
+                break;
+            }
         }
     }
 
@@ -534,6 +634,47 @@ impl RuntimeSession {
             &mut locals,
             0,
         );
+        let _ = self.apply_pending_scene_change();
+    }
+
+    fn queue_scene_switch(&mut self, scene_name: String) {
+        self.pending_scene = Some(scene_name);
+    }
+
+    fn apply_pending_scene_change(&mut self) -> bool {
+        let Some(scene_name) = self.pending_scene.take() else {
+            return false;
+        };
+        self.capture_persistent_entity_state();
+        self.current_scene = resolve_scene_name(&self.compiled, &scene_name);
+        self.rebuild_world_for_scene(true);
+        true
+    }
+
+    fn rebuild_world_for_scene(&mut self, run_ready: bool) {
+        self.world = RuntimeWorld::from_compiled_scene(&self.compiled, &self.current_scene);
+        self.restore_persistent_entity_state();
+        self.initialize_script_state_all();
+        if run_ready && self.initialized {
+            self.execute_event("ready", 0.0);
+        }
+    }
+
+    fn capture_persistent_entity_state(&mut self) {
+        for entity in &self.world.entities {
+            if entity.script.is_some() && !entity.script_state.is_empty() {
+                self.persisted_entity_state
+                    .insert(entity.name.clone(), entity.script_state.clone());
+            }
+        }
+    }
+
+    fn restore_persistent_entity_state(&mut self) {
+        for entity in &mut self.world.entities {
+            if let Some(saved) = self.persisted_entity_state.get(&entity.name) {
+                entity.script_state.extend(saved.clone());
+            }
+        }
     }
 
     fn apply_ops(
@@ -585,6 +726,20 @@ impl RuntimeSession {
             }
             OpCode::IgnoreValue(_) => ExecSignal::Continue,
             OpCode::Call(name, args) => {
+                if let Some(signal) = self.invoke_builtin_action(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    Some(op.line),
+                    name,
+                    args,
+                    dt,
+                    locals,
+                    call_depth,
+                ) {
+                    return signal;
+                }
                 let _ = self.invoke_function(
                     entity_index,
                     entity_name,
@@ -996,6 +1151,73 @@ impl RuntimeSession {
                 );
                 ExecSignal::Continue
             }
+        }
+    }
+
+    fn invoke_builtin_action(
+        &mut self,
+        entity_index: usize,
+        entity_name: &str,
+        script_path: &Path,
+        event: &str,
+        line: Option<usize>,
+        name: &str,
+        args: &[Expr],
+        dt: f32,
+        locals: &mut HashMap<String, Value>,
+        call_depth: usize,
+    ) -> Option<ExecSignal> {
+        match name {
+            "set_scene" if args.len() == 1 => {
+                let scene_name = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_string()?
+                    .to_string();
+                self.queue_scene_switch(scene_name);
+                Some(ExecSignal::Stop)
+            }
+            "submit_score" if args.len() == 2 => {
+                let name = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_string()?
+                    .to_string();
+                let score = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[1],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()? as i32;
+                self.high_scores.submit(&name, score);
+                Some(ExecSignal::Continue)
+            }
+            _ => None,
         }
     }
 
@@ -1499,6 +1721,36 @@ impl RuntimeSession {
                 let value = value.max(0.0).floor() as i32;
                 Some(Value::String(format!("{value:0digits$}")))
             }
+            "high_score_name" if args.len() == 1 => {
+                let index = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[0],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let index = index.max(1.0).floor() as usize - 1;
+                Some(Value::String(self.high_scores.name_at(index).to_string()))
+            }
+            "high_score_value" if args.len() == 1 => {
+                let index = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[0],
+                    dt,
+                    locals,
+                    call_depth,
+                )?.as_scalar()?;
+                let index = index.max(1.0).floor() as usize - 1;
+                Some(Value::Scalar(self.high_scores.score_at(index) as f32))
+            }
             "difficulty" if args.is_empty() => {
                 Some(Value::Scalar(1.0 + (self.query_state.elapsed_time / 12.0).floor()))
             }
@@ -1696,14 +1948,38 @@ impl RuntimeSession {
 }
 
 impl RuntimeWorld {
-    fn from_compiled(compiled: &CompiledProject) -> Self {
+    fn from_compiled_scene(compiled: &CompiledProject, scene_name: &str) -> Self {
         let mut static_draw_commands = Vec::new();
         let mut templates = Vec::new();
         let mut entities = Vec::new();
 
         for document in &compiled.parsed_scenes {
             for scene in &document.scenes {
+                if scene.name != scene_name {
+                    continue;
+                }
+                let scene = apply_scene_layout(scene);
                 static_draw_commands.extend(compile_static_map_commands(&scene.maps));
+                for high_score in &scene.high_scores {
+                    if !high_score.visual.visible || high_score.visual.template {
+                        continue;
+                    }
+                    static_draw_commands.push(DrawCommand::HighScore(rpu_core::SceneHighScore {
+                        anchor: high_score.visual.anchor,
+                        layer: high_score.visual.layer,
+                        z: high_score.visual.z,
+                        x: high_score.visual.pos[0],
+                        y: high_score.visual.pos[1],
+                        width: high_score.visual.size[0],
+                        color: high_score.visual.color,
+                        font: high_score.font.clone(),
+                        font_size: high_score.font_size,
+                        items: high_score.items,
+                        gap: high_score.gap,
+                        score_digits: high_score.score_digits,
+                        visible: high_score.visual.visible,
+                    }));
+                }
                 let markers = compile_map_markers(&scene.maps);
                 for rect in &scene.rects {
                     let entity = runtime_rect_entity(rect);
@@ -1867,6 +2143,45 @@ impl RenderView {
     }
 }
 
+impl Default for HighScoreTable {
+    fn default() -> Self {
+        Self {
+            entries: (0..8)
+                .map(|_| HighScoreEntry {
+                    name: "UNKNOWN".to_string(),
+                    score: 0,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl HighScoreTable {
+    fn submit(&mut self, name: &str, score: i32) {
+        self.entries.push(HighScoreEntry {
+            name: name.to_string(),
+            score: score.max(0),
+        });
+        self.entries.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        self.entries.truncate(8);
+    }
+
+    fn name_at(&self, index: usize) -> &str {
+        self.entries
+            .get(index)
+            .map(|entry| entry.name.as_str())
+            .unwrap_or("UNKNOWN")
+    }
+
+    fn score_at(&self, index: usize) -> i32 {
+        self.entries.get(index).map(|entry| entry.score).unwrap_or(0)
+    }
+}
+
 fn format_line_suffix(line: Option<usize>) -> String {
     line.map(|line| format!(":{line}")).unwrap_or_default()
 }
@@ -1896,7 +2211,10 @@ fn target_property(target: &ScriptTarget) -> &ScriptProperty {
 
 impl RpuRuntimeApp {
     fn current_clear_color(&self) -> [f32; 4] {
-        let camera = self.session.compiled.active_camera();
+        let camera = self
+            .session
+            .compiled
+            .active_camera_for(&self.session.current_scene);
         let mut base = camera.background;
         if camera.background == SceneCamera::default().background {
             let named = color_from_name(&self.session.compiled.name);
@@ -1920,12 +2238,23 @@ impl RpuRuntimeApp {
     }
 }
 
+fn resolve_scene_name(compiled: &CompiledProject, requested: &str) -> String {
+    if compiled.scene_exists(requested) {
+        requested.to_string()
+    } else if compiled.scene_exists(compiled.start_scene.as_str()) {
+        compiled.start_scene.clone()
+    } else {
+        compiled.first_scene_name().unwrap_or("Main").to_string()
+    }
+}
+
 fn runtime_rect_entity(rect: &RectNode) -> RuntimeEntity {
     RuntimeEntity {
         name: rect.name.clone(),
         template: rect.visual.template,
         visible: rect.visual.visible,
         spawn_time: 0.0,
+        anchor: rect.visual.anchor,
         layer: rect.visual.layer,
         z: rect.visual.z,
         pos: rect.visual.pos,
@@ -1959,6 +2288,7 @@ fn runtime_sprite_entity(
         template: sprite.visual.template,
         visible: sprite.visual.visible,
         spawn_time: 0.0,
+        anchor: sprite.visual.anchor,
         layer: sprite.visual.layer,
         z: sprite.visual.z,
         pos,
@@ -1988,6 +2318,7 @@ fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
         template: text.visual.template,
         visible: text.visual.visible,
         spawn_time: 0.0,
+        anchor: text.visual.anchor,
         layer: text.visual.layer,
         z: text.visual.z,
         pos: text.visual.pos,
@@ -2005,6 +2336,7 @@ fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
             value: text.value.clone(),
             font: text.font.clone(),
             font_size: text.font_size,
+            align: text.align,
         },
     }
 }
@@ -2025,6 +2357,7 @@ fn compile_static_map_commands(maps: &[AsciiMapNode]) -> Vec<DrawCommand> {
                     }
                     if let Some(MapLegendMeaning::Color(color)) = legend.get(&ch) {
                         commands.push(DrawCommand::Rect(SceneRect {
+                            anchor: Anchor::World,
                             layer: -10,
                             z: (row as i32) * 100 + col as i32,
                             x: map.origin[0] + col as f32 * map.cell[0],
@@ -2070,13 +2403,21 @@ fn submit_draw_command(
     view: &RenderView,
     stable_order: i32,
     command: &DrawCommand,
-    project: &RpuProject,
+    asset_base: &str,
+    high_scores: &HighScoreTable,
     elapsed_time: f32,
 ) {
     match command {
         DrawCommand::Rect(rect) => {
-            let (x, y, width, height) =
-                world_to_screen(camera, view, rect.x, rect.y, rect.width, rect.height);
+            let (x, y, width, height) = screen_rect_for_anchor(
+                rect.anchor,
+                camera,
+                view,
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+            );
             frame.push_rect(rect.layer, rect.z * 1000 + stable_order, x, y, width, height, rect.color);
         }
         DrawCommand::Sprite(sprite) => {
@@ -2090,41 +2431,102 @@ fn submit_draw_command(
             );
             let texture_path = texture_name
                 .as_deref()
-                .map(|texture| project.root().join("assets").join(texture))
-                .map(pathbuf_to_string);
-            submit_sprite(
-                frame,
-                camera,
-                view,
-                sprite.layer,
-                sprite.z * 1000 + stable_order,
-                sprite.x,
-                sprite.y,
-                sprite.width,
-                sprite.height,
-                sprite.color,
-                sprite.scroll,
-                sprite.repeat_x,
-                sprite.repeat_y,
-                sprite.flip_x,
-                sprite.flip_y,
-                texture_path.as_deref(),
-                0.0,
-            );
+                .map(|texture| format!("{}/{}", asset_base.trim_end_matches('/'), texture));
+            if sprite.anchor != Anchor::World && !sprite.repeat_x && !sprite.repeat_y {
+                let (sx, sy, sw, sh) = screen_rect_for_anchor(
+                    sprite.anchor,
+                    camera,
+                    view,
+                    sprite.x,
+                    sprite.y,
+                    sprite.width,
+                    sprite.height,
+                );
+                frame.push_sprite(
+                    sprite.layer,
+                    sprite.z * 1000 + stable_order,
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    sprite.color,
+                    sprite.flip_x,
+                    sprite.flip_y,
+                    texture_path.as_deref(),
+                );
+            } else {
+                submit_sprite(
+                    frame,
+                    camera,
+                    view,
+                    sprite.layer,
+                    sprite.z * 1000 + stable_order,
+                    sprite.x,
+                    sprite.y,
+                    sprite.width,
+                    sprite.height,
+                    sprite.color,
+                    sprite.scroll,
+                    sprite.repeat_x,
+                    sprite.repeat_y,
+                    sprite.flip_x,
+                    sprite.flip_y,
+                    texture_path.as_deref(),
+                    0.0,
+                );
+            }
         }
         DrawCommand::Text(text) => {
-            let font_path = project.root().join("assets").join(&text.font);
-            let (x, y, _, _) = world_to_screen(camera, view, text.x, text.y, 0.0, 0.0);
+            let font_path = format!("{}/{}", asset_base.trim_end_matches('/'), text.font);
+            let (x, y) = screen_point_for_anchor(text.anchor, camera, view, text.x, text.y);
             frame.push_text(
                 text.layer,
                 text.z * 1000 + stable_order,
                 x,
                 y,
                 &text.value,
-                &pathbuf_to_string(font_path),
-                text.font_size,
+                &font_path,
+                text.font_size * view.scale.max(0.01),
                 text.color,
+                Anchor::World,
+                text.align,
             );
+        }
+        DrawCommand::HighScore(table) => {
+            let font_path = format!("{}/{}", asset_base.trim_end_matches('/'), table.font);
+            let (base_x, base_y) =
+                screen_point_for_anchor(table.anchor, camera, view, table.x, table.y);
+            let score_x = base_x + table.width * view.scale;
+            let gap = table.gap * view.scale;
+            let font_size = table.font_size * view.scale.max(0.01);
+            for (index, entry) in high_scores.entries.iter().take(table.items).enumerate() {
+                let row_y = base_y + gap * index as f32;
+                frame.push_text(
+                    table.layer,
+                    table.z * 1000 + stable_order + index as i32 * 2,
+                    base_x,
+                    row_y,
+                    &entry.name,
+                    &font_path,
+                    font_size,
+                    table.color,
+                    Anchor::World,
+                    TextAlign::Left,
+                );
+                let score = format!("{:0width$}", entry.score.max(0), width = table.score_digits);
+                frame.push_text(
+                    table.layer,
+                    table.z * 1000 + stable_order + index as i32 * 2 + 1,
+                    score_x,
+                    row_y,
+                    &score,
+                    &font_path,
+                    font_size,
+                    table.color,
+                    Anchor::World,
+                    TextAlign::Right,
+                );
+            }
         }
     }
 }
@@ -2194,6 +2596,59 @@ fn world_to_screen(
     let virtual_x = (x - camera.x) * zoom + view.virtual_size.0 * 0.5;
     let virtual_y = (y - camera.y) * zoom + view.virtual_size.1 * 0.5;
     view.map_rect(virtual_x, virtual_y, width * zoom, height * zoom)
+}
+
+fn anchored_virtual_rect(
+    anchor: Anchor,
+    view: &RenderView,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> (f32, f32, f32, f32) {
+    let virtual_w = view.virtual_size.0;
+    let virtual_h = view.virtual_size.1;
+    let anchored_x = match anchor {
+        Anchor::TopLeft | Anchor::Left | Anchor::BottomLeft => x,
+        Anchor::Top | Anchor::Center | Anchor::Bottom => virtual_w * 0.5 - width * 0.5 + x,
+        Anchor::TopRight | Anchor::Right | Anchor::BottomRight => virtual_w - width + x,
+        Anchor::World => x,
+    };
+    let anchored_y = match anchor {
+        Anchor::TopLeft | Anchor::Top | Anchor::TopRight => y,
+        Anchor::Left | Anchor::Center | Anchor::Right => virtual_h * 0.5 - height * 0.5 + y,
+        Anchor::BottomLeft | Anchor::Bottom | Anchor::BottomRight => virtual_h - height + y,
+        Anchor::World => y,
+    };
+    (anchored_x, anchored_y, width, height)
+}
+
+fn screen_rect_for_anchor(
+    anchor: Anchor,
+    camera: &SceneCamera,
+    view: &RenderView,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> (f32, f32, f32, f32) {
+    if anchor == Anchor::World {
+        world_to_screen(camera, view, x, y, width, height)
+    } else {
+        let (vx, vy, vw, vh) = anchored_virtual_rect(anchor, view, x, y, width, height);
+        view.map_rect(vx, vy, vw, vh)
+    }
+}
+
+fn screen_point_for_anchor(
+    anchor: Anchor,
+    camera: &SceneCamera,
+    view: &RenderView,
+    x: f32,
+    y: f32,
+) -> (f32, f32) {
+    let (sx, sy, _, _) = screen_rect_for_anchor(anchor, camera, view, x, y, 0.0, 0.0);
+    (sx, sy)
 }
 
 fn world_to_virtual(
@@ -2272,7 +2727,8 @@ fn submit_sprite(
     let scrolled_y = y + scroll[1] * elapsed_time;
 
     if !repeat_x && !repeat_y {
-        let (sx, sy, sw, sh) = world_to_screen(camera, view, scrolled_x, scrolled_y, width, height);
+        let (sx, sy, sw, sh) =
+            screen_rect_for_anchor(Anchor::World, camera, view, scrolled_x, scrolled_y, width, height);
         frame.push_sprite(layer, order, sx, sy, sw, sh, color, flip_x, flip_y, texture_path);
         return;
     }
@@ -2320,8 +2776,4 @@ fn submit_sprite(
         }
         tile_y += virtual_h;
     }
-}
-
-fn pathbuf_to_string(path: PathBuf) -> String {
-    path.to_string_lossy().into_owned()
 }

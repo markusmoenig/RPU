@@ -7,4 +7,4 @@ edition = "2024"
 anyhow.workspace = true
 rpu-core = { path = "../rpu-core" }
 rpu-scenevm = { path = "../rpu-scenevm" }
-
+web-time = "1.1"

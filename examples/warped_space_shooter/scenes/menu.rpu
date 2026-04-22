@@ -1,0 +1,123 @@
+scene Menu {
+    meta {
+        title = "Warped Space Shooter"
+    }
+
+    camera MainCamera {
+        pos = (136, 80)
+        zoom = 1.0
+        background = #050b18
+    }
+
+    sprite BackgroundBack {
+        layer = -100
+        z = 0
+        pos = (0, 0)
+        color = #ffffff
+        texture = "bg-back.png"
+    }
+
+    sprite BackgroundStars {
+        layer = -90
+        z = 1
+        pos = (0, 0)
+        color = #ffffff
+        texture = "bg-stars.png"
+        scroll = (-8.0, 0.0)
+        repeat_x = true
+    }
+
+    stack MenuContent {
+        anchor = top
+        pos = (-80, 18)
+        size = (160, 128)
+        direction = vertical
+        gap = 6.0
+        align = center
+    }
+
+    text TitleLabel {
+        parent = "MenuContent"
+        order = 0
+        layer = 20
+        z = 20
+        pos = (0, 0)
+        color = #f4f8ff
+        value = "WARPED SPACE SHOOTER"
+        font = "BetterPixels.ttf"
+        font_size = 14.0
+    }
+
+    text StartLabel {
+        parent = "MenuContent"
+        order = 1
+        layer = 20
+        z = 22
+        pos = (0, 0)
+        color = #ffd95c
+        value = "PRESS ACTION"
+        font = "BetterPixels.ttf"
+        font_size = 10.0
+    }
+
+    text HighScoreLabel {
+        parent = "MenuContent"
+        order = 2
+        layer = 20
+        z = 23
+        pos = (0, 0)
+        color = #9dd8ff
+        value = "TOP PILOTS"
+        font = "BetterPixels.ttf"
+        font_size = 8.0
+    }
+
+    highscore HighScoreTable {
+        parent = "MenuContent"
+        order = 3
+        layer = 20
+        z = 24
+        pos = (0, 0)
+        size = (80, 72)
+        color = #f4f8ff
+        font = "BetterPixels.ttf"
+        font_size = 8.0
+        items = 8
+        gap = 8.0
+        score_digits = 4
+    }
+
+    rect HudState {
+        visible = false
+        pos = (0, 0)
+        size = (0, 0)
+        color = #00000000
+        script = "hud.rpu"
+    }
+
+    rect MenuController {
+        visible = false
+        pos = (0, 0)
+        size = (0, 0)
+        color = #00000000
+
+        on ready() {
+            HudState.menu_return_at = 0
+        }
+
+        on update(dt) {
+            let _ = dt
+            StartLabel.color = alpha(#ffd95c, lerp(0.45, 1.0, pulse(0.7)))
+            if input_action() {
+                HudState.score = 0
+                HudState.lives = 3
+                HudState.invulnerable_until = 0
+                HudState.respawn_until = 0
+                HudState.final_score = 0
+                HudState.game_over_at = 0
+                HudState.menu_return_at = 0
+                call set_scene("Game")
+            }
+        }
+    }
+}

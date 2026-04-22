@@ -40,7 +40,7 @@ const config: Config = {
     ],
   ],
   themeConfig: {
-    image: 'img/logo.png',
+    image: 'img/logo-w.png',
     colorMode: {
       respectPrefersColorScheme: true,
     },
@@ -48,7 +48,7 @@ const config: Config = {
       title: 'RPU',
       logo: {
         alt: 'RPU logo',
-        src: 'img/logo.png',
+        src: 'img/logo-w.png',
         href: '/',
       },
       items: [

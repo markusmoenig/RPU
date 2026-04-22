@@ -1,0 +1,115 @@
+scene GameOver {
+    meta {
+        title = "Warped Space Shooter"
+    }
+
+    camera MainCamera {
+        pos = (136, 80)
+        zoom = 1.0
+        background = #050b18
+    }
+
+    sprite BackgroundBack {
+        layer = -100
+        z = 0
+        pos = (0, 0)
+        color = #ffffff
+        texture = "bg-back.png"
+    }
+
+    sprite BackgroundStars {
+        layer = -90
+        z = 1
+        pos = (0, 0)
+        color = #ffffff
+        texture = "bg-stars.png"
+        scroll = (-8.0, 0.0)
+        repeat_x = true
+    }
+
+    text GameOverLabel {
+        layer = 20
+        z = 20
+        anchor = top
+        align = center
+        pos = (0, 38)
+        color = #ff9e7a
+        value = "GAME OVER"
+        font = "BetterPixels.ttf"
+        font_size = 28.0
+    }
+
+    text FinalScoreLabel {
+        layer = 20
+        z = 21
+        anchor = top
+        align = center
+        pos = (0, 74)
+        color = #9dd8ff
+        value = "SCORE"
+        font = "BetterPixels.ttf"
+        font_size = 14.0
+    }
+
+    text FinalScoreValue {
+        layer = 20
+        z = 22
+        anchor = top
+        align = center
+        pos = (0, 90)
+        color = #f4f8ff
+        value = "0000"
+        font = "BetterPixels.ttf"
+        font_size = 24.0
+    }
+
+    text HighScoreLabel {
+        layer = 20
+        z = 23
+        anchor = top
+        align = center
+        pos = (0, 120)
+        color = #9dd8ff
+        value = "HIGH SCORE"
+        font = "BetterPixels.ttf"
+        font_size = 14.0
+    }
+
+    text HighScoreValue {
+        layer = 20
+        z = 24
+        anchor = top
+        align = center
+        pos = (0, 136)
+        color = #f4f8ff
+        value = "0000"
+        font = "BetterPixels.ttf"
+        font_size = 20.0
+    }
+
+    rect HudState {
+        visible = false
+        pos = (0, 0)
+        size = (0, 0)
+        color = #00000000
+        script = "hud.rpu"
+    }
+
+    rect GameOverController {
+        visible = false
+        pos = (0, 0)
+        size = (0, 0)
+        color = #00000000
+
+        on ready() {
+            HudState.menu_return_at = 0
+        }
+
+        on update(dt) {
+            let _ = dt
+            if input_action() {
+                call set_scene("Menu")
+            }
+        }
+    }
+}

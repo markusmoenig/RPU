@@ -1,4 +1,9 @@
+state intro_until = 0
+
 fn player_tint() {
+    if HudState.game_over_at > time() {
+        return #ffffff00
+    }
     if time() < HudState.respawn_until {
         return #ffffff00
     }
@@ -23,27 +28,28 @@ fn player_texture() {
 
 on ready() {
     log("warped_space_shooter ready")
+    intro_until = time() + 0.75
     self.color = player_tint()
     self.texture = player_texture()
 }
 
 on update(dt) {
-    let intro_t = smoothstep(0.0, 1.0, time() / 0.75)
+    let intro_t = smoothstep(0.0, 1.0, 1.0 - ((intro_until - time()) / 0.75))
     let intro_target_x = screen_width() * 0.33
     let respawn_y = clamp(screen_height() * 0.5 - self.height * 0.5, 10.0, screen_height() - 32.0)
     let respawn_start_x = -self.width - 48.0
     let respawn_target_x = 20.0
     let respawn_t = smoothstep(0.0, 1.0, (time() - HudState.respawn_until) / 0.45)
 
-    // First boot flies farther into frame than a later respawn.
-    if time() < 0.75 {
+    if HudState.game_over_at > time() {
+        self.x = respawn_start_x
+        self.y = respawn_y
+    } else if time() < intro_until {
         self.x = lerp(-self.width - 96.0, intro_target_x, intro_t)
         self.y = clamp(self.y, 10.0, screen_height() - 32.0)
-    // After death the player stays offscreen for 2 seconds...
     } else if time() < HudState.respawn_until {
         self.x = respawn_start_x
         self.y = respawn_y
-    // ...then quickly flies back in from the left.
     } else if time() < HudState.respawn_until + 0.45 {
         self.x = lerp(respawn_start_x, respawn_target_x, respawn_t)
         self.y = respawn_y
@@ -75,15 +81,18 @@ on update(dt) {
             spawn("BulletTemplate", self.x + self.width - 2.0, self.y + self.height * 0.5 - 1.5)
         }
 
-        // Ignore hits while invulnerable, then consume one life and start the death timer.
-        if time() >= HudState.invulnerable_until {
+        if time() >= HudState.invulnerable_until && HudState.lives > 0 {
             let hit = first_overlap("hostile")
             if exists(hit) {
                 spawn("ExplosionTemplate", self.x - 6.0, self.y - 13.0)
                 destroy(hit)
                 HudState.lives = clamp(HudState.lives - 1.0, 0.0, 3.0)
-                HudState.respawn_until = time() + 2.0
-                HudState.invulnerable_until = HudState.respawn_until + 1.6
+                if HudState.lives <= 0.0 {
+                    HudState.game_over_at = time() + 1.0
+                } else {
+                    HudState.respawn_until = time() + 1.0
+                    HudState.invulnerable_until = HudState.respawn_until + 1.6
+                }
             }
         }
     }

@@ -2,16 +2,16 @@ RPU build placeholder
 project = Warped Space Shooter
 version = 0.1.0
 root = examples/warped_space_shooter
-scene_defs = 1
-scene_files = 1
-scripts = 11
-cameras = 1
+scene_defs = 3
+scene_files = 3
+scripts = 14
+cameras = 3
 rects = 0
-sprites = 6
-handlers = 13
-ops = 104
+sprites = 10
+handlers = 19
+ops = 148
 assets = 24
-warnings = 0
+warnings = 1
 errors = 0
 
-none
+- Warning: no main scene detected; expected scenes/main.rpu or `scene Main` (scenes)

@@ -25,6 +25,16 @@ enum Command {
         #[arg(default_value = ".")]
         project: PathBuf,
     },
+    BuildWeb {
+        #[arg(default_value = ".")]
+        project: PathBuf,
+    },
+    ServeWeb {
+        #[arg(default_value = ".")]
+        project: PathBuf,
+        #[arg(long, default_value_t = 8000)]
+        port: u16,
+    },
     ExportXcode {
         #[arg(default_value = ".")]
         project: PathBuf,
@@ -40,6 +50,8 @@ fn main() -> Result<()> {
         Command::New { name, path } => rpu_build::new_project(&name, path.as_deref())?,
         Command::Run { project } => rpu_build::run_project(&project)?,
         Command::Build { project } => rpu_build::build_project(&project)?,
+        Command::BuildWeb { project } => rpu_build::build_web_project(&project)?,
+        Command::ServeWeb { project, port } => rpu_build::serve_web_project(&project, port)?,
         Command::ExportXcode { project, output } => {
             rpu_build::export_xcode(&project, output.as_deref())?
         }
@@ -47,4 +59,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
