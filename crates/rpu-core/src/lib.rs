@@ -10,6 +10,12 @@ pub struct ProjectManifest {
     pub project: ProjectInfo,
     #[serde(default)]
     pub window: WindowConfig,
+    #[serde(
+        default,
+        alias = "apple",
+        skip_serializing_if = "MetaConfig::is_empty"
+    )]
+    pub meta: MetaConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +37,20 @@ pub struct WindowConfig {
     pub default_scale: f32,
     #[serde(default)]
     pub resize: ResizeMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MetaConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+impl MetaConfig {
+    fn is_empty(&self) -> bool {
+        self.bundle_id.is_none() && self.display_name.is_none()
+    }
 }
 
 impl Default for WindowConfig {
@@ -531,6 +551,7 @@ impl RpuProject {
                 start_scene: default_start_scene(),
             },
             window: WindowConfig::default(),
+            meta: MetaConfig::default(),
         };
 
         fs::write(root.join("rpu.toml"), toml::to_string_pretty(&manifest)?)
@@ -613,6 +634,14 @@ impl RpuProject {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn bundle_id(&self) -> Option<&str> {
+        self.manifest.meta.bundle_id.as_deref()
+    }
+
+    pub fn display_name(&self) -> Option<&str> {
+        self.manifest.meta.display_name.as_deref()
     }
 
     pub fn paths(&self) -> ProjectPaths {

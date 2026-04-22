@@ -15,32 +15,32 @@ use std::time::Instant;
 use web_time::Instant;
 
 pub fn run(project: RpuProject) -> Result<()> {
-    run_app(RpuRuntimeApp::new(project)?)
+    run_app(RuntimeApp::new(project)?)
 }
 
 pub fn run_bundled(project: BundledProject, asset_base: &str) -> Result<()> {
-    run_app(RpuRuntimeApp::new_bundled(project, asset_base)?)
+    run_app(RuntimeApp::new_bundled(project, asset_base)?)
 }
 
-struct RpuRuntimeApp {
+pub struct RuntimeApp {
     session: RuntimeSession,
 }
 
-impl RpuRuntimeApp {
-    fn new(project: RpuProject) -> Result<Self> {
+impl RuntimeApp {
+    pub fn new(project: RpuProject) -> Result<Self> {
         Ok(Self {
             session: RuntimeSession::new_native(project)?,
         })
     }
 
-    fn new_bundled(project: BundledProject, asset_base: &str) -> Result<Self> {
+    pub fn new_bundled(project: BundledProject, asset_base: &str) -> Result<Self> {
         Ok(Self {
             session: RuntimeSession::new_bundled(project, asset_base)?,
         })
     }
 }
 
-impl RpuSceneApp for RpuRuntimeApp {
+impl RpuSceneApp for RuntimeApp {
     fn window_title(&self) -> Option<String> {
         Some(format!("RPU - {}", self.session.compiled.name))
     }
@@ -2280,7 +2280,7 @@ fn target_property(target: &ScriptTarget) -> &ScriptProperty {
     }
 }
 
-impl RpuRuntimeApp {
+impl RuntimeApp {
     fn current_clear_color(&self) -> [f32; 4] {
         let camera = self
             .session

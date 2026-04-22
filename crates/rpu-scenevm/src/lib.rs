@@ -4,6 +4,8 @@ use base64::Engine;
 use bytemuck::{Pod, Zeroable};
 use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
 use rpu_core::{Anchor, TextAlign};
+#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+use std::ffi::c_void;
 #[cfg(not(target_arch = "wasm32"))]
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::collections::{HashMap, HashSet};
@@ -140,17 +142,15 @@ impl RuntimeContext {
         self.audio.stop_music();
     }
 
-    #[allow(dead_code)]
-    fn set_window_size(&mut self, window_size: (u32, u32)) {
+    pub fn set_window_size(&mut self, window_size: (u32, u32)) {
         self.window_size = window_size;
     }
 
-    #[allow(dead_code)]
-    fn set_scale_factor(&mut self, scale_factor: f32) {
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
         self.scale_factor = scale_factor;
     }
 
-    fn set_key_pressed(&mut self, key: &str, pressed: bool) {
+    pub fn set_key_pressed(&mut self, key: &str, pressed: bool) {
         let key = normalize_key_name(key);
         if pressed {
             self.pressed_keys.insert(key);
@@ -1003,6 +1003,95 @@ impl GpuState {
         })
     }
 
+    #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+    fn new_core_animation_layer(layer_ptr: *mut c_void, width: u32, height: u32) -> Result<Self> {
+        let width = width.max(1);
+        let height = height.max(1);
+        let instance = wgpu::Instance::default();
+        let surface = unsafe {
+            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer_ptr))
+        }
+        .map_err(|error| anyhow!("failed to create surface for CAMetalLayer: {error}"))?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }))
+        .context("failed to request GPU adapter")?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("rpu-device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::default(),
+        }))
+        .context("failed to request GPU device")?;
+
+        let caps = surface.get_capabilities(&adapter);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(wgpu::TextureFormat::is_srgb)
+            .or_else(|| caps.formats.first().copied())
+            .ok_or_else(|| anyhow!("surface does not expose any formats"))?;
+        let present_mode = caps
+            .present_modes
+            .iter()
+            .copied()
+            .find(|mode| *mode == wgpu::PresentMode::Fifo)
+            .or_else(|| caps.present_modes.first().copied())
+            .ok_or_else(|| anyhow!("surface does not expose any present modes"))?;
+        let alpha_mode = caps
+            .alpha_modes
+            .iter()
+            .copied()
+            .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
+            .or_else(|| caps.alpha_modes.first().copied())
+            .unwrap_or(wgpu::CompositeAlphaMode::Opaque);
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width,
+            height,
+            present_mode,
+            desired_maximum_frame_latency: 2,
+            alpha_mode,
+            view_formats: vec![],
+        };
+        surface.configure(&device, &config);
+        let surface_is_srgb = config.format.is_srgb();
+        let (quad_pipeline, bind_group_layout) = create_quad_pipeline(&device, config.format);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("rpu-texture-sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        let white_texture =
+            GpuTexture::from_rgba(&device, &queue, &sampler, &bind_group_layout, 1, 1, &[255; 4]);
+
+        Ok(Self {
+            surface,
+            device,
+            queue,
+            config,
+            surface_is_srgb,
+            quad_pipeline,
+            sampler,
+            bind_group_layout,
+            white_texture,
+            texture_cache: HashMap::new(),
+            font_cache: HashMap::new(),
+        })
+    }
+
     #[allow(dead_code)]
     fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
@@ -1211,6 +1300,80 @@ impl GpuState {
             return &self.white_texture;
         };
         self.texture_cache.get(path).unwrap_or(&self.white_texture)
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+pub struct MetalLayerRunner<A: RpuSceneApp> {
+    app: A,
+    gpu: GpuState,
+    ctx: RuntimeContext,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+impl<A: RpuSceneApp> MetalLayerRunner<A> {
+    pub fn new(
+        mut app: A,
+        layer_ptr: *mut c_void,
+        width: u32,
+        height: u32,
+        scale_factor: f32,
+    ) -> Result<Self> {
+        let gpu = GpuState::new_core_animation_layer(layer_ptr, width, height)?;
+        let mut ctx = RuntimeContext::new((width.max(1), height.max(1)), scale_factor);
+        app.set_native_mode(false);
+        app.set_scale(scale_factor);
+        app.init(&mut ctx);
+        Ok(Self { app, gpu, ctx })
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32, scale_factor: f32) {
+        let size = (width.max(1), height.max(1));
+        self.ctx.set_window_size(size);
+        self.ctx.set_scale_factor(scale_factor);
+        self.app.set_scale(scale_factor);
+        self.app.resize(&mut self.ctx, size);
+        self.gpu.resize(size.0, size.1);
+    }
+
+    pub fn key_down(&mut self, key: &str) {
+        self.ctx.set_key_pressed(key, true);
+    }
+
+    pub fn key_up(&mut self, key: &str) {
+        self.ctx.set_key_pressed(key, false);
+    }
+
+    pub fn mouse_down(&mut self, x: f32, y: f32) {
+        self.app.mouse_down(&mut self.ctx, x, y);
+    }
+
+    pub fn mouse_up(&mut self, x: f32, y: f32) {
+        self.app.mouse_up(&mut self.ctx, x, y);
+    }
+
+    pub fn mouse_move(&mut self, x: f32, y: f32) {
+        self.app.mouse_move(&mut self.ctx, x, y);
+    }
+
+    pub fn scroll(&mut self, dx: f32, dy: f32) {
+        self.app.scroll(&mut self.ctx, dx, dy);
+    }
+
+    pub fn render(&mut self) -> Result<()> {
+        self.app.update(&mut self.ctx);
+        let mut frame = SceneFrame::new(self.ctx.window_size());
+        self.app.render(&mut self.ctx, &mut frame);
+        match self.gpu.render(&frame) {
+            Ok(()) => Ok(()),
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                let (w, h) = self.ctx.window_size();
+                self.gpu.resize(w.max(1), h.max(1));
+                Ok(())
+            }
+            Err(wgpu::SurfaceError::OutOfMemory) => Err(anyhow!("GPU surface out of memory")),
+            Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => Ok(()),
+        }
     }
 }
 

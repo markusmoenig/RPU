@@ -8,3 +8,7 @@ width = 272
 height = 160
 default_scale = 4.0
 resize = "letterbox"
+
+[meta]
+bundle_id = "org.rpu.warped_space_shooter"
+display_name = "Warped Space Shooter"
