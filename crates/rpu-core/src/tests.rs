@@ -298,9 +298,14 @@ scene Main {
     let mut parsed = parse_scene_document(&scene, &mut diagnostics);
     let example_root =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/warped_space_shooter");
-    resolve_sprite_texture_sizes(
-        &example_root,
-        &[PathBuf::from("assets/player.png")],
+    let asset_path = example_root.join("assets/player.png");
+    let asset_bytes = std::fs::read(&asset_path).expect("player asset should exist");
+    let assets = vec![BundledAsset {
+        relative_path: PathBuf::from("assets/player.png"),
+        bytes: asset_bytes,
+    }];
+    resolve_sprite_texture_sizes_from_assets(
+        &assets,
         std::slice::from_mut(&mut parsed),
         &mut diagnostics,
     );

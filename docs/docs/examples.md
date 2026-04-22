@@ -6,70 +6,25 @@ sidebar_position: 8
 
 # Examples
 
-The repo currently maintains three example projects.
+## Warped Space Shooter
 
-## `hello_shapes`
+Source:
 
-Declaration-focused example.
+- [examples/warped_space_shooter](https://github.com/markusmoenig/RPU/tree/main/examples/warped_space_shooter)
 
-It demonstrates:
+Play it here:
 
-- `rect`
-- `sprite`
-- camera setup
-- layering
-- textures
-- inline scene-local scripts
-- script assignments
-- locals
-- boolean conditions
-- reusable functions
-- return values
-
-Repo path:
-
-```text
-examples/hello_shapes
-```
-
-## `terrain_playground`
-
-Map-focused example.
-
-It demonstrates:
-
-- embedded `map`
-- `legend`
-- `ascii`
-- marker placement
-- `symbol = x` sprite spawning
-- keyboard input queries
-- screen-size queries
-
-Repo path:
-
-```text
-examples/terrain_playground
-```
-
-## `warped_space_shooter`
-
-Small game-focused example.
-
-It demonstrates:
-
-- a concrete playable goal
-- project-defined gameplay base resolution
-- keyboard movement with `input_left()` / `input_right()` / `input_up()` / `input_down()`
-- `key("Space")`
-- screen-size query calls
-- difficulty-driven spawning via templates
-- script-driven enemy and asteroid motion
-- layered gameplay backgrounds (`bg-back` + `bg-stars`)
-- textured sprites using the bundled shooter art reference
-
-Repo path:
-
-```text
-examples/warped_space_shooter
-```
+<iframe
+  src="/games/warped-space-shooter/index.html"
+  title="Warped Space Shooter"
+  style={{
+    width: '100%',
+    maxWidth: '960px',
+    aspectRatio: '16 / 10',
+    border: '1px solid var(--ifm-color-emphasis-300)',
+    borderRadius: '12px',
+    background: '#000',
+    display: 'block',
+    marginTop: '1rem',
+  }}
+/>

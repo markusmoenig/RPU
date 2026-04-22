@@ -1022,8 +1022,7 @@ pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
         .ok_or_else(|| anyhow!("missing browser body"))?;
 
     let initial_size = app.initial_window_size().unwrap_or((1280, 720));
-    let device_scale = window.device_pixel_ratio().max(1.0) as f32;
-    configure_canvas(&canvas, initial_size, device_scale)?;
+    let device_scale = fit_canvas_to_viewport(&window, &canvas, initial_size)?;
     body.append_child(&canvas)
         .map_err(|error| anyhow!("failed to attach canvas: {error:?}"))?;
 
@@ -1039,11 +1038,11 @@ pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
 async fn start_web_app<A: RpuSceneApp + 'static>(
     mut app: A,
     canvas: HtmlCanvasElement,
-    initial_size: (u32, u32),
+    logical_size: (u32, u32),
     device_scale: f32,
 ) -> Result<()> {
     let gpu = GpuState::new_canvas(canvas.clone()).await?;
-    let mut ctx = RuntimeContext::new(initial_size, device_scale);
+    let mut ctx = RuntimeContext::new((canvas.width().max(1), canvas.height().max(1)), device_scale);
     app.set_native_mode(false);
     app.set_scale(device_scale);
     app.init(&mut ctx);
@@ -1066,6 +1065,7 @@ async fn start_web_app<A: RpuSceneApp + 'static>(
             .and_then(|fps| (fps > 0.0).then_some(1000.0 / fps as f64));
     }
 
+    register_web_resize_handler(&runner, logical_size)?;
     register_web_input_handlers(&runner)?;
 
     let animation = Rc::new(RefCell::new(None::<Closure<dyn FnMut(f64)>>));
@@ -1127,6 +1127,66 @@ fn configure_canvas(canvas: &HtmlCanvasElement, logical_size: (u32, u32), scale:
         .map_err(|error| anyhow!("failed to style canvas display: {error:?}"))?;
     canvas.set_width((logical_size.0 as f32 * scale).round().max(1.0) as u32);
     canvas.set_height((logical_size.1 as f32 * scale).round().max(1.0) as u32);
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn fit_canvas_to_viewport(
+    window: &web_sys::Window,
+    canvas: &HtmlCanvasElement,
+    logical_size: (u32, u32),
+) -> Result<f32> {
+    let viewport_w = window
+        .inner_width()
+        .map_err(|error| anyhow!("failed to read window innerWidth: {error:?}"))?
+        .as_f64()
+        .unwrap_or(logical_size.0 as f64)
+        .max(1.0);
+    let viewport_h = window
+        .inner_height()
+        .map_err(|error| anyhow!("failed to read window innerHeight: {error:?}"))?
+        .as_f64()
+        .unwrap_or(logical_size.1 as f64)
+        .max(1.0);
+    let logical_w = logical_size.0.max(1) as f64;
+    let logical_h = logical_size.1.max(1) as f64;
+    let fit_scale = (viewport_w / logical_w).min(viewport_h / logical_h).max(0.1);
+    let css_w = (logical_w * fit_scale).round().max(1.0) as u32;
+    let css_h = (logical_h * fit_scale).round().max(1.0) as u32;
+    let device_scale = window.device_pixel_ratio().max(1.0) as f32;
+    configure_canvas(canvas, (css_w, css_h), device_scale)?;
+    Ok(device_scale)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn register_web_resize_handler<A: RpuSceneApp + 'static>(
+    runner: &Rc<RefCell<WebRunner<A>>>,
+    logical_size: (u32, u32),
+) -> Result<()> {
+    let window = web_sys::window().ok_or_else(|| anyhow!("missing browser window"))?;
+    let runner = runner.clone();
+    let resize = Closure::wrap(Box::new(move || {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let canvas = runner.borrow().canvas.clone();
+        let Ok(device_scale) = fit_canvas_to_viewport(&window, &canvas, logical_size) else {
+            return;
+        };
+        let mut runner = runner.borrow_mut();
+        let pixel_size = (canvas.width().max(1), canvas.height().max(1));
+        runner.ctx.set_window_size(pixel_size);
+        runner.ctx.set_scale_factor(device_scale);
+        runner.app.set_scale(device_scale);
+        let mut ctx = runner.ctx.clone();
+        runner.app.resize(&mut ctx, pixel_size);
+        runner.ctx = ctx;
+        runner.gpu.resize(pixel_size.0, pixel_size.1);
+    }) as Box<dyn FnMut()>);
+    window
+        .add_event_listener_with_callback("resize", resize.as_ref().unchecked_ref())
+        .map_err(|error| anyhow!("failed to register resize: {error:?}"))?;
+    resize.forget();
     Ok(())
 }
 

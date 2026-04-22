@@ -47,6 +47,11 @@ impl RpuSceneApp for RpuRuntimeApp {
 
     fn initial_window_size(&self) -> Option<(u32, u32)> {
         let window = &self.session.compiled.window;
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Some((window.width.max(1), window.height.max(1)));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         Some((
             (window.width as f32 * window.default_scale.max(0.1)).round() as u32,
             (window.height as f32 * window.default_scale.max(0.1)).round() as u32,

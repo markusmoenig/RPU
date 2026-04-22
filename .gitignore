@@ -4,5 +4,6 @@ docs/node_modules/
 docs/build/
 docs/.docusaurus/
 docs/static/play/
+docs/static/games/
 examples/*/build/
 Space Shooter Files/
