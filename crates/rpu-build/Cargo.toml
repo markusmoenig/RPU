@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+image.workspace = true
 rpu-core = { path = "../rpu-core" }
 rpu-runtime = { path = "../rpu-runtime" }
 tiny_http = "0.12"

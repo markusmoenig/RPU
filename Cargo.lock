@@ -1957,6 +1957,7 @@ name = "rpu-build"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "image",
  "rpu-core",
  "rpu-runtime",
  "tiny_http",

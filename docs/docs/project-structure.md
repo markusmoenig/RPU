@@ -30,6 +30,10 @@ width = 272
 height = 160
 default_scale = 4.0
 resize = "letterbox"
+
+[meta]
+bundle_id = "org.rpu.my_app"
+display_name = "My App"
 ```
 
 `window.width` / `window.height` define the authored base resolution.
@@ -55,6 +59,25 @@ Current resize modes:
 `stretch` fills the window exactly, even if that distorts the image.
 
 For pixel-art or fixed-layout games, `letterbox` is usually the right default.
+
+## `meta`
+
+`meta` holds project metadata that can be reused by platform exporters.
+
+Current fields:
+
+- `bundle_id`
+- `display_name`
+
+Example:
+
+```toml
+[meta]
+bundle_id = "org.rpu.warped_space_shooter"
+display_name = "Warped Space Shooter"
+```
+
+Right now these are used by the Apple/Xcode export, but the section is intentionally platform-neutral so the same metadata can be reused by future exporters.
 
 ## `scenes/`
 

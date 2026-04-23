@@ -449,10 +449,224 @@ pub struct MapLegendEntry {
     pub meaning: MapLegendMeaning,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapTerrainEntry {
+    pub topology: TerrainTopology,
+    pub material: String,
+    pub material_stack: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainTopology {
+    Solid,
+    SlopeUp,
+    SlopeDown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainShape {
+    Empty,
+    Isolated,
+    Interior,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeftOuter,
+    TopRightOuter,
+    BottomLeftOuter,
+    BottomRightOuter,
+    TopLeftInner,
+    TopRightInner,
+    BottomLeftInner,
+    BottomRightInner,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassifiedMapCell {
+    pub row: usize,
+    pub col: usize,
+    pub symbol: char,
+    pub topology: TerrainTopology,
+    pub material_key: String,
+    pub material: String,
+    pub shape: TerrainShape,
+    pub style: TerrainEdgeStyle,
+    pub normal: TerrainNormal,
+    pub tangent: TerrainTangent,
+    pub surface_u: u32,
+    pub boundary_distance: u32,
+    pub depth_band: TerrainDepthBand,
+    pub region_id: usize,
+    pub exposed: TerrainExposedSides,
+    pub is_boundary: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerrainRegion {
+    pub id: usize,
+    pub material: String,
+    pub min_row: usize,
+    pub min_col: usize,
+    pub max_row: usize,
+    pub max_col: usize,
+    pub cells: Vec<(usize, usize)>,
+    pub boundary_cells: Vec<(usize, usize)>,
+    pub boundary_loop: Vec<(usize, usize)>,
+    pub max_boundary_distance: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassifiedAsciiMap {
+    pub name: String,
+    pub width: usize,
+    pub height: usize,
+    pub cells: Vec<ClassifiedMapCell>,
+    pub regions: Vec<TerrainRegion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TerrainExposedSides {
+    pub top: bool,
+    pub bottom: bool,
+    pub left: bool,
+    pub right: bool,
+}
+
+impl TerrainExposedSides {
+    pub fn any(self) -> bool {
+        self.top || self.bottom || self.left || self.right
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainEdgeStyle {
+    Square,
+    Round,
+    Diagonal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainNormal {
+    None,
+    Up,
+    Down,
+    Left,
+    Right,
+    UpLeft,
+    UpRight,
+    DownLeft,
+    DownRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainTangent {
+    None,
+    Up,
+    Down,
+    Left,
+    Right,
+    UpLeft,
+    UpRight,
+    DownLeft,
+    DownRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainDepthBand {
+    Edge,
+    NearSurface,
+    Interior,
+    DeepInterior,
+}
+
 #[derive(Debug, Clone)]
 pub enum MapLegendMeaning {
     Marker,
     Color([f32; 4]),
+    Terrain(MapTerrainEntry),
+}
+
+impl AsciiMapNode {
+    pub fn classify_terrain(&self) -> ClassifiedAsciiMap {
+        let legend: std::collections::HashMap<char, &MapTerrainEntry> = self
+            .legend
+            .iter()
+            .filter_map(|entry| match &entry.meaning {
+                MapLegendMeaning::Terrain(terrain) => Some((entry.symbol, terrain)),
+                _ => None,
+            })
+            .collect();
+
+        let height = self.rows.len();
+        let width = self.rows.iter().map(|row| row.chars().count()).max().unwrap_or(0);
+        let occupancy = build_terrain_occupancy(self, &legend, width, height);
+        let regions = extract_terrain_regions(self, &legend, width, height);
+        let region_lookup: std::collections::HashMap<(usize, usize), usize> = regions
+            .iter()
+            .flat_map(|region| region.cells.iter().map(|&(row, col)| ((row, col), region.id)))
+            .collect();
+        let distance_lookup: std::collections::HashMap<(usize, usize), u32> = regions
+            .iter()
+            .flat_map(|region| {
+                compute_region_boundary_distances(region)
+                    .into_iter()
+                    .map(|(cell, distance)| (cell, distance))
+            })
+            .collect();
+        let surface_u_lookup: std::collections::HashMap<(usize, usize), u32> = regions
+            .iter()
+            .flat_map(|region| compute_region_surface_coordinates(region).into_iter())
+            .collect();
+        let mut cells = Vec::new();
+
+        for (row, line) in self.rows.iter().enumerate() {
+            for (col, ch) in line.chars().enumerate() {
+                let Some(terrain) = legend.get(&ch) else {
+                    continue;
+                };
+                let exposed = terrain_exposed_sides(&occupancy, row, col);
+                let shape = classify_terrain_shape(&occupancy, row, col);
+                let boundary_distance = *distance_lookup.get(&(row, col)).unwrap_or(&0);
+                let depth_band = classify_terrain_depth_band(boundary_distance);
+                cells.push(ClassifiedMapCell {
+                    row,
+                    col,
+                    symbol: ch,
+                    topology: terrain.topology,
+                    material_key: terrain.material.clone(),
+                    material: terrain_material_for_depth_band(
+                        &terrain.material_stack,
+                        depth_band,
+                        classify_terrain_normal(exposed),
+                        classify_terrain_edge_style(terrain.topology, shape),
+                    )
+                    .to_string(),
+                    shape,
+                    style: classify_terrain_edge_style(terrain.topology, shape),
+                    normal: {
+                        let normal = classify_terrain_normal(exposed);
+                        normal
+                    },
+                    tangent: classify_terrain_tangent(classify_terrain_normal(exposed)),
+                    surface_u: *surface_u_lookup.get(&(row, col)).unwrap_or(&0),
+                    boundary_distance,
+                    depth_band,
+                    region_id: *region_lookup.get(&(row, col)).unwrap_or(&0),
+                    exposed,
+                    is_boundary: exposed.any(),
+                });
+            }
+        }
+
+        ClassifiedAsciiMap {
+            name: self.name.clone(),
+            width,
+            height,
+            cells,
+            regions,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1974,6 +2188,12 @@ fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
         .iter()
         .map(|entry| (entry.symbol, &entry.meaning))
         .collect();
+    let classified = map.classify_terrain();
+    let terrain_cells: std::collections::HashMap<(usize, usize), &ClassifiedMapCell> = classified
+        .cells
+        .iter()
+        .map(|cell| ((cell.row, cell.col), cell))
+        .collect();
     let mut commands = Vec::new();
     for (row, line) in map.rows.iter().enumerate() {
         for (col, ch) in line.chars().enumerate() {
@@ -1990,6 +2210,22 @@ fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
                     width: map.cell[0],
                     height: map.cell[1],
                     color: *color,
+                    visible: true,
+                }));
+            }
+            if let Some(MapLegendMeaning::Terrain(_)) = legend.get(&ch) {
+                let Some(cell) = terrain_cells.get(&(row, col)) else {
+                    continue;
+                };
+                commands.push(DrawCommand::Rect(SceneRect {
+                    anchor: Anchor::World,
+                    layer: -10,
+                    z: (row as i32) * 100 + col as i32,
+                    x: map.origin[0] + col as f32 * map.cell[0],
+                    y: map.origin[1] + row as f32 * map.cell[1],
+                    width: map.cell[0],
+                    height: map.cell[1],
+                    color: terrain_shape_debug_color(cell.shape),
                     visible: true,
                 }));
             }
@@ -2735,7 +2971,571 @@ fn parse_map_legend_meaning(value: &str) -> Option<MapLegendMeaning> {
         return Some(MapLegendMeaning::Marker);
     }
 
-    parse_color(value).map(MapLegendMeaning::Color)
+    if let Some(color) = parse_color(value) {
+        return Some(MapLegendMeaning::Color(color));
+    }
+
+    parse_terrain_legend_entry(value).map(MapLegendMeaning::Terrain)
+}
+
+fn parse_terrain_legend_entry(value: &str) -> Option<MapTerrainEntry> {
+    let value = value.trim();
+    let (topology, material_raw) = match value.split_once(':') {
+        Some((kind, material)) => (parse_terrain_topology(kind.trim())?, material.trim()),
+        None => (TerrainTopology::Solid, value),
+    };
+    let material = parse_string(material_raw).unwrap_or_else(|| material_raw.trim().to_string());
+    if material.is_empty() {
+        return None;
+    }
+    let material_stack = material
+        .split('>')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if material_stack.is_empty() {
+        return None;
+    }
+    Some(MapTerrainEntry {
+        topology,
+        material,
+        material_stack,
+    })
+}
+
+fn parse_terrain_topology(value: &str) -> Option<TerrainTopology> {
+    match value {
+        "solid" => Some(TerrainTopology::Solid),
+        "slope_up" => Some(TerrainTopology::SlopeUp),
+        "slope_down" => Some(TerrainTopology::SlopeDown),
+        _ => None,
+    }
+}
+
+fn build_terrain_occupancy(
+    map: &AsciiMapNode,
+    legend: &std::collections::HashMap<char, &MapTerrainEntry>,
+    width: usize,
+    height: usize,
+) -> Vec<Vec<bool>> {
+    let mut occupancy = vec![vec![false; width]; height];
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            if legend.contains_key(&ch) {
+                occupancy[row][col] = true;
+            }
+        }
+    }
+    occupancy
+}
+
+fn extract_terrain_regions(
+    map: &AsciiMapNode,
+    legend: &std::collections::HashMap<char, &MapTerrainEntry>,
+    width: usize,
+    height: usize,
+) -> Vec<TerrainRegion> {
+    let mut materials = vec![vec![None::<String>; width]; height];
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            if let Some(terrain) = legend.get(&ch) {
+                materials[row][col] = Some(terrain.material.clone());
+            }
+        }
+    }
+
+    let mut visited = vec![vec![false; width]; height];
+    let mut regions = Vec::new();
+    let mut next_id = 1usize;
+
+    for row in 0..height {
+        for col in 0..width {
+            let Some(material) = materials[row][col].as_ref() else {
+                continue;
+            };
+            if visited[row][col] {
+                continue;
+            }
+
+            let mut queue = std::collections::VecDeque::new();
+            let mut cells = Vec::new();
+            let mut boundary_cells = Vec::new();
+            let mut min_row = row;
+            let mut max_row = row;
+            let mut min_col = col;
+            let mut max_col = col;
+
+            visited[row][col] = true;
+            queue.push_back((row, col));
+
+            while let Some((current_row, current_col)) = queue.pop_front() {
+                cells.push((current_row, current_col));
+                if terrain_exposed_sides_for_material(&materials, current_row, current_col, material).any() {
+                    boundary_cells.push((current_row, current_col));
+                }
+                min_row = min_row.min(current_row);
+                max_row = max_row.max(current_row);
+                min_col = min_col.min(current_col);
+                max_col = max_col.max(current_col);
+
+                for (next_row, next_col) in orthogonal_neighbors(current_row, current_col, width, height) {
+                    if visited[next_row][next_col] {
+                        continue;
+                    }
+                    if materials[next_row][next_col].as_deref() != Some(material.as_str()) {
+                        continue;
+                    }
+                    visited[next_row][next_col] = true;
+                    queue.push_back((next_row, next_col));
+                }
+            }
+
+            let boundary_loop = order_boundary_cells(&boundary_cells);
+            let max_boundary_distance = compute_region_boundary_distances_from_cells(&cells, &boundary_cells)
+                .into_values()
+                .max()
+                .unwrap_or(0);
+
+            regions.push(TerrainRegion {
+                id: next_id,
+                material: material.clone(),
+                min_row,
+                min_col,
+                max_row,
+                max_col,
+                cells,
+                boundary_cells,
+                boundary_loop,
+                max_boundary_distance,
+            });
+            next_id += 1;
+        }
+    }
+
+    regions
+}
+
+fn orthogonal_neighbors(
+    row: usize,
+    col: usize,
+    width: usize,
+    height: usize,
+) -> impl Iterator<Item = (usize, usize)> {
+    let mut neighbors = Vec::with_capacity(4);
+    if row > 0 {
+        neighbors.push((row - 1, col));
+    }
+    if row + 1 < height {
+        neighbors.push((row + 1, col));
+    }
+    if col > 0 {
+        neighbors.push((row, col - 1));
+    }
+    if col + 1 < width {
+        neighbors.push((row, col + 1));
+    }
+    neighbors.into_iter()
+}
+
+fn terrain_exposed_sides(occupancy: &[Vec<bool>], row: usize, col: usize) -> TerrainExposedSides {
+    let filled = |dy: isize, dx: isize| -> bool {
+        let y = row as isize + dy;
+        let x = col as isize + dx;
+        if y < 0 || x < 0 {
+            return false;
+        }
+        occupancy
+            .get(y as usize)
+            .and_then(|r| r.get(x as usize))
+            .copied()
+            .unwrap_or(false)
+    };
+
+    TerrainExposedSides {
+        top: !filled(-1, 0),
+        bottom: !filled(1, 0),
+        left: !filled(0, -1),
+        right: !filled(0, 1),
+    }
+}
+
+fn terrain_exposed_sides_for_material(
+    materials: &[Vec<Option<String>>],
+    row: usize,
+    col: usize,
+    material: &str,
+) -> TerrainExposedSides {
+    let same = |dy: isize, dx: isize| -> bool {
+        let y = row as isize + dy;
+        let x = col as isize + dx;
+        if y < 0 || x < 0 {
+            return false;
+        }
+        materials
+            .get(y as usize)
+            .and_then(|r| r.get(x as usize))
+            .and_then(|cell| cell.as_deref())
+            == Some(material)
+    };
+
+    TerrainExposedSides {
+        top: !same(-1, 0),
+        bottom: !same(1, 0),
+        left: !same(0, -1),
+        right: !same(0, 1),
+    }
+}
+
+fn classify_terrain_edge_style(topology: TerrainTopology, shape: TerrainShape) -> TerrainEdgeStyle {
+    match topology {
+        TerrainTopology::SlopeUp | TerrainTopology::SlopeDown => TerrainEdgeStyle::Diagonal,
+        TerrainTopology::Solid => match shape {
+            TerrainShape::TopLeftOuter
+            | TerrainShape::TopRightOuter
+            | TerrainShape::BottomLeftOuter
+            | TerrainShape::BottomRightOuter => TerrainEdgeStyle::Round,
+            _ => TerrainEdgeStyle::Square,
+        },
+    }
+}
+
+fn classify_terrain_normal(exposed: TerrainExposedSides) -> TerrainNormal {
+    match (exposed.top, exposed.bottom, exposed.left, exposed.right) {
+        (false, false, false, false) => TerrainNormal::None,
+        (true, false, false, false) => TerrainNormal::Up,
+        (false, true, false, false) => TerrainNormal::Down,
+        (false, false, true, false) => TerrainNormal::Left,
+        (false, false, false, true) => TerrainNormal::Right,
+        (true, false, true, false) => TerrainNormal::UpLeft,
+        (true, false, false, true) => TerrainNormal::UpRight,
+        (false, true, true, false) => TerrainNormal::DownLeft,
+        (false, true, false, true) => TerrainNormal::DownRight,
+        (true, true, false, false) => TerrainNormal::Up,
+        (false, false, true, true) => TerrainNormal::Left,
+        (true, true, true, false) => TerrainNormal::UpLeft,
+        (true, true, false, true) => TerrainNormal::UpRight,
+        (true, false, true, true) => TerrainNormal::UpLeft,
+        (false, true, true, true) => TerrainNormal::DownLeft,
+        (true, true, true, true) => TerrainNormal::UpLeft,
+    }
+}
+
+fn classify_terrain_tangent(normal: TerrainNormal) -> TerrainTangent {
+    match normal {
+        TerrainNormal::None => TerrainTangent::None,
+        TerrainNormal::Up => TerrainTangent::Right,
+        TerrainNormal::Down => TerrainTangent::Left,
+        TerrainNormal::Left => TerrainTangent::Up,
+        TerrainNormal::Right => TerrainTangent::Down,
+        TerrainNormal::UpLeft => TerrainTangent::UpRight,
+        TerrainNormal::UpRight => TerrainTangent::DownRight,
+        TerrainNormal::DownLeft => TerrainTangent::UpLeft,
+        TerrainNormal::DownRight => TerrainTangent::DownLeft,
+    }
+}
+
+fn classify_terrain_depth_band(boundary_distance: u32) -> TerrainDepthBand {
+    match boundary_distance {
+        0 => TerrainDepthBand::Edge,
+        1 => TerrainDepthBand::NearSurface,
+        2..=3 => TerrainDepthBand::Interior,
+        _ => TerrainDepthBand::DeepInterior,
+    }
+}
+
+fn terrain_material_for_depth_band<'a>(
+    material_stack: &'a [String],
+    depth_band: TerrainDepthBand,
+    normal: TerrainNormal,
+    style: TerrainEdgeStyle,
+) -> &'a str {
+    let index = match depth_band {
+        TerrainDepthBand::Edge => match style {
+            TerrainEdgeStyle::Diagonal => 0,
+            TerrainEdgeStyle::Square | TerrainEdgeStyle::Round => match normal {
+                TerrainNormal::Up | TerrainNormal::UpLeft | TerrainNormal::UpRight => 0,
+                _ => 1,
+            },
+        },
+        TerrainDepthBand::NearSurface => 1,
+        TerrainDepthBand::Interior => 2,
+        TerrainDepthBand::DeepInterior => material_stack.len().saturating_sub(1),
+    }
+    .min(material_stack.len().saturating_sub(1));
+    material_stack
+        .get(index)
+        .map(String::as_str)
+        .unwrap_or("")
+}
+
+fn compute_region_boundary_distances(region: &TerrainRegion) -> std::collections::HashMap<(usize, usize), u32> {
+    compute_region_boundary_distances_from_cells(&region.cells, &region.boundary_cells)
+}
+
+fn compute_region_surface_coordinates(region: &TerrainRegion) -> std::collections::HashMap<(usize, usize), u32> {
+    let cell_set: std::collections::HashSet<(usize, usize)> = region.cells.iter().copied().collect();
+    let mut surface_u = std::collections::HashMap::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    for (index, &cell) in region.boundary_loop.iter().enumerate() {
+        if surface_u.insert(cell, index as u32).is_none() {
+            queue.push_back(cell);
+        }
+    }
+
+    while let Some((row, col)) = queue.pop_front() {
+        let current_u = *surface_u.get(&(row, col)).unwrap_or(&0);
+        for next in orthogonal_neighbors_unbounded(row, col) {
+            if !cell_set.contains(&next) || surface_u.contains_key(&next) {
+                continue;
+            }
+            surface_u.insert(next, current_u);
+            queue.push_back(next);
+        }
+    }
+
+    for &cell in &region.cells {
+        surface_u.entry(cell).or_insert(0);
+    }
+
+    surface_u
+}
+
+fn compute_region_boundary_distances_from_cells(
+    cells: &[(usize, usize)],
+    boundary_cells: &[(usize, usize)],
+) -> std::collections::HashMap<(usize, usize), u32> {
+    let cell_set: std::collections::HashSet<(usize, usize)> = cells.iter().copied().collect();
+    let mut distances = std::collections::HashMap::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    for &cell in boundary_cells {
+        distances.insert(cell, 0);
+        queue.push_back(cell);
+    }
+
+    while let Some((row, col)) = queue.pop_front() {
+        let current_distance = *distances.get(&(row, col)).unwrap_or(&0);
+        for next in orthogonal_neighbors_unbounded(row, col) {
+            if !cell_set.contains(&next) || distances.contains_key(&next) {
+                continue;
+            }
+            distances.insert(next, current_distance + 1);
+            queue.push_back(next);
+        }
+    }
+
+    for &cell in cells {
+        distances.entry(cell).or_insert(0);
+    }
+
+    distances
+}
+
+fn order_boundary_cells(boundary_cells: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    if boundary_cells.is_empty() {
+        return Vec::new();
+    }
+
+    let boundary_set: std::collections::HashSet<(usize, usize)> =
+        boundary_cells.iter().copied().collect();
+    let mut remaining = boundary_set.clone();
+    let mut ordered = Vec::with_capacity(boundary_cells.len());
+    let mut current = *boundary_cells.iter().min().expect("boundary cells are not empty");
+    let mut previous_direction = (0isize, 1isize);
+
+    while !remaining.is_empty() {
+        ordered.push(current);
+        remaining.remove(&current);
+
+        let mut neighbors = boundary_neighbors(current, &remaining);
+        if neighbors.is_empty() {
+            if let Some(next) = remaining
+                .iter()
+                .min_by_key(|&&(row, col)| {
+                    row.abs_diff(current.0) + col.abs_diff(current.1)
+                })
+                .copied()
+            {
+                current = next;
+                previous_direction = (0, 1);
+                continue;
+            }
+            break;
+        }
+
+        neighbors.sort_by_key(|&(next_row, next_col)| {
+            let direction = (
+                next_row as isize - current.0 as isize,
+                next_col as isize - current.1 as isize,
+            );
+            (
+                boundary_turn_rank(previous_direction, direction),
+                next_row.abs_diff(current.0) + next_col.abs_diff(current.1),
+                next_row,
+                next_col,
+            )
+        });
+
+        let next = neighbors[0];
+        previous_direction = (
+            next.0 as isize - current.0 as isize,
+            next.1 as isize - current.1 as isize,
+        );
+        current = next;
+    }
+
+    ordered
+}
+
+fn orthogonal_neighbors_unbounded(row: usize, col: usize) -> impl Iterator<Item = (usize, usize)> {
+    let mut neighbors = Vec::with_capacity(4);
+    if row > 0 {
+        neighbors.push((row - 1, col));
+    }
+    neighbors.push((row + 1, col));
+    if col > 0 {
+        neighbors.push((row, col - 1));
+    }
+    neighbors.push((row, col + 1));
+    neighbors.into_iter()
+}
+
+fn boundary_neighbors(
+    current: (usize, usize),
+    boundary_cells: &std::collections::HashSet<(usize, usize)>,
+) -> Vec<(usize, usize)> {
+    let (row, col) = current;
+    let mut neighbors = Vec::with_capacity(8);
+    for dy in -1isize..=1 {
+        for dx in -1isize..=1 {
+            if dy == 0 && dx == 0 {
+                continue;
+            }
+            let next_row = row as isize + dy;
+            let next_col = col as isize + dx;
+            if next_row < 0 || next_col < 0 {
+                continue;
+            }
+            let next = (next_row as usize, next_col as usize);
+            if boundary_cells.contains(&next) {
+                neighbors.push(next);
+            }
+        }
+    }
+    neighbors
+}
+
+fn boundary_turn_rank(previous_direction: (isize, isize), direction: (isize, isize)) -> i32 {
+    let directions = [
+        (-1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
+        (1, 0),
+        (1, -1),
+        (0, -1),
+        (-1, -1),
+    ];
+    let previous_index = directions
+        .iter()
+        .position(|&candidate| candidate == previous_direction)
+        .unwrap_or(2) as i32;
+    let current_index = directions
+        .iter()
+        .position(|&candidate| candidate == direction)
+        .unwrap_or(2) as i32;
+    (current_index - previous_index).rem_euclid(8)
+}
+
+fn classify_terrain_shape(occupancy: &[Vec<bool>], row: usize, col: usize) -> TerrainShape {
+    if occupancy.is_empty() || occupancy[row][col] == false {
+        return TerrainShape::Empty;
+    }
+
+    let filled = |dy: isize, dx: isize| -> bool {
+        let y = row as isize + dy;
+        let x = col as isize + dx;
+        if y < 0 || x < 0 {
+            return false;
+        }
+        occupancy
+            .get(y as usize)
+            .and_then(|r| r.get(x as usize))
+            .copied()
+            .unwrap_or(false)
+    };
+
+    let up = filled(-1, 0);
+    let down = filled(1, 0);
+    let left = filled(0, -1);
+    let right = filled(0, 1);
+
+    let top_open = !up;
+    let bottom_open = !down;
+    let left_open = !left;
+    let right_open = !right;
+
+    if top_open && left_open && !bottom_open && !right_open {
+        return TerrainShape::TopLeftOuter;
+    }
+    if top_open && right_open && !bottom_open && !left_open {
+        return TerrainShape::TopRightOuter;
+    }
+    if bottom_open && left_open && !top_open && !right_open {
+        return TerrainShape::BottomLeftOuter;
+    }
+    if bottom_open && right_open && !top_open && !left_open {
+        return TerrainShape::BottomRightOuter;
+    }
+
+    let up_left = filled(-1, -1);
+    let up_right = filled(-1, 1);
+    let down_left = filled(1, -1);
+    let down_right = filled(1, 1);
+
+    if !top_open && !left_open && !up_left {
+        return TerrainShape::TopLeftInner;
+    }
+    if !top_open && !right_open && !up_right {
+        return TerrainShape::TopRightInner;
+    }
+    if !bottom_open && !left_open && !down_left {
+        return TerrainShape::BottomLeftInner;
+    }
+    if !bottom_open && !right_open && !down_right {
+        return TerrainShape::BottomRightInner;
+    }
+
+    match (top_open, bottom_open, left_open, right_open) {
+        (false, false, false, false) => TerrainShape::Interior,
+        (true, false, false, false) => TerrainShape::Top,
+        (false, true, false, false) => TerrainShape::Bottom,
+        (false, false, true, false) => TerrainShape::Left,
+        (false, false, false, true) => TerrainShape::Right,
+        _ => TerrainShape::Isolated,
+    }
+}
+
+fn terrain_shape_debug_color(shape: TerrainShape) -> [f32; 4] {
+    match shape {
+        TerrainShape::Empty => [0.0, 0.0, 0.0, 0.0],
+        TerrainShape::Isolated => [0.95, 0.32, 0.32, 1.0],
+        TerrainShape::Interior => [0.14, 0.26, 0.74, 1.0],
+        TerrainShape::Top => [0.35, 0.88, 0.42, 1.0],
+        TerrainShape::Bottom => [0.72, 0.33, 0.84, 1.0],
+        TerrainShape::Left => [0.98, 0.72, 0.26, 1.0],
+        TerrainShape::Right => [0.98, 0.56, 0.18, 1.0],
+        TerrainShape::TopLeftOuter => [0.26, 0.92, 0.92, 1.0],
+        TerrainShape::TopRightOuter => [0.19, 0.82, 0.98, 1.0],
+        TerrainShape::BottomLeftOuter => [0.88, 0.41, 0.81, 1.0],
+        TerrainShape::BottomRightOuter => [0.75, 0.33, 0.95, 1.0],
+        TerrainShape::TopLeftInner => [0.62, 0.94, 0.62, 1.0],
+        TerrainShape::TopRightInner => [0.55, 0.88, 0.55, 1.0],
+        TerrainShape::BottomLeftInner => [0.93, 0.58, 0.58, 1.0],
+        TerrainShape::BottomRightInner => [0.86, 0.49, 0.49, 1.0],
+    }
 }
 
 fn normalize_ascii_map(mut map: AsciiMapNode) -> AsciiMapNode {

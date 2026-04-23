@@ -2423,6 +2423,12 @@ fn compile_static_map_commands(maps: &[AsciiMapNode]) -> Vec<DrawCommand> {
                 .iter()
                 .map(|entry| (entry.symbol, &entry.meaning))
                 .collect();
+            let classified = map.classify_terrain();
+            let terrain_cells: HashMap<(usize, usize), _> = classified
+                .cells
+                .iter()
+                .map(|cell| ((cell.row, cell.col), cell))
+                .collect();
             let mut commands = Vec::new();
             for (row, line) in map.rows.iter().enumerate() {
                 for (col, ch) in line.chars().enumerate() {
@@ -2442,11 +2448,190 @@ fn compile_static_map_commands(maps: &[AsciiMapNode]) -> Vec<DrawCommand> {
                             visible: true,
                         }));
                     }
+                    if let Some(MapLegendMeaning::Terrain(_)) = legend.get(&ch) {
+                        let Some(cell) = terrain_cells.get(&(row, col)) else {
+                            continue;
+                        };
+                        let x = map.origin[0] + col as f32 * map.cell[0];
+                        let y = map.origin[1] + row as f32 * map.cell[1];
+                        let z = (row as i32) * 100 + col as i32;
+                        commands.push(DrawCommand::Rect(SceneRect {
+                            anchor: Anchor::World,
+                            layer: -10,
+                            z,
+                            x,
+                            y,
+                            width: map.cell[0],
+                            height: map.cell[1],
+                            color: terrain_shape_debug_color(cell.shape),
+                            visible: true,
+                        }));
+                        commands.extend(terrain_style_marker_commands(
+                            x,
+                            y,
+                            map.cell[0],
+                            map.cell[1],
+                            z + 1,
+                            cell.style,
+                        ));
+                    }
                 }
             }
             commands
         })
         .collect()
+}
+
+fn terrain_shape_debug_color(shape: rpu_core::TerrainShape) -> [f32; 4] {
+    match shape {
+        rpu_core::TerrainShape::Empty => [0.0, 0.0, 0.0, 0.0],
+        rpu_core::TerrainShape::Isolated => [242.0 / 255.0, 82.0 / 255.0, 82.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::Interior => [36.0 / 255.0, 66.0 / 255.0, 189.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::Top => [89.0 / 255.0, 224.0 / 255.0, 107.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::Bottom => [184.0 / 255.0, 84.0 / 255.0, 214.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::Left => [250.0 / 255.0, 184.0 / 255.0, 66.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::Right => [250.0 / 255.0, 143.0 / 255.0, 46.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::TopLeftOuter => [66.0 / 255.0, 235.0 / 255.0, 235.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::TopRightOuter => [48.0 / 255.0, 209.0 / 255.0, 250.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::BottomLeftOuter => [224.0 / 255.0, 105.0 / 255.0, 207.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::BottomRightOuter => [191.0 / 255.0, 84.0 / 255.0, 242.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::TopLeftInner => [158.0 / 255.0, 240.0 / 255.0, 158.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::TopRightInner => [140.0 / 255.0, 224.0 / 255.0, 140.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::BottomLeftInner => [237.0 / 255.0, 148.0 / 255.0, 148.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::BottomRightInner => [219.0 / 255.0, 125.0 / 255.0, 125.0 / 255.0, 1.0],
+    }
+}
+
+fn terrain_style_marker_commands(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    z: i32,
+    style: rpu_core::TerrainEdgeStyle,
+) -> Vec<DrawCommand> {
+    let marker = [0.08, 0.08, 0.1, 0.95];
+    let center_w = (width * 0.24).max(2.0);
+    let center_h = (height * 0.24).max(2.0);
+    let center_x = x + (width - center_w) * 0.5;
+    let center_y = y + (height - center_h) * 0.5;
+    let mut rects = Vec::new();
+
+    match style {
+        rpu_core::TerrainEdgeStyle::Square => {
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: center_x,
+                y: center_y,
+                width: center_w,
+                height: center_h,
+                color: marker,
+                visible: true,
+            }));
+        }
+        rpu_core::TerrainEdgeStyle::Round => {
+            let arm_w = (width * 0.14).max(1.5);
+            let arm_h = (height * 0.14).max(1.5);
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: center_x,
+                y: center_y,
+                width: center_w,
+                height: center_h,
+                color: marker,
+                visible: true,
+            }));
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: center_x - arm_w * 0.9,
+                y: center_y + (center_h - arm_h) * 0.5,
+                width: arm_w,
+                height: arm_h,
+                color: marker,
+                visible: true,
+            }));
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: center_x + center_w - arm_w * 0.1,
+                y: center_y + (center_h - arm_h) * 0.5,
+                width: arm_w,
+                height: arm_h,
+                color: marker,
+                visible: true,
+            }));
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: center_x + (center_w - arm_w) * 0.5,
+                y: center_y - arm_h * 0.9,
+                width: arm_w,
+                height: arm_h,
+                color: marker,
+                visible: true,
+            }));
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: center_x + (center_w - arm_w) * 0.5,
+                y: center_y + center_h - arm_h * 0.1,
+                width: arm_w,
+                height: arm_h,
+                color: marker,
+                visible: true,
+            }));
+        }
+        rpu_core::TerrainEdgeStyle::Diagonal => {
+            let step_w = (width * 0.16).max(1.5);
+            let step_h = (height * 0.16).max(1.5);
+            let left = x + width * 0.26;
+            let top = y + height * 0.62;
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: left,
+                y: top,
+                width: step_w,
+                height: step_h,
+                color: marker,
+                visible: true,
+            }));
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: left + step_w * 0.95,
+                y: top - step_h * 0.95,
+                width: step_w,
+                height: step_h,
+                color: marker,
+                visible: true,
+            }));
+            rects.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: -9,
+                z,
+                x: left + step_w * 1.9,
+                y: top - step_h * 1.9,
+                width: step_w,
+                height: step_h,
+                color: marker,
+                visible: true,
+            }));
+        }
+    }
+
+    rects
 }
 
 fn compile_map_markers(maps: &[AsciiMapNode]) -> HashMap<String, [f32; 2]> {

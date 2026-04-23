@@ -41,6 +41,38 @@ To preview it locally:
 rpu serve-web examples/warped_space_shooter --port 8123
 ```
 
+If the wasm target is missing, RPU will try to install it automatically with `rustup`.
+
+If `wasm-bindgen-cli` is missing, install it with:
+
+```bash
+cargo install wasm-bindgen-cli
+```
+
+## Export For Xcode
+
+On macOS, RPU can generate an Xcode project:
+
+```bash
+rpu export-xcode examples/warped_space_shooter
+```
+
+This requires:
+
+- macOS
+- Xcode / `xcodebuild`
+- Rust / Cargo
+
+If your project defines:
+
+```toml
+[meta]
+bundle_id = "org.rpu.my_game"
+display_name = "My Game"
+```
+
+the Xcode export will use that metadata for the generated app.
+
 ## Next
 
 More setup steps will go here.

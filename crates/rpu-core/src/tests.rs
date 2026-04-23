@@ -75,6 +75,268 @@ scene Main {
 }
 
 #[test]
+fn scene_parser_supports_terrain_material_entries_and_shape_classification() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    map Terrain {
+        legend {
+            # = rock
+        }
+
+        ascii {
+            ####
+            ####
+        }
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let map = &parsed.scenes[0].maps[0];
+    assert_eq!(map.legend.len(), 1);
+    match &map.legend[0].meaning {
+        MapLegendMeaning::Terrain(terrain) => {
+            assert_eq!(terrain.topology, TerrainTopology::Solid);
+            assert_eq!(terrain.material, "rock");
+            assert_eq!(terrain.material_stack, vec!["rock".to_string()]);
+        }
+        other => panic!("expected terrain legend entry, got {other:?}"),
+    }
+
+    let classified = map.classify_terrain();
+    assert_eq!(classified.cells.len(), 8);
+    assert!(classified
+        .cells
+        .iter()
+        .any(|cell| cell.shape == TerrainShape::TopLeftOuter));
+    assert!(classified
+        .cells
+        .iter()
+        .any(|cell| cell.shape == TerrainShape::Top));
+    assert!(classified
+        .cells
+        .iter()
+        .any(|cell| cell.shape == TerrainShape::TopRightOuter));
+    assert_eq!(classified.regions.len(), 1);
+    assert!(classified.cells.iter().all(|cell| cell.region_id == 1));
+    let top_left = classified
+        .cells
+        .iter()
+        .find(|cell| cell.row == 0 && cell.col == 0)
+        .expect("top-left terrain cell should exist");
+    assert!(top_left.is_boundary);
+    assert!(top_left.exposed.top);
+    assert!(top_left.exposed.left);
+    assert!(!top_left.exposed.right);
+    assert!(!top_left.exposed.bottom);
+    assert_eq!(top_left.style, TerrainEdgeStyle::Round);
+    assert_eq!(top_left.normal, TerrainNormal::UpLeft);
+    assert_eq!(top_left.tangent, TerrainTangent::UpRight);
+    assert!(top_left.surface_u < classified.regions[0].boundary_loop.len() as u32);
+    assert_eq!(top_left.material_key, "rock");
+    assert_eq!(top_left.material, "rock");
+    assert_eq!(top_left.boundary_distance, 0);
+    assert_eq!(top_left.depth_band, TerrainDepthBand::Edge);
+    assert_eq!(classified.regions[0].boundary_cells.len(), 8);
+    assert_eq!(classified.regions[0].boundary_loop.len(), 8);
+    assert_eq!(classified.regions[0].max_boundary_distance, 0);
+}
+
+#[test]
+fn terrain_classification_extracts_connected_regions_by_material() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r##"
+scene Main {
+    map Terrain {
+        legend {
+            # = rock
+            - = grass
+        }
+
+        ascii {
+            ##  --
+            ##  --
+        }
+    }
+}
+"##,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let classified = parsed.scenes[0].maps[0].classify_terrain();
+    assert_eq!(classified.regions.len(), 2);
+    assert_eq!(classified.regions[0].material, "rock");
+    assert_eq!(classified.regions[0].cells.len(), 4);
+    assert_eq!(classified.regions[1].material, "grass");
+    assert_eq!(classified.regions[1].cells.len(), 4);
+
+    let rock_ids: std::collections::HashSet<_> = classified
+        .cells
+        .iter()
+        .filter(|cell| cell.material == "rock")
+        .map(|cell| cell.region_id)
+        .collect();
+    let grass_ids: std::collections::HashSet<_> = classified
+        .cells
+        .iter()
+        .filter(|cell| cell.material == "grass")
+        .map(|cell| cell.region_id)
+        .collect();
+
+    assert_eq!(rock_ids.len(), 1);
+    assert_eq!(grass_ids.len(), 1);
+    assert_ne!(rock_ids, grass_ids);
+    assert_eq!(classified.regions[0].boundary_cells.len(), 4);
+    assert_eq!(classified.regions[1].boundary_cells.len(), 4);
+    assert!(classified
+        .cells
+        .iter()
+        .filter(|cell| cell.material == "rock")
+        .all(|cell| cell.style == TerrainEdgeStyle::Round || cell.style == TerrainEdgeStyle::Square));
+    assert!(classified
+        .cells
+        .iter()
+        .any(|cell| cell.normal == TerrainNormal::UpLeft));
+    assert!(classified
+        .cells
+        .iter()
+        .any(|cell| cell.tangent == TerrainTangent::UpRight));
+    assert!(classified
+        .cells
+        .iter()
+        .all(|cell| cell.boundary_distance == 0));
+    assert!(classified
+        .cells
+        .iter()
+        .all(|cell| cell.depth_band == TerrainDepthBand::Edge));
+    assert_eq!(classified.regions[0].boundary_loop.len(), 4);
+    assert_eq!(classified.regions[1].boundary_loop.len(), 4);
+}
+
+#[test]
+fn terrain_classification_computes_boundary_distance_and_depth_bands() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    map Terrain {
+        legend {
+            # = rock
+        }
+
+        ascii {
+            #####
+            #####
+            #####
+            #####
+            #####
+        }
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let classified = parsed.scenes[0].maps[0].classify_terrain();
+    let center = classified
+        .cells
+        .iter()
+        .find(|cell| cell.row == 2 && cell.col == 2)
+        .expect("center cell should exist");
+    assert_eq!(center.boundary_distance, 2);
+    assert_eq!(center.depth_band, TerrainDepthBand::Interior);
+    assert_eq!(classified.regions[0].max_boundary_distance, 2);
+}
+
+#[test]
+fn terrain_classification_resolves_material_stack_from_depth_bands() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    map Terrain {
+        legend {
+            # = grass>dirt>rock
+        }
+
+        ascii {
+            #####
+            #####
+            #####
+            #####
+            #####
+        }
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let map = &parsed.scenes[0].maps[0];
+    match &map.legend[0].meaning {
+        MapLegendMeaning::Terrain(terrain) => {
+            assert_eq!(
+                terrain.material_stack,
+                vec!["grass".to_string(), "dirt".to_string(), "rock".to_string()]
+            );
+        }
+        other => panic!("expected terrain legend entry, got {other:?}"),
+    }
+
+    let classified = map.classify_terrain();
+    let edge = classified
+        .cells
+        .iter()
+        .find(|cell| cell.row == 0 && cell.col == 2)
+        .expect("edge cell should exist");
+    let near_surface = classified
+        .cells
+        .iter()
+        .find(|cell| cell.row == 1 && cell.col == 2)
+        .expect("near-surface cell should exist");
+    let side_edge = classified
+        .cells
+        .iter()
+        .find(|cell| cell.row == 2 && cell.col == 0)
+        .expect("side edge cell should exist");
+    let center = classified
+        .cells
+        .iter()
+        .find(|cell| cell.row == 2 && cell.col == 2)
+        .expect("center cell should exist");
+
+    assert_eq!(edge.material_key, "grass>dirt>rock");
+    assert!(edge.surface_u < classified.regions[0].boundary_loop.len() as u32);
+    assert_eq!(edge.material, "grass");
+    assert_eq!(edge.depth_band, TerrainDepthBand::Edge);
+    assert_eq!(side_edge.depth_band, TerrainDepthBand::Edge);
+    assert!(side_edge.surface_u < classified.regions[0].boundary_loop.len() as u32);
+    assert_eq!(side_edge.material, "dirt");
+    assert_eq!(near_surface.material, "dirt");
+    assert_eq!(near_surface.surface_u, edge.surface_u);
+    assert_eq!(near_surface.depth_band, TerrainDepthBand::NearSurface);
+    assert_eq!(center.material, "rock");
+    assert!(center.surface_u < classified.regions[0].boundary_loop.len() as u32);
+    assert_eq!(center.depth_band, TerrainDepthBand::Interior);
+}
+
+#[test]
 fn scene_parser_supports_inline_visual_scripts() {
     let scene = source_file(
         "scenes/main.rpu",

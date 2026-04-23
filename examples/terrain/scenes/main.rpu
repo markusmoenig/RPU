@@ -1,0 +1,42 @@
+scene Main {
+    meta {
+        title = "Terrain"
+    }
+
+    camera MainCamera {
+        pos = (320, 220)
+        zoom = 1.0
+        background = (0.06, 0.08, 0.10, 1.0)
+    }
+
+    map Terrain {
+        origin = (80, 128)
+        cell = (48, 48)
+
+        legend {
+            # = grass>dirt>rock
+            - = grass>dirt>rock
+            / = slope_up:grass>dirt>rock
+            \ = slope_down:grass>dirt>rock
+        }
+
+        ascii {
+            #####
+            #####
+            #####
+            #####
+            #####
+
+              ####
+              ####
+
+                    ###
+                    ###
+                    ###
+
+            ###/
+              /----
+                 \##
+        }
+    }
+}

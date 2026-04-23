@@ -44,6 +44,15 @@ Current behavior:
 
 Builds a browser export for a project.
 
+Preflight behavior:
+
+- checks that `cargo` and `rustup` are available
+- automatically installs the missing Rust target with:
+  - `rustup target add wasm32-unknown-unknown`
+- requires `wasm-bindgen-cli`
+  - if missing, install it with:
+    - `cargo install wasm-bindgen-cli`
+
 Current output goes to:
 
 ```text
@@ -96,6 +105,39 @@ It currently reports:
 
 ## `rpu export-xcode`
 
-Current Apple export output is also a placeholder.
+Exports a native Apple project that uses the generated Xcode host plus the Rust renderer through FFI.
 
-It prepares an output directory and writes a summary README for the future Apple flow.
+Current output goes to:
+
+```text
+build/apple/
+```
+
+Current preflight behavior:
+
+- requires macOS
+- requires `xcodebuild`
+- requires `cargo`
+
+Example:
+
+```bash
+rpu export-xcode examples/warped_space_shooter
+```
+
+If you run it on a non-macOS machine, it fails early with a clear message instead of trying to build the bridge anyway.
+
+The generated export currently includes:
+
+- `App/`
+- `RustBridge/`
+- `Project/`
+- `RPUAppleApp.xcodeproj/`
+
+The generated macOS host is a native AppKit app. It creates the Apple window and `CAMetalLayer`, while Rust renders into that surface through FFI using the same renderer as the normal desktop runtime.
+
+Current metadata and sizing behavior:
+
+- uses `[meta].display_name` for the app display name
+- uses `[meta].bundle_id` for the bundle identifier
+- uses `[window].width`, `[window].height`, and `[window].default_scale` for the startup content size
