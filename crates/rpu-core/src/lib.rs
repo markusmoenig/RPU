@@ -482,6 +482,26 @@ pub enum TerrainShape {
     BottomRightInner,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainContour {
+    None,
+    FlatTop,
+    RampUpRight,
+    RampUpLeft,
+    CapLeft,
+    CapRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainTransitionRole {
+    None,
+    RampUpRight,
+    RampUpLeft,
+    JoinFromLeft,
+    JoinFromRight,
+    JoinBoth,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassifiedMapCell {
     pub row: usize,
@@ -491,6 +511,9 @@ pub struct ClassifiedMapCell {
     pub material_key: String,
     pub material: String,
     pub shape: TerrainShape,
+    pub contour: TerrainContour,
+    pub transition_role: TerrainTransitionRole,
+    pub transition_strength: u8,
     pub style: TerrainEdgeStyle,
     pub normal: TerrainNormal,
     pub tangent: TerrainTangent,
@@ -643,6 +666,9 @@ impl AsciiMapNode {
                     )
                     .to_string(),
                     shape,
+                    contour: classify_terrain_contour(terrain.topology, shape),
+                    transition_role: TerrainTransitionRole::None,
+                    transition_strength: 0,
                     style: classify_terrain_edge_style(terrain.topology, shape),
                     normal: {
                         let normal = classify_terrain_normal(exposed);
@@ -658,6 +684,16 @@ impl AsciiMapNode {
                 });
             }
         }
+
+        let contour_lookup: std::collections::HashMap<(usize, usize), TerrainContour> = cells
+            .iter()
+            .map(|cell| ((cell.row, cell.col), cell.contour))
+            .collect();
+
+        for cell in &mut cells {
+            cell.transition_role = classify_terrain_transition_role(cell.row, cell.col, cell.contour, &contour_lookup);
+        }
+        compute_transition_strengths(&mut cells);
 
         ClassifiedAsciiMap {
             name: self.name.clone(),
@@ -3197,6 +3233,63 @@ fn classify_terrain_edge_style(topology: TerrainTopology, shape: TerrainShape) -
             | TerrainShape::BottomRightOuter => TerrainEdgeStyle::Round,
             _ => TerrainEdgeStyle::Square,
         },
+    }
+}
+
+fn classify_terrain_contour(topology: TerrainTopology, shape: TerrainShape) -> TerrainContour {
+    match topology {
+        TerrainTopology::SlopeUp => TerrainContour::RampUpRight,
+        TerrainTopology::SlopeDown => TerrainContour::RampUpLeft,
+        TerrainTopology::Solid => match shape {
+            TerrainShape::Top | TerrainShape::TopLeftOuter | TerrainShape::TopRightOuter => {
+                TerrainContour::FlatTop
+            }
+            _ => TerrainContour::None,
+        },
+    }
+}
+
+fn classify_terrain_transition_role(
+    row: usize,
+    col: usize,
+    contour: TerrainContour,
+    contour_lookup: &std::collections::HashMap<(usize, usize), TerrainContour>,
+) -> TerrainTransitionRole {
+    match contour {
+        TerrainContour::RampUpRight => TerrainTransitionRole::RampUpRight,
+        TerrainContour::RampUpLeft => TerrainTransitionRole::RampUpLeft,
+        TerrainContour::FlatTop => {
+            let join_from_left = row
+                .checked_add(1)
+                .and_then(|r| col.checked_sub(1).map(|c| (r, c)))
+                .and_then(|pos| contour_lookup.get(&pos).copied())
+                == Some(TerrainContour::RampUpRight);
+            let join_from_right = row
+                .checked_add(1)
+                .map(|r| (r, col + 1))
+                .and_then(|pos| contour_lookup.get(&pos).copied())
+                == Some(TerrainContour::RampUpLeft);
+
+            match (join_from_left, join_from_right) {
+                (true, true) => TerrainTransitionRole::JoinBoth,
+                (true, false) => TerrainTransitionRole::JoinFromLeft,
+                (false, true) => TerrainTransitionRole::JoinFromRight,
+                (false, false) => TerrainTransitionRole::None,
+            }
+        }
+        _ => TerrainTransitionRole::None,
+    }
+}
+
+fn compute_transition_strengths(cells: &mut [ClassifiedMapCell]) {
+    for cell in cells.iter_mut() {
+        cell.transition_strength = match cell.transition_role {
+            TerrainTransitionRole::RampUpRight | TerrainTransitionRole::RampUpLeft => 255,
+            TerrainTransitionRole::JoinFromLeft
+            | TerrainTransitionRole::JoinFromRight
+            | TerrainTransitionRole::JoinBoth => 255,
+            TerrainTransitionRole::None => 0,
+        };
     }
 }
 
