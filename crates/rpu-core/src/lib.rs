@@ -10,11 +10,7 @@ pub struct ProjectManifest {
     pub project: ProjectInfo,
     #[serde(default)]
     pub window: WindowConfig,
-    #[serde(
-        default,
-        alias = "apple",
-        skip_serializing_if = "MetaConfig::is_empty"
-    )]
+    #[serde(default, alias = "apple", skip_serializing_if = "MetaConfig::is_empty")]
     pub meta: MetaConfig,
 }
 
@@ -45,11 +41,20 @@ pub struct MetaConfig {
     pub bundle_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    #[serde(
+        default,
+        alias = "apple_development_team",
+        alias = "team_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub development_team: Option<String>,
 }
 
 impl MetaConfig {
     fn is_empty(&self) -> bool {
-        self.bundle_id.is_none() && self.display_name.is_none()
+        self.bundle_id.is_none()
+            && self.display_name.is_none()
+            && self.development_team.is_none()
     }
 }
 
@@ -439,8 +444,46 @@ pub struct AsciiMapNode {
     pub name: String,
     pub origin: [f32; 2],
     pub cell: [f32; 2],
+    pub render: TerrainRenderMode,
+    pub terrain_style: TerrainStyleSettings,
     pub legend: Vec<MapLegendEntry>,
     pub rows: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainRenderMode {
+    Debug,
+    Basic,
+    Synth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TerrainStyleSettings {
+    pub cap_depth: f32,
+    pub ramp_cap_depth: f32,
+    pub join_cap_depth: f32,
+    pub shoulder_width: f32,
+    pub surface_roughness: f32,
+    pub shoulder_shape: TerrainShoulderShape,
+}
+
+impl Default for TerrainStyleSettings {
+    fn default() -> Self {
+        Self {
+            cap_depth: 0.5,
+            ramp_cap_depth: 5.0 / 12.0,
+            join_cap_depth: 0.5,
+            shoulder_width: 1.0,
+            surface_roughness: 0.0,
+            shoulder_shape: TerrainShoulderShape::Linear,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainShoulderShape {
+    Linear,
+    Bend,
 }
 
 #[derive(Debug, Clone)]
@@ -544,6 +587,7 @@ pub struct ClassifiedAsciiMap {
     pub name: String,
     pub width: usize,
     pub height: usize,
+    pub render: TerrainRenderMode,
     pub cells: Vec<ClassifiedMapCell>,
     pub regions: Vec<TerrainRegion>,
 }
@@ -622,12 +666,22 @@ impl AsciiMapNode {
             .collect();
 
         let height = self.rows.len();
-        let width = self.rows.iter().map(|row| row.chars().count()).max().unwrap_or(0);
+        let width = self
+            .rows
+            .iter()
+            .map(|row| row.chars().count())
+            .max()
+            .unwrap_or(0);
         let occupancy = build_terrain_occupancy(self, &legend, width, height);
         let regions = extract_terrain_regions(self, &legend, width, height);
         let region_lookup: std::collections::HashMap<(usize, usize), usize> = regions
             .iter()
-            .flat_map(|region| region.cells.iter().map(|&(row, col)| ((row, col), region.id)))
+            .flat_map(|region| {
+                region
+                    .cells
+                    .iter()
+                    .map(|&(row, col)| ((row, col), region.id))
+            })
             .collect();
         let distance_lookup: std::collections::HashMap<(usize, usize), u32> = regions
             .iter()
@@ -691,7 +745,8 @@ impl AsciiMapNode {
             .collect();
 
         for cell in &mut cells {
-            cell.transition_role = classify_terrain_transition_role(cell.row, cell.col, cell.contour, &contour_lookup);
+            cell.transition_role =
+                classify_terrain_transition_role(cell.row, cell.col, cell.contour, &contour_lookup);
         }
         compute_transition_strengths(&mut cells);
 
@@ -699,6 +754,7 @@ impl AsciiMapNode {
             name: self.name.clone(),
             width,
             height,
+            render: self.render,
             cells,
             regions,
         }
@@ -806,10 +862,15 @@ impl RpuProject {
 
         fs::write(root.join("rpu.toml"), toml::to_string_pretty(&manifest)?)
             .with_context(|| format!("failed to write {}", root.join("rpu.toml").display()))?;
-        fs::write(root.join("scenes/main.rpu"), default_scene(name))
-            .with_context(|| format!("failed to write {}", root.join("scenes/main.rpu").display()))?;
-        fs::write(root.join("scripts/main.rpu"), default_script())
-            .with_context(|| format!("failed to write {}", root.join("scripts/main.rpu").display()))?;
+        fs::write(root.join("scenes/main.rpu"), default_scene(name)).with_context(|| {
+            format!("failed to write {}", root.join("scenes/main.rpu").display())
+        })?;
+        fs::write(root.join("scripts/main.rpu"), default_script()).with_context(|| {
+            format!(
+                "failed to write {}",
+                root.join("scripts/main.rpu").display()
+            )
+        })?;
         fs::write(root.join(".gitignore"), default_gitignore())
             .with_context(|| format!("failed to write {}", root.join(".gitignore").display()))?;
 
@@ -894,6 +955,10 @@ impl RpuProject {
         self.manifest.meta.display_name.as_deref()
     }
 
+    pub fn development_team(&self) -> Option<&str> {
+        self.manifest.meta.development_team.as_deref()
+    }
+
     pub fn paths(&self) -> ProjectPaths {
         ProjectPaths {
             manifest: self.root.join("rpu.toml"),
@@ -943,7 +1008,10 @@ impl BundledProject {
                 .collect(),
             assets: assets
                 .into_iter()
-                .map(|(relative_path, bytes)| BundledAsset { relative_path, bytes })
+                .map(|(relative_path, bytes)| BundledAsset {
+                    relative_path,
+                    bytes,
+                })
                 .collect(),
         })
     }
@@ -1003,7 +1071,10 @@ impl CompiledProject {
     }
 
     pub fn scene_count(&self) -> usize {
-        self.parsed_scenes.iter().map(|document| document.scenes.len()).sum()
+        self.parsed_scenes
+            .iter()
+            .map(|document| document.scenes.len())
+            .sum()
     }
 
     pub fn scene_exists(&self, name: &str) -> bool {
@@ -1166,7 +1237,10 @@ fn compile_project_sources(
 
     for script_name in &external_script_references {
         let expected = PathBuf::from("scripts").join(script_name);
-        if !scripts.iter().any(|script| script.relative_path == expected) {
+        if !scripts
+            .iter()
+            .any(|script| script.relative_path == expected)
+        {
             diagnostics.push(Diagnostic::error(
                 format!("referenced script is missing: {}", script_name),
                 Some(expected),
@@ -1242,10 +1316,7 @@ fn collect_source_files(dir: &Path, root: &Path) -> Result<Vec<SourceFile>> {
             let metadata = fs::metadata(path)
                 .with_context(|| format!("failed to read metadata for {}", path.display()))?;
             out.push(SourceFile {
-                relative_path: path
-                    .strip_prefix(root)
-                    .unwrap_or(path)
-                    .to_path_buf(),
+                relative_path: path.strip_prefix(root).unwrap_or(path).to_path_buf(),
                 contents,
                 modified: metadata.modified().ok(),
             });
@@ -1306,10 +1377,7 @@ fn newest_modification_in_dir(dir: &Path) -> Result<Option<SystemTime>> {
     Ok(latest)
 }
 
-fn collect_files_recursive(
-    dir: &Path,
-    visit: &mut dyn FnMut(&Path) -> Result<()>,
-) -> Result<()> {
+fn collect_files_recursive(dir: &Path, visit: &mut dyn FnMut(&Path) -> Result<()>) -> Result<()> {
     if !dir.exists() {
         return Ok(());
     }
@@ -1439,6 +1507,8 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 name,
                 origin: [0.0, 0.0],
                 cell: [32.0, 32.0],
+                render: TerrainRenderMode::Basic,
+                terrain_style: TerrainStyleSettings::default(),
                 legend: Vec::new(),
                 rows: Vec::new(),
             });
@@ -1609,7 +1679,8 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             && (line.starts_with("on ") || line.starts_with("fn "))
             && line.ends_with('{')
         {
-            inline_script_capture = Some((update_brace_depth(0, raw_line), vec![raw_line.to_string()]));
+            inline_script_capture =
+                Some((update_brace_depth(0, raw_line), vec![raw_line.to_string()]));
             continue;
         }
 
@@ -1884,8 +1955,18 @@ fn extract_script_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
                 .rects
                 .iter()
                 .filter_map(|rect| rect.visual.script_binding.clone())
-                .chain(scene.sprites.iter().filter_map(|sprite| sprite.visual.script_binding.clone()))
-                .chain(scene.texts.iter().filter_map(|text| text.visual.script_binding.clone()))
+                .chain(
+                    scene
+                        .sprites
+                        .iter()
+                        .filter_map(|sprite| sprite.visual.script_binding.clone()),
+                )
+                .chain(
+                    scene
+                        .texts
+                        .iter()
+                        .filter_map(|text| text.visual.script_binding.clone()),
+                )
         })
         .collect()
 }
@@ -1899,7 +1980,12 @@ fn extract_external_script_references(parsed_scenes: &[SceneDocument]) -> Vec<St
                 .rects
                 .iter()
                 .filter_map(|rect| rect.visual.script.clone())
-                .chain(scene.sprites.iter().filter_map(|sprite| sprite.visual.script.clone()))
+                .chain(
+                    scene
+                        .sprites
+                        .iter()
+                        .filter_map(|sprite| sprite.visual.script.clone()),
+                )
         })
         .collect()
 }
@@ -1908,7 +1994,12 @@ fn extract_texture_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
     parsed_scenes
         .iter()
         .flat_map(|document| document.scenes.iter())
-        .flat_map(|scene| scene.sprites.iter().flat_map(|sprite| sprite.textures.iter().cloned()))
+        .flat_map(|scene| {
+            scene
+                .sprites
+                .iter()
+                .flat_map(|sprite| sprite.textures.iter().cloned())
+        })
         .collect()
 }
 
@@ -1946,23 +2037,38 @@ fn collect_inline_script_sources(
     for document in parsed_scenes {
         for scene in &document.scenes {
             for rect in &scene.rects {
-                if let Some(source) =
-                    compile_inline_visual_script(&document.path, scene, &rect.name, &rect.visual, &scene_modified, &script_sources)
-                {
+                if let Some(source) = compile_inline_visual_script(
+                    &document.path,
+                    scene,
+                    &rect.name,
+                    &rect.visual,
+                    &scene_modified,
+                    &script_sources,
+                ) {
                     generated.push(source);
                 }
             }
             for sprite in &scene.sprites {
-                if let Some(source) =
-                    compile_inline_visual_script(&document.path, scene, &sprite.name, &sprite.visual, &scene_modified, &script_sources)
-                {
+                if let Some(source) = compile_inline_visual_script(
+                    &document.path,
+                    scene,
+                    &sprite.name,
+                    &sprite.visual,
+                    &scene_modified,
+                    &script_sources,
+                ) {
                     generated.push(source);
                 }
             }
             for text in &scene.texts {
-                if let Some(source) =
-                    compile_inline_visual_script(&document.path, scene, &text.name, &text.visual, &scene_modified, &script_sources)
-                {
+                if let Some(source) = compile_inline_visual_script(
+                    &document.path,
+                    scene,
+                    &text.name,
+                    &text.visual,
+                    &scene_modified,
+                    &script_sources,
+                ) {
                     generated.push(source);
                 }
             }
@@ -2023,12 +2129,22 @@ pub fn apply_scene_layout(scene: &SceneNode) -> SceneNode {
 
         for rect in &scene.rects {
             if rect.visual.parent.as_deref() == Some(stack.name.as_str()) {
-                ordered.push((rect.name.clone(), rect.visual.order, rect.visual.size, false));
+                ordered.push((
+                    rect.name.clone(),
+                    rect.visual.order,
+                    rect.visual.size,
+                    false,
+                ));
             }
         }
         for sprite in &scene.sprites {
             if sprite.visual.parent.as_deref() == Some(stack.name.as_str()) {
-                ordered.push((sprite.name.clone(), sprite.visual.order, sprite.visual.size, false));
+                ordered.push((
+                    sprite.name.clone(),
+                    sprite.visual.order,
+                    sprite.visual.size,
+                    false,
+                ));
             }
         }
         for text in &scene.texts {
@@ -2343,101 +2459,360 @@ const META_SCHEMA: &[SchemaEntry] = &[SchemaEntry {
 }];
 
 const VISUAL_SCHEMA: &[SchemaEntry] = &[
-    SchemaEntry { key: "visible", kind: PropertyKind::Bool },
-    SchemaEntry { key: "template", kind: PropertyKind::Bool },
-    SchemaEntry { key: "group", kind: PropertyKind::String },
-    SchemaEntry { key: "parent", kind: PropertyKind::String },
-    SchemaEntry { key: "order", kind: PropertyKind::I32 },
-    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
-    SchemaEntry { key: "layer", kind: PropertyKind::I32 },
-    SchemaEntry { key: "z", kind: PropertyKind::I32 },
-    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "color", kind: PropertyKind::Color },
-    SchemaEntry { key: "script", kind: PropertyKind::String },
+    SchemaEntry {
+        key: "visible",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "template",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "group",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "parent",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "order",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "anchor",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "layer",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "z",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "pos",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "size",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "script",
+        kind: PropertyKind::String,
+    },
 ];
 
 const SPRITE_SCHEMA: &[SchemaEntry] = &[
-    SchemaEntry { key: "texture", kind: PropertyKind::StringList },
-    SchemaEntry { key: "animation_mode", kind: PropertyKind::String },
-    SchemaEntry { key: "symbol", kind: PropertyKind::Symbol },
-    SchemaEntry { key: "rotation", kind: PropertyKind::F32 },
-    SchemaEntry { key: "scroll", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "repeat_x", kind: PropertyKind::Bool },
-    SchemaEntry { key: "repeat_y", kind: PropertyKind::Bool },
-    SchemaEntry { key: "flip_x", kind: PropertyKind::Bool },
-    SchemaEntry { key: "flip_y", kind: PropertyKind::Bool },
-    SchemaEntry { key: "animation_fps", kind: PropertyKind::F32 },
-    SchemaEntry { key: "destroy_on_animation_end", kind: PropertyKind::Bool },
-    SchemaEntry { key: "visible", kind: PropertyKind::Bool },
-    SchemaEntry { key: "template", kind: PropertyKind::Bool },
-    SchemaEntry { key: "group", kind: PropertyKind::String },
-    SchemaEntry { key: "parent", kind: PropertyKind::String },
-    SchemaEntry { key: "order", kind: PropertyKind::I32 },
-    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
-    SchemaEntry { key: "layer", kind: PropertyKind::I32 },
-    SchemaEntry { key: "z", kind: PropertyKind::I32 },
-    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "color", kind: PropertyKind::Color },
-    SchemaEntry { key: "script", kind: PropertyKind::String },
+    SchemaEntry {
+        key: "texture",
+        kind: PropertyKind::StringList,
+    },
+    SchemaEntry {
+        key: "animation_mode",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "symbol",
+        kind: PropertyKind::Symbol,
+    },
+    SchemaEntry {
+        key: "rotation",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "scroll",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "repeat_x",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "repeat_y",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "flip_x",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "flip_y",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "animation_fps",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "destroy_on_animation_end",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "visible",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "template",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "group",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "parent",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "order",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "anchor",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "layer",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "z",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "pos",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "size",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "script",
+        kind: PropertyKind::String,
+    },
 ];
 
 const TEXT_SCHEMA: &[SchemaEntry] = &[
-    SchemaEntry { key: "value", kind: PropertyKind::String },
-    SchemaEntry { key: "font", kind: PropertyKind::String },
-    SchemaEntry { key: "font_size", kind: PropertyKind::F32 },
-    SchemaEntry { key: "align", kind: PropertyKind::BareString },
-    SchemaEntry { key: "visible", kind: PropertyKind::Bool },
-    SchemaEntry { key: "template", kind: PropertyKind::Bool },
-    SchemaEntry { key: "group", kind: PropertyKind::String },
-    SchemaEntry { key: "parent", kind: PropertyKind::String },
-    SchemaEntry { key: "order", kind: PropertyKind::I32 },
-    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
-    SchemaEntry { key: "layer", kind: PropertyKind::I32 },
-    SchemaEntry { key: "z", kind: PropertyKind::I32 },
-    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "color", kind: PropertyKind::Color },
-    SchemaEntry { key: "script", kind: PropertyKind::String },
+    SchemaEntry {
+        key: "value",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "font",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "font_size",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "align",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "visible",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "template",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "group",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "parent",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "order",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "anchor",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "layer",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "z",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "pos",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "script",
+        kind: PropertyKind::String,
+    },
 ];
 
 const HIGHSCORE_SCHEMA: &[SchemaEntry] = &[
-    SchemaEntry { key: "font", kind: PropertyKind::String },
-    SchemaEntry { key: "font_size", kind: PropertyKind::F32 },
-    SchemaEntry { key: "items", kind: PropertyKind::I32 },
-    SchemaEntry { key: "gap", kind: PropertyKind::F32 },
-    SchemaEntry { key: "score_digits", kind: PropertyKind::I32 },
-    SchemaEntry { key: "visible", kind: PropertyKind::Bool },
-    SchemaEntry { key: "template", kind: PropertyKind::Bool },
-    SchemaEntry { key: "group", kind: PropertyKind::String },
-    SchemaEntry { key: "parent", kind: PropertyKind::String },
-    SchemaEntry { key: "order", kind: PropertyKind::I32 },
-    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
-    SchemaEntry { key: "layer", kind: PropertyKind::I32 },
-    SchemaEntry { key: "z", kind: PropertyKind::I32 },
-    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "color", kind: PropertyKind::Color },
+    SchemaEntry {
+        key: "font",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "font_size",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "items",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "gap",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "score_digits",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "visible",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "template",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "group",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "parent",
+        kind: PropertyKind::String,
+    },
+    SchemaEntry {
+        key: "order",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "anchor",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "layer",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "z",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "pos",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "size",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
 ];
 
 const STACK_SCHEMA: &[SchemaEntry] = &[
-    SchemaEntry { key: "anchor", kind: PropertyKind::BareString },
-    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "size", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "direction", kind: PropertyKind::BareString },
-    SchemaEntry { key: "gap", kind: PropertyKind::F32 },
-    SchemaEntry { key: "align", kind: PropertyKind::BareString },
+    SchemaEntry {
+        key: "anchor",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "pos",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "size",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "direction",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "gap",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "align",
+        kind: PropertyKind::BareString,
+    },
 ];
 
 const CAMERA_SCHEMA: &[SchemaEntry] = &[
-    SchemaEntry { key: "pos", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "zoom", kind: PropertyKind::F32 },
-    SchemaEntry { key: "background", kind: PropertyKind::Color },
+    SchemaEntry {
+        key: "pos",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "zoom",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "background",
+        kind: PropertyKind::Color,
+    },
 ];
 
 const MAP_SCHEMA: &[SchemaEntry] = &[
-    SchemaEntry { key: "origin", kind: PropertyKind::Vec2 },
-    SchemaEntry { key: "cell", kind: PropertyKind::Vec2 },
+    SchemaEntry {
+        key: "origin",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "cell",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "render",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "cap_depth",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "ramp_cap_depth",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "join_cap_depth",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "shoulder_width",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "surface_roughness",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "shoulder_shape",
+        kind: PropertyKind::BareString,
+    },
 ];
 
 impl<'a> Property<'a> {
@@ -2695,16 +3070,14 @@ fn apply_visual_property(
             ("group", PropertyValue::String(group)) => visual.group = Some(group),
             ("parent", PropertyValue::String(parent)) => visual.parent = Some(parent),
             ("order", PropertyValue::I32(order)) => visual.order = order,
-            ("anchor", PropertyValue::String(anchor)) => {
-                match parse_anchor(&anchor) {
-                    Some(anchor) => visual.anchor = anchor,
-                    None => diagnostics.push(Diagnostic::warning_at(
-                        format!("invalid {kind} anchor"),
-                        Some(path.to_path_buf()),
-                        line,
-                    )),
-                }
-            }
+            ("anchor", PropertyValue::String(anchor)) => match parse_anchor(&anchor) {
+                Some(anchor) => visual.anchor = anchor,
+                None => diagnostics.push(Diagnostic::warning_at(
+                    format!("invalid {kind} anchor"),
+                    Some(path.to_path_buf()),
+                    line,
+                )),
+            },
             ("layer", PropertyValue::I32(layer)) => visual.layer = layer,
             ("z", PropertyValue::I32(z)) => visual.z = z,
             ("pos", PropertyValue::Vec2(pos)) => visual.pos = pos,
@@ -2740,15 +3113,16 @@ fn apply_stack_property(
             },
             ("pos", PropertyValue::Vec2(pos)) => stack.pos = pos,
             ("size", PropertyValue::Vec2(size)) => stack.size = size,
-            ("direction", PropertyValue::String(direction)) => match parse_layout_direction(&direction)
-            {
-                Some(direction) => stack.direction = direction,
-                None => diagnostics.push(Diagnostic::warning_at(
-                    "invalid stack direction".to_string(),
-                    Some(path.to_path_buf()),
-                    line,
-                )),
-            },
+            ("direction", PropertyValue::String(direction)) => {
+                match parse_layout_direction(&direction) {
+                    Some(direction) => stack.direction = direction,
+                    None => diagnostics.push(Diagnostic::warning_at(
+                        "invalid stack direction".to_string(),
+                        Some(path.to_path_buf()),
+                        line,
+                    )),
+                }
+            }
             ("gap", PropertyValue::F32(gap)) => stack.gap = gap.max(0.0),
             ("align", PropertyValue::String(align)) => match parse_stack_align(&align) {
                 Some(align) => stack.align = align,
@@ -2880,24 +3254,15 @@ fn apply_text_property(
             ("value", PropertyValue::String(value)) => text.value = value,
             ("font", PropertyValue::String(font)) => text.font = font,
             ("font_size", PropertyValue::F32(size)) => text.font_size = size.max(1.0),
-            ("align", PropertyValue::String(align)) => {
-                match parse_text_align(&align) {
-                    Some(align) => text.align = align,
-                    None => diagnostics.push(Diagnostic::warning_at(
-                        "invalid text align".to_string(),
-                        Some(path.to_path_buf()),
-                        line,
-                    )),
-                }
-            }
-            _ => apply_visual_property(
-                &mut text.visual,
-                property,
-                line,
-                "text",
-                path,
-                diagnostics,
-            ),
+            ("align", PropertyValue::String(align)) => match parse_text_align(&align) {
+                Some(align) => text.align = align,
+                None => diagnostics.push(Diagnostic::warning_at(
+                    "invalid text align".to_string(),
+                    Some(path.to_path_buf()),
+                    line,
+                )),
+            },
+            _ => apply_visual_property(&mut text.visual, property, line, "text", path, diagnostics),
         }
     }
 }
@@ -2909,9 +3274,14 @@ fn apply_high_score_property(
     path: &Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Some((key, value)) =
-        parse_schema_value(HIGHSCORE_SCHEMA, property, line, "highscore", path, diagnostics)
-    {
+    if let Some((key, value)) = parse_schema_value(
+        HIGHSCORE_SCHEMA,
+        property,
+        line,
+        "highscore",
+        path,
+        diagnostics,
+    ) {
         match (key, value) {
             ("font", PropertyValue::String(font)) => high_score.font = font,
             ("font_size", PropertyValue::F32(size)) => high_score.font_size = size.max(1.0),
@@ -2939,12 +3309,46 @@ fn apply_map_property(
     path: &Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Some((key, value)) = parse_schema_value(MAP_SCHEMA, property, line, "map", path, diagnostics)
+    if let Some((key, value)) =
+        parse_schema_value(MAP_SCHEMA, property, line, "map", path, diagnostics)
     {
         match (key, value) {
             ("origin", PropertyValue::Vec2(origin)) => map.origin = origin,
             ("cell", PropertyValue::Vec2(cell)) => {
                 map.cell = [cell[0].max(1.0), cell[1].max(1.0)];
+            }
+            ("render", PropertyValue::String(render)) => match parse_terrain_render_mode(&render) {
+                Some(mode) => map.render = mode,
+                None => diagnostics.push(Diagnostic::warning_at(
+                    "invalid map render mode".to_string(),
+                    Some(path.to_path_buf()),
+                    line,
+                )),
+            },
+            ("cap_depth", PropertyValue::F32(value)) => {
+                map.terrain_style.cap_depth = value.clamp(0.05, 1.5);
+            }
+            ("ramp_cap_depth", PropertyValue::F32(value)) => {
+                map.terrain_style.ramp_cap_depth = value.clamp(0.05, 1.5);
+            }
+            ("join_cap_depth", PropertyValue::F32(value)) => {
+                map.terrain_style.join_cap_depth = value.clamp(0.05, 1.5);
+            }
+            ("shoulder_width", PropertyValue::F32(value)) => {
+                map.terrain_style.shoulder_width = value.clamp(0.0, 1.0);
+            }
+            ("surface_roughness", PropertyValue::F32(value)) => {
+                map.terrain_style.surface_roughness = value.clamp(0.0, 0.25);
+            }
+            ("shoulder_shape", PropertyValue::String(shape)) => {
+                match parse_terrain_shoulder_shape(&shape) {
+                    Some(shape) => map.terrain_style.shoulder_shape = shape,
+                    None => diagnostics.push(Diagnostic::warning_at(
+                        "invalid terrain shoulder shape".to_string(),
+                        Some(path.to_path_buf()),
+                        line,
+                    )),
+                }
             }
             _ => {}
         }
@@ -3012,6 +3416,23 @@ fn parse_map_legend_meaning(value: &str) -> Option<MapLegendMeaning> {
     }
 
     parse_terrain_legend_entry(value).map(MapLegendMeaning::Terrain)
+}
+
+fn parse_terrain_render_mode(value: &str) -> Option<TerrainRenderMode> {
+    match value.trim() {
+        "debug" => Some(TerrainRenderMode::Debug),
+        "basic" => Some(TerrainRenderMode::Basic),
+        "synth" => Some(TerrainRenderMode::Synth),
+        _ => None,
+    }
+}
+
+fn parse_terrain_shoulder_shape(value: &str) -> Option<TerrainShoulderShape> {
+    match value.trim() {
+        "linear" => Some(TerrainShoulderShape::Linear),
+        "bend" => Some(TerrainShoulderShape::Bend),
+        _ => None,
+    }
 }
 
 fn parse_terrain_legend_entry(value: &str) -> Option<MapTerrainEntry> {
@@ -3107,7 +3528,14 @@ fn extract_terrain_regions(
 
             while let Some((current_row, current_col)) = queue.pop_front() {
                 cells.push((current_row, current_col));
-                if terrain_exposed_sides_for_material(&materials, current_row, current_col, material).any() {
+                if terrain_exposed_sides_for_material(
+                    &materials,
+                    current_row,
+                    current_col,
+                    material,
+                )
+                .any()
+                {
                     boundary_cells.push((current_row, current_col));
                 }
                 min_row = min_row.min(current_row);
@@ -3115,7 +3543,9 @@ fn extract_terrain_regions(
                 min_col = min_col.min(current_col);
                 max_col = max_col.max(current_col);
 
-                for (next_row, next_col) in orthogonal_neighbors(current_row, current_col, width, height) {
+                for (next_row, next_col) in
+                    orthogonal_neighbors(current_row, current_col, width, height)
+                {
                     if visited[next_row][next_col] {
                         continue;
                     }
@@ -3128,10 +3558,11 @@ fn extract_terrain_regions(
             }
 
             let boundary_loop = order_boundary_cells(&boundary_cells);
-            let max_boundary_distance = compute_region_boundary_distances_from_cells(&cells, &boundary_cells)
-                .into_values()
-                .max()
-                .unwrap_or(0);
+            let max_boundary_distance =
+                compute_region_boundary_distances_from_cells(&cells, &boundary_cells)
+                    .into_values()
+                    .max()
+                    .unwrap_or(0);
 
             regions.push(TerrainRegion {
                 id: next_id,
@@ -3356,18 +3787,20 @@ fn terrain_material_for_depth_band<'a>(
         TerrainDepthBand::DeepInterior => material_stack.len().saturating_sub(1),
     }
     .min(material_stack.len().saturating_sub(1));
-    material_stack
-        .get(index)
-        .map(String::as_str)
-        .unwrap_or("")
+    material_stack.get(index).map(String::as_str).unwrap_or("")
 }
 
-fn compute_region_boundary_distances(region: &TerrainRegion) -> std::collections::HashMap<(usize, usize), u32> {
+fn compute_region_boundary_distances(
+    region: &TerrainRegion,
+) -> std::collections::HashMap<(usize, usize), u32> {
     compute_region_boundary_distances_from_cells(&region.cells, &region.boundary_cells)
 }
 
-fn compute_region_surface_coordinates(region: &TerrainRegion) -> std::collections::HashMap<(usize, usize), u32> {
-    let cell_set: std::collections::HashSet<(usize, usize)> = region.cells.iter().copied().collect();
+fn compute_region_surface_coordinates(
+    region: &TerrainRegion,
+) -> std::collections::HashMap<(usize, usize), u32> {
+    let cell_set: std::collections::HashSet<(usize, usize)> =
+        region.cells.iter().copied().collect();
     let mut surface_u = std::collections::HashMap::new();
     let mut queue = std::collections::VecDeque::new();
 
@@ -3435,7 +3868,10 @@ fn order_boundary_cells(boundary_cells: &[(usize, usize)]) -> Vec<(usize, usize)
         boundary_cells.iter().copied().collect();
     let mut remaining = boundary_set.clone();
     let mut ordered = Vec::with_capacity(boundary_cells.len());
-    let mut current = *boundary_cells.iter().min().expect("boundary cells are not empty");
+    let mut current = *boundary_cells
+        .iter()
+        .min()
+        .expect("boundary cells are not empty");
     let mut previous_direction = (0isize, 1isize);
 
     while !remaining.is_empty() {
@@ -3446,9 +3882,7 @@ fn order_boundary_cells(boundary_cells: &[(usize, usize)]) -> Vec<(usize, usize)
         if neighbors.is_empty() {
             if let Some(next) = remaining
                 .iter()
-                .min_by_key(|&&(row, col)| {
-                    row.abs_diff(current.0) + col.abs_diff(current.1)
-                })
+                .min_by_key(|&&(row, col)| row.abs_diff(current.0) + col.abs_diff(current.1))
                 .copied()
             {
                 current = next;
@@ -3636,7 +4070,11 @@ fn normalize_ascii_map(mut map: AsciiMapNode) -> AsciiMapNode {
         .rows
         .iter()
         .filter(|row| !row.trim().is_empty())
-        .map(|row| row.chars().take_while(|ch| *ch == ' ' || *ch == '\t').count())
+        .map(|row| {
+            row.chars()
+                .take_while(|ch| *ch == ' ' || *ch == '\t')
+                .count()
+        })
         .min()
         .unwrap_or(0);
 
@@ -3679,12 +4117,7 @@ fn parse_hex_color(hex: &str) -> Option<[f32; 4]> {
             let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
             let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
             let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-            Some([
-                r as f32 / 255.0,
-                g as f32 / 255.0,
-                b as f32 / 255.0,
-                1.0,
-            ])
+            Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0])
         }
         8 => {
             let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
@@ -3814,7 +4247,10 @@ fn count_ops(ops: &[BytecodeOp]) -> usize {
         .sum()
 }
 
-fn compile_scripts(scripts: &[SourceFile], diagnostics: &mut Vec<Diagnostic>) -> Vec<BytecodeScript> {
+fn compile_scripts(
+    scripts: &[SourceFile],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<BytecodeScript> {
     scripts
         .iter()
         .map(|script| compile_script(script, diagnostics))
@@ -3878,11 +4314,7 @@ fn compile_script(script: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -> Byt
             };
             index += 1;
             let ops = compile_script_block(&lines, &mut index, script, diagnostics);
-            functions.push(BytecodeFunction {
-                name,
-                params,
-                ops,
-            });
+            functions.push(BytecodeFunction { name, params, ops });
             continue;
         }
 
@@ -3950,7 +4382,10 @@ fn compile_script_block(
             break;
         }
 
-        if let Some(condition_text) = line.strip_prefix("if ").and_then(|rest| rest.strip_suffix('{')) {
+        if let Some(condition_text) = line
+            .strip_prefix("if ")
+            .and_then(|rest| rest.strip_suffix('{'))
+        {
             *index += 1;
             if let Some(condition) = parse_condition(condition_text.trim()) {
                 let body = compile_script_block(lines, index, script, diagnostics);
@@ -3971,10 +4406,7 @@ fn compile_script_block(
         }
 
         if let Some(op) = compile_statement(line) {
-            ops.push(BytecodeOp {
-                line: *line_no,
-                op,
-            });
+            ops.push(BytecodeOp { line: *line_no, op });
         } else {
             diagnostics.push(Diagnostic::warning_at(
                 "unsupported script statement",
@@ -4006,7 +4438,10 @@ fn compile_else_branch(
         return compile_script_block(lines, index, script, diagnostics);
     }
 
-    if let Some(condition_text) = line.strip_prefix("else if ").and_then(|rest| rest.strip_suffix('{')) {
+    if let Some(condition_text) = line
+        .strip_prefix("else if ")
+        .and_then(|rest| rest.strip_suffix('{'))
+    {
         *index += 1;
         if let Some(condition) = parse_condition(condition_text.trim()) {
             let body = compile_script_block(lines, index, script, diagnostics);
@@ -4333,15 +4768,14 @@ fn tokenize_expr(value: &str) -> Option<Vec<ExprToken>> {
             '-' => {
                 let unary_context = matches!(
                     tokens.last(),
-                    None
-                        | Some(
-                            ExprToken::Plus
-                                | ExprToken::Minus
-                                | ExprToken::Star
-                                | ExprToken::Slash
-                                | ExprToken::LParen
-                                | ExprToken::Comma
-                        )
+                    None | Some(
+                        ExprToken::Plus
+                            | ExprToken::Minus
+                            | ExprToken::Star
+                            | ExprToken::Slash
+                            | ExprToken::LParen
+                            | ExprToken::Comma
+                    )
                 );
                 let next_is_number = chars
                     .peek()

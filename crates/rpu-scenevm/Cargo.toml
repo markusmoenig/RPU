@@ -16,7 +16,10 @@ wasm-bindgen = "=0.2.100"
 wasm-bindgen-futures = "=0.4.50"
 wgpu.workspace = true
 web-sys = { version = "=0.3.77", features = ["Document", "DomRect", "Element", "EventTarget", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "KeyboardEvent", "MouseEvent", "WheelEvent", "Window", "CssStyleDeclaration", "console"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "tvos"), not(target_os = "ios")))'.dependencies]
+rodio = "0.20"
 winit.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rodio = "0.20"
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_os = "tvos", target_os = "ios")))'.dependencies]
+lewton = "0.10"

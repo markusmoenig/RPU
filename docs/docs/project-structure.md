@@ -68,6 +68,7 @@ Current fields:
 
 - `bundle_id`
 - `display_name`
+- `development_team`
 
 Example:
 
@@ -75,9 +76,10 @@ Example:
 [meta]
 bundle_id = "org.rpu.warped_space_shooter"
 display_name = "Warped Space Shooter"
+development_team = "ABCDE12345"
 ```
 
-Right now these are used by the Apple/Xcode export, but the section is intentionally platform-neutral so the same metadata can be reused by future exporters.
+Right now these are used by the Apple/Xcode export. `development_team` is Apple-specific in practice, but it lives in `meta` because signing and package metadata are exporter concerns and the same section can be reused by future exporters.
 
 ## `scenes/`
 

@@ -12,3 +12,4 @@ resize = "letterbox"
 [meta]
 bundle_id = "org.rpu.warped_space_shooter"
 display_name = "Warped Space Shooter"
+development_team = "G6R6L3VH62"

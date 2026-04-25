@@ -1,11 +1,21 @@
 use anyhow::Result;
+use image::{ImageBuffer, Rgba};
 use rpu_core::{
-    apply_scene_layout, Anchor, AnimationMode, AsciiMapNode, BinaryOp, BundledProject, BytecodeOp,
-    CompareOp, CompiledProject, Condition, DestroyTarget, DrawCommand, Expr, MapLegendMeaning,
-    OpCode, RectNode, ResizeMode, RpuProject, SceneCamera, SceneRect, ScriptProperty,
-    ScriptTarget, SpriteNode, TextAlign, TextNode, WindowConfig,
+    Anchor, AnimationMode, AsciiMapNode, BinaryOp, BundledProject, BytecodeOp, CompareOp,
+    CompiledProject, Condition, DestroyTarget, DrawCommand, Expr, MapLegendMeaning, OpCode,
+    RectNode, ResizeMode, RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget,
+    SpriteNode, TextAlign, TextNode, WindowConfig, apply_scene_layout,
 };
-use rpu_scenevm::{run_app, RpuSceneApp, RuntimeContext, SceneFrame};
+#[cfg(any(
+    target_arch = "wasm32",
+    all(
+        not(target_arch = "wasm32"),
+        not(target_os = "tvos"),
+        not(target_os = "ios")
+    )
+))]
+use rpu_scenevm::run_app;
+use rpu_scenevm::{RpuSceneApp, RuntimeContext, SceneFrame, register_generated_rgba_texture};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,10 +24,26 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
+#[cfg(any(
+    target_arch = "wasm32",
+    all(
+        not(target_arch = "wasm32"),
+        not(target_os = "tvos"),
+        not(target_os = "ios")
+    )
+))]
 pub fn run(project: RpuProject) -> Result<()> {
     run_app(RuntimeApp::new(project)?)
 }
 
+#[cfg(any(
+    target_arch = "wasm32",
+    all(
+        not(target_arch = "wasm32"),
+        not(target_os = "tvos"),
+        not(target_os = "ios")
+    )
+))]
 pub fn run_bundled(project: BundledProject, asset_base: &str) -> Result<()> {
     run_app(RuntimeApp::new_bundled(project, asset_base)?)
 }
@@ -320,7 +346,11 @@ impl RuntimeSession {
         let compiled = project.compile()?;
         log_compilation("initial compile", &compiled);
         let current_scene = resolve_scene_name(&compiled, compiled.start_scene.as_str());
-        let world = RuntimeWorld::from_compiled_scene(&compiled, &current_scene);
+        let world = RuntimeWorld::from_compiled_scene(
+            &compiled,
+            &current_scene,
+            &project.root().join("assets").display().to_string(),
+        );
         let mut session = Self {
             asset_base: project.root().join("assets").display().to_string(),
             project: Some(project),
@@ -351,7 +381,7 @@ impl RuntimeSession {
         let compiled = project.compile()?;
         log_compilation("initial compile", &compiled);
         let current_scene = resolve_scene_name(&compiled, compiled.start_scene.as_str());
-        let world = RuntimeWorld::from_compiled_scene(&compiled, &current_scene);
+        let world = RuntimeWorld::from_compiled_scene(&compiled, &current_scene, asset_base);
         let mut session = Self {
             project: None,
             compiled,
@@ -547,8 +577,7 @@ impl RuntimeSession {
             return;
         };
 
-        match project.has_source_changes_since(self.compiled.fingerprint.latest_modified)
-        {
+        match project.has_source_changes_since(self.compiled.fingerprint.latest_modified) {
             Ok(true) => match project.compile() {
                 Ok(compiled) => {
                     log_compilation("hot reload", &compiled);
@@ -593,7 +622,11 @@ impl RuntimeSession {
                 continue;
             };
 
-            for handler in script.handlers.iter().filter(|handler| handler.event == event) {
+            for handler in script
+                .handlers
+                .iter()
+                .filter(|handler| handler.event == event)
+            {
                 scheduled.push((
                     entity_index,
                     entity.name.clone(),
@@ -679,7 +712,11 @@ impl RuntimeSession {
     }
 
     fn rebuild_world_for_scene(&mut self, run_ready: bool) {
-        self.world = RuntimeWorld::from_compiled_scene(&self.compiled, &self.current_scene);
+        self.world = RuntimeWorld::from_compiled_scene(
+            &self.compiled,
+            &self.current_scene,
+            &self.asset_base,
+        );
         self.restore_persistent_entity_state();
         self.initialize_script_state_all();
         if run_ready && self.initialized {
@@ -969,14 +1006,15 @@ impl RuntimeSession {
                     );
                     return ExecSignal::Continue;
                 };
-                let instance_name = name.clone().unwrap_or_else(|| self.next_spawn_name(template));
+                let instance_name = name
+                    .clone()
+                    .unwrap_or_else(|| self.next_spawn_name(template));
                 if let Some(spawned_index) = self.world.spawn_from_template(
                     template,
                     &instance_name,
                     [x, y],
                     self.query_state.elapsed_time,
-                )
-                {
+                ) {
                     self.initialize_entity_state(spawned_index);
                     if self.initialized {
                         self.execute_entity_event(spawned_index, "ready", 0.0);
@@ -1328,7 +1366,11 @@ impl RuntimeSession {
             );
             return None;
         };
-        let Some(function) = script.functions.iter().find(|function| function.name == name) else {
+        let Some(function) = script
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+        else {
             eprintln!(
                 "rpu: script warning: missing function `{}` in {}{} for {}:{}",
                 name,
@@ -1428,10 +1470,30 @@ impl RuntimeSession {
         Some(match condition {
             Condition::Compare { left, op, right } => {
                 let left = self
-                    .eval_expr(entity_index, entity_name, script_path, event, line, left, dt, locals, call_depth)?
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        left,
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
                     .as_scalar()?;
                 let right = self
-                    .eval_expr(entity_index, entity_name, script_path, event, line, right, dt, locals, call_depth)?
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        right,
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
                     .as_scalar()?;
                 match op {
                     CompareOp::Less => left < right,
@@ -1523,7 +1585,18 @@ impl RuntimeSession {
                 .cloned()
                 .or_else(|| self.read_state(entity_index, name)),
             Expr::Call(name, args) => self
-                .eval_builtin_query(entity_index, entity_name, script_path, event, line, name, args, dt, locals, call_depth)
+                .eval_builtin_query(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    name,
+                    args,
+                    dt,
+                    locals,
+                    call_depth,
+                )
                 .or_else(|| {
                     self.invoke_function(
                         entity_index,
@@ -1543,10 +1616,30 @@ impl RuntimeSession {
             Expr::Color(color) => Some(Value::Color(*color)),
             Expr::Binary(left, op, right) => {
                 let left = self
-                    .eval_expr(entity_index, entity_name, script_path, event, line, left, dt, locals, call_depth)?
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        left,
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
                     .as_scalar()?;
                 let right = self
-                    .eval_expr(entity_index, entity_name, script_path, event, line, right, dt, locals, call_depth)?
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        right,
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
                     .as_scalar()?;
                 let value = match op {
                     BinaryOp::Add => left + right,
@@ -1558,13 +1651,43 @@ impl RuntimeSession {
             }
             Expr::Clamp(value, min, max) => {
                 let value = self
-                    .eval_expr(entity_index, entity_name, script_path, event, line, value, dt, locals, call_depth)?
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        value,
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
                     .as_scalar()?;
                 let min = self
-                    .eval_expr(entity_index, entity_name, script_path, event, line, min, dt, locals, call_depth)?
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        min,
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
                     .as_scalar()?;
                 let max = self
-                    .eval_expr(entity_index, entity_name, script_path, event, line, max, dt, locals, call_depth)?
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        max,
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
                     .as_scalar()?;
                 Some(Value::Scalar(value.clamp(min.min(max), min.max(max))))
             }
@@ -1585,11 +1708,21 @@ impl RuntimeSession {
         call_depth: usize,
     ) -> Option<Value> {
         match name {
-            "input_left" if args.is_empty() => Some(Value::Scalar(self.query_state.input_left as i32 as f32)),
-            "input_right" if args.is_empty() => Some(Value::Scalar(self.query_state.input_right as i32 as f32)),
-            "input_up" if args.is_empty() => Some(Value::Scalar(self.query_state.input_up as i32 as f32)),
-            "input_down" if args.is_empty() => Some(Value::Scalar(self.query_state.input_down as i32 as f32)),
-            "input_action" if args.is_empty() => Some(Value::Scalar(self.query_state.input_action as i32 as f32)),
+            "input_left" if args.is_empty() => {
+                Some(Value::Scalar(self.query_state.input_left as i32 as f32))
+            }
+            "input_right" if args.is_empty() => {
+                Some(Value::Scalar(self.query_state.input_right as i32 as f32))
+            }
+            "input_up" if args.is_empty() => {
+                Some(Value::Scalar(self.query_state.input_up as i32 as f32))
+            }
+            "input_down" if args.is_empty() => {
+                Some(Value::Scalar(self.query_state.input_down as i32 as f32))
+            }
+            "input_action" if args.is_empty() => {
+                Some(Value::Scalar(self.query_state.input_action as i32 as f32))
+            }
             "exists" if args.len() == 1 => {
                 let name = self.eval_expr(
                     entity_index,
@@ -1603,7 +1736,9 @@ impl RuntimeSession {
                     call_depth,
                 )?;
                 let name = name.as_string()?;
-                Some(Value::Scalar(self.world.find_entity(name).is_some() as i32 as f32))
+                Some(Value::Scalar(
+                    self.world.find_entity(name).is_some() as i32 as f32
+                ))
             }
             "first_overlap" if args.len() == 1 => {
                 let group = self.eval_expr(
@@ -1639,94 +1774,110 @@ impl RuntimeSession {
             "time" if args.is_empty() => Some(Value::Scalar(self.query_state.elapsed_time)),
             "age" if args.is_empty() => {
                 let entity = self.world.entities.get(entity_index)?;
-                Some(Value::Scalar((self.query_state.elapsed_time - entity.spawn_time).max(0.0)))
+                Some(Value::Scalar(
+                    (self.query_state.elapsed_time - entity.spawn_time).max(0.0),
+                ))
             }
             "lerp" if args.len() == 3 => {
-                let a = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[0],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
-                let b = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[1],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
-                let t = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[2],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let a = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
+                let b = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[1],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
+                let t = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[2],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 Some(Value::Scalar(a + (b - a) * t))
             }
             "pulse" if args.len() == 1 => {
-                let period = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[0],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let period = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 let period = period.max(0.001);
                 let phase = (self.query_state.elapsed_time / period) * std::f32::consts::TAU;
                 Some(Value::Scalar(0.5 + 0.5 * phase.sin()))
             }
             "smoothstep" if args.len() == 3 => {
-                let edge0 = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[0],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
-                let edge1 = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[1],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
-                let x = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[2],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let edge0 = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
+                let edge1 = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[1],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
+                let x = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[2],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 let t = if (edge1 - edge0).abs() < f32::EPSILON {
                     0.0
                 } else {
@@ -1749,122 +1900,152 @@ impl RuntimeSession {
                     Value::Color(color) => color,
                     _ => return None,
                 };
-                let alpha = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[1],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let alpha = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[1],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 color[3] = alpha.clamp(0.0, 1.0);
                 Some(Value::Color(color))
             }
             "format_int" if args.len() == 2 => {
-                let value = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[0],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
-                let digits = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[1],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let value = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
+                let digits = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[1],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 let digits = digits.max(1.0).floor() as usize;
                 let value = value.max(0.0).floor() as i32;
                 Some(Value::String(format!("{value:0digits$}")))
             }
             "high_score_name" if args.len() == 1 => {
-                let index = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[0],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let index = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 let index = index.max(1.0).floor() as usize - 1;
                 Some(Value::String(self.high_scores.name_at(index).to_string()))
             }
             "high_score_value" if args.len() == 1 => {
-                let index = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[0],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let index = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 let index = index.max(1.0).floor() as usize - 1;
                 Some(Value::Scalar(self.high_scores.score_at(index) as f32))
             }
-            "difficulty" if args.is_empty() => {
-                Some(Value::Scalar(1.0 + (self.query_state.elapsed_time / 12.0).floor()))
+            "difficulty" if args.is_empty() => Some(Value::Scalar(
+                1.0 + (self.query_state.elapsed_time / 12.0).floor(),
+            )),
+            "screen_width" if args.is_empty() => {
+                Some(Value::Scalar(self.query_state.window_size.0 as f32))
             }
-            "screen_width" if args.is_empty() => Some(Value::Scalar(self.query_state.window_size.0 as f32)),
-            "screen_height" if args.is_empty() => Some(Value::Scalar(self.query_state.window_size.1 as f32)),
+            "screen_height" if args.is_empty() => {
+                Some(Value::Scalar(self.query_state.window_size.1 as f32))
+            }
             "rand" if args.len() == 2 => {
-                let min = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[0],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
-                let max = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[1],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let min = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
+                let max = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[1],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 let key = line
-                    .map(|line| format!("{}:{}:{}:{}:rand", script_path.display(), entity_name, event, line))
-                    .unwrap_or_else(|| format!("{}:{}:{}:rand", script_path.display(), entity_name, event));
+                    .map(|line| {
+                        format!(
+                            "{}:{}:{}:{}:rand",
+                            script_path.display(),
+                            entity_name,
+                            event,
+                            line
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        format!("{}:{}:{}:rand", script_path.display(), entity_name, event)
+                    });
                 Some(Value::Scalar(self.random_between_spread(&key, min, max)))
             }
             "every" if args.len() == 1 || args.len() == 2 => {
-                let min_interval = self.eval_expr(
-                    entity_index,
-                    entity_name,
-                    script_path,
-                    event,
-                    line,
-                    &args[0],
-                    dt,
-                    locals,
-                    call_depth,
-                )?.as_scalar()?;
+                let min_interval = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_scalar()?;
                 let max_interval = if args.len() == 2 {
                     self.eval_expr(
                         entity_index,
@@ -1876,7 +2057,8 @@ impl RuntimeSession {
                         dt,
                         locals,
                         call_depth,
-                    )?.as_scalar()?
+                    )?
+                    .as_scalar()?
                 } else {
                     min_interval
                 };
@@ -1885,7 +2067,13 @@ impl RuntimeSession {
                     return Some(Value::Scalar(0.0));
                 }
                 let line = line?;
-                let key = format!("{}:{}:{}:{}", script_path.display(), entity_name, event, line);
+                let key = format!(
+                    "{}:{}:{}:{}",
+                    script_path.display(),
+                    entity_name,
+                    event,
+                    line
+                );
                 let now = self.query_state.elapsed_time;
                 let ready = match self.every_state.get(&key).copied() {
                     Some(next_fire) if now < next_fire => false,
@@ -2019,7 +2207,7 @@ impl RuntimeSession {
 }
 
 impl RuntimeWorld {
-    fn from_compiled_scene(compiled: &CompiledProject, scene_name: &str) -> Self {
+    fn from_compiled_scene(compiled: &CompiledProject, scene_name: &str, asset_base: &str) -> Self {
         let mut static_draw_commands = Vec::new();
         let mut templates = Vec::new();
         let mut entities = Vec::new();
@@ -2030,7 +2218,7 @@ impl RuntimeWorld {
                     continue;
                 }
                 let scene = apply_scene_layout(scene);
-                static_draw_commands.extend(compile_static_map_commands(&scene.maps));
+                static_draw_commands.extend(compile_static_map_commands(&scene.maps, asset_base));
                 for high_score in &scene.high_scores {
                     if !high_score.visual.visible || high_score.visual.template {
                         continue;
@@ -2150,7 +2338,6 @@ impl RuntimeWorld {
             }
         });
     }
-
 }
 
 impl Value {
@@ -2233,11 +2420,8 @@ impl HighScoreTable {
             name: name.to_string(),
             score: score.max(0),
         });
-        self.entries.sort_by(|a, b| {
-            b.score
-                .cmp(&a.score)
-                .then_with(|| a.name.cmp(&b.name))
-        });
+        self.entries
+            .sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.name.cmp(&b.name)));
         self.entries.truncate(8);
     }
 
@@ -2249,7 +2433,10 @@ impl HighScoreTable {
     }
 
     fn score_at(&self, index: usize) -> i32 {
-        self.entries.get(index).map(|entry| entry.score).unwrap_or(0)
+        self.entries
+            .get(index)
+            .map(|entry| entry.score)
+            .unwrap_or(0)
     }
 }
 
@@ -2415,7 +2602,7 @@ fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
     }
 }
 
-fn compile_static_map_commands(maps: &[AsciiMapNode]) -> Vec<DrawCommand> {
+fn compile_static_map_commands(maps: &[AsciiMapNode], asset_base: &str) -> Vec<DrawCommand> {
     maps.iter()
         .flat_map(|map| {
             let legend: HashMap<char, &MapLegendMeaning> = map
@@ -2424,6 +2611,12 @@ fn compile_static_map_commands(maps: &[AsciiMapNode]) -> Vec<DrawCommand> {
                 .map(|entry| (entry.symbol, &entry.meaning))
                 .collect();
             let classified = map.classify_terrain();
+            let has_terrain = classified.cells.iter().any(|_| true);
+            if has_terrain && !matches!(classified.render, rpu_core::TerrainRenderMode::Debug) {
+                if let Some(command) = generated_terrain_map_command(map, &classified, asset_base) {
+                    return vec![command];
+                }
+            }
             let terrain_cells: HashMap<(usize, usize), _> = classified
                 .cells
                 .iter()
@@ -2482,6 +2675,2415 @@ fn compile_static_map_commands(maps: &[AsciiMapNode]) -> Vec<DrawCommand> {
         .collect()
 }
 
+pub fn render_terrain_map_image(
+    map: &AsciiMapNode,
+    asset_base: &str,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let classified = map.classify_terrain();
+    if classified.width == 0 || classified.height == 0 || classified.cells.is_empty() {
+        return None;
+    }
+    let cell_w = map.cell[0].round().max(1.0) as u32;
+    let cell_h = map.cell[1].round().max(1.0) as u32;
+    rasterize_terrain_map(map, &classified, asset_base, cell_w, cell_h)
+}
+
+pub fn render_terrain_fragment_image(map: &AsciiMapNode) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let classified = map.classify_terrain();
+    if classified.width == 0 || classified.height == 0 || classified.cells.is_empty() {
+        return None;
+    }
+    let cell_w = map.cell[0].round().max(1.0) as u32;
+    let cell_h = map.cell[1].round().max(1.0) as u32;
+    let width = classified.width as u32 * cell_w;
+    let height = classified.height as u32 * cell_h;
+    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
+
+    for cell in &classified.cells {
+        let x0 = cell.col as u32 * cell_w;
+        let y0 = cell.row as u32 * cell_h;
+        for py in 0..cell_h {
+            for px in 0..cell_w {
+                let fragment =
+                    runtime_terrain_fragment_for_pixel(cell, &map.terrain_style, px, py, cell_w);
+                image.put_pixel(
+                    x0 + px,
+                    y0 + py,
+                    runtime_terrain_fragment_debug_color(fragment),
+                );
+            }
+        }
+    }
+
+    Some(image)
+}
+
+fn generated_terrain_map_command(
+    map: &AsciiMapNode,
+    classified: &rpu_core::ClassifiedAsciiMap,
+    asset_base: &str,
+) -> Option<DrawCommand> {
+    let cell_w = map.cell[0].round().max(1.0) as u32;
+    let cell_h = map.cell[1].round().max(1.0) as u32;
+    let image = rasterize_terrain_map(map, classified, asset_base, cell_w, cell_h)?;
+    let key = format!(
+        "generated://terrain/{}:{}:{}x{}",
+        sanitize_generated_key(asset_base),
+        sanitize_generated_key(&map.name),
+        image.width(),
+        image.height()
+    );
+    register_generated_rgba_texture(&key, image.width(), image.height(), image.as_raw());
+    Some(DrawCommand::Sprite(rpu_core::SceneSprite {
+        anchor: Anchor::World,
+        layer: -10,
+        z: -10,
+        x: map.origin[0],
+        y: map.origin[1],
+        width: image.width() as f32,
+        height: image.height() as f32,
+        rotation: 0.0,
+        color: [1.0, 1.0, 1.0, 1.0],
+        textures: vec![key],
+        animation_fps: 0.0,
+        animation_mode: AnimationMode::Loop,
+        destroy_on_animation_end: false,
+        scroll: [0.0, 0.0],
+        repeat_x: false,
+        repeat_y: false,
+        flip_x: false,
+        flip_y: false,
+        visible: true,
+    }))
+}
+
+fn sanitize_generated_key(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect()
+}
+
+fn rasterize_terrain_map(
+    map: &AsciiMapNode,
+    classified: &rpu_core::ClassifiedAsciiMap,
+    asset_base: &str,
+    cell_w: u32,
+    cell_h: u32,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    if classified.width == 0 || classified.height == 0 {
+        return None;
+    }
+    let width = classified.width as u32 * cell_w;
+    let height = classified.height as u32 * cell_h;
+    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([0, 0, 0, 0]));
+    let use_synth = matches!(classified.render, rpu_core::TerrainRenderMode::Synth);
+    let material_fields = runtime_build_material_fields(asset_base, classified, use_synth);
+    let region_body_fields =
+        runtime_build_region_body_fields(asset_base, classified, cell_w, cell_h, use_synth);
+    let strip_fields =
+        runtime_build_surface_strip_fields(asset_base, classified, cell_w, use_synth);
+    let region_lookup: HashMap<usize, &rpu_core::TerrainRegion> = classified
+        .regions
+        .iter()
+        .map(|region| (region.id, region))
+        .collect();
+
+    for cell in &classified.cells {
+        let Some(region) = region_lookup.get(&cell.region_id).copied() else {
+            continue;
+        };
+        let x0 = cell.col as u32 * cell_w;
+        let y0 = cell.row as u32 * cell_h;
+        for py in 0..cell_h {
+            for px in 0..cell_w {
+                let color = rasterize_terrain_pixel(
+                    &material_fields,
+                    &region_body_fields,
+                    &strip_fields,
+                    &map.terrain_style,
+                    cell,
+                    region,
+                    px,
+                    py,
+                    cell_w,
+                    use_synth,
+                );
+                image.put_pixel(x0 + px, y0 + py, color);
+            }
+        }
+    }
+
+    let _ = map;
+    Some(image)
+}
+
+fn rasterize_terrain_pixel(
+    material_fields: &HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    region_body_fields: &HashMap<(usize, String), ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    strip_fields: &HashMap<usize, RegionSurfaceStrips>,
+    style: &rpu_core::TerrainStyleSettings,
+    cell: &rpu_core::ClassifiedMapCell,
+    region: &rpu_core::TerrainRegion,
+    px: u32,
+    py: u32,
+    tile: u32,
+    use_synth_variation: bool,
+) -> Rgba<u8> {
+    let (u, v) = runtime_region_space_projection_for_cell(cell, region, style, px, py, tile);
+    let fragment = runtime_terrain_fragment_for_pixel(cell, style, px, py, tile);
+    if matches!(fragment, TerrainPixelFragment::Empty) {
+        return rgba([0, 0, 0, 0]);
+    }
+    let local_inward = runtime_pixel_local_inward(cell, style, px, py, tile);
+    let top_material = runtime_top_material_for_stack(&cell.material_key);
+    let body_material = runtime_body_material_for_cell(cell);
+    let body = runtime_sample_body_material(
+        material_fields,
+        region_body_fields,
+        body_material,
+        cell,
+        region,
+        u,
+        v,
+        use_synth_variation,
+    );
+    if matches!(
+        fragment,
+        TerrainPixelFragment::FlatCap
+            | TerrainPixelFragment::RampCap
+            | TerrainPixelFragment::JoinCap
+    ) {
+        let cap_depth = runtime_cap_depth_for_cell(cell, style, tile);
+        let top = if let Some(strips) = strip_fields.get(&cell.region_id) {
+            runtime_sample_surface_strip_pixel(
+                strips,
+                cell,
+                px,
+                local_inward,
+                cap_depth,
+                tile,
+                use_synth_variation,
+            )
+        } else {
+            runtime_sample_top_material(material_fields, top_material, u, local_inward, cap_depth)
+        };
+        return runtime_alpha_over(top, body);
+    }
+    body
+}
+
+#[derive(Clone, Copy)]
+enum TerrainPixelFragment {
+    Empty,
+    Body,
+    FlatCap,
+    RampCap,
+    JoinCap,
+}
+
+fn runtime_terrain_fragment_for_pixel(
+    cell: &rpu_core::ClassifiedMapCell,
+    style: &rpu_core::TerrainStyleSettings,
+    px: u32,
+    py: u32,
+    tile: u32,
+) -> TerrainPixelFragment {
+    let surface_y = runtime_surface_height_for_cell(cell, style, px, tile);
+    if py < surface_y {
+        return TerrainPixelFragment::Empty;
+    }
+    let top_material = runtime_top_material_for_stack(&cell.material_key);
+    let is_surface_cell = cell.material == top_material
+        && matches!(
+            cell.normal,
+            rpu_core::TerrainNormal::Up
+                | rpu_core::TerrainNormal::UpLeft
+                | rpu_core::TerrainNormal::UpRight
+        );
+    if !is_surface_cell {
+        return TerrainPixelFragment::Body;
+    }
+    let local_inward = py - surface_y;
+    if local_inward >= runtime_cap_depth_for_cell(cell, style, tile) {
+        return TerrainPixelFragment::Body;
+    }
+    match (cell.contour, cell.transition_role) {
+        (rpu_core::TerrainContour::RampUpLeft, _)
+        | (rpu_core::TerrainContour::RampUpRight, _)
+        | (_, rpu_core::TerrainTransitionRole::RampUpLeft)
+        | (_, rpu_core::TerrainTransitionRole::RampUpRight) => TerrainPixelFragment::RampCap,
+        (_, rpu_core::TerrainTransitionRole::JoinFromLeft)
+        | (_, rpu_core::TerrainTransitionRole::JoinFromRight)
+        | (_, rpu_core::TerrainTransitionRole::JoinBoth) => TerrainPixelFragment::JoinCap,
+        _ => TerrainPixelFragment::FlatCap,
+    }
+}
+
+fn runtime_pixel_local_inward(
+    cell: &rpu_core::ClassifiedMapCell,
+    style: &rpu_core::TerrainStyleSettings,
+    px: u32,
+    py: u32,
+    tile: u32,
+) -> u32 {
+    py.saturating_sub(runtime_surface_height_for_cell(cell, style, px, tile))
+}
+
+fn runtime_terrain_fragment_debug_color(fragment: TerrainPixelFragment) -> Rgba<u8> {
+    match fragment {
+        TerrainPixelFragment::Empty => rgba([14, 18, 24, 255]),
+        TerrainPixelFragment::Body => rgba([132, 86, 54, 255]),
+        TerrainPixelFragment::FlatCap => rgba([68, 221, 87, 255]),
+        TerrainPixelFragment::RampCap => rgba([58, 196, 222, 255]),
+        TerrainPixelFragment::JoinCap => rgba([245, 206, 74, 255]),
+    }
+}
+
+fn runtime_sample_body_material(
+    material_fields: &HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    region_body_fields: &HashMap<(usize, String), ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    material: &str,
+    cell: &rpu_core::ClassifiedMapCell,
+    region: &rpu_core::TerrainRegion,
+    u: u32,
+    v: u32,
+    use_synth_variation: bool,
+) -> Rgba<u8> {
+    let base = runtime_sample_region_or_material_field(
+        material_fields,
+        region_body_fields,
+        region.id,
+        material,
+        cell,
+        region,
+        u,
+        v,
+    );
+    if !use_synth_variation {
+        return base;
+    }
+
+    // Break up the straight vertical wallpaper effect while staying continuous in region space.
+    let seed = runtime_hash_material_seed(
+        material,
+        region.id as u32,
+        (region.min_col as u32)
+            .wrapping_mul(31)
+            .wrapping_add(region.min_row as u32),
+    );
+    let skew_u = u
+        .wrapping_add(v / 3)
+        .wrapping_add((seed & 31) * 3)
+        .wrapping_add(cell.surface_u * 2);
+    let skew_v = v
+        .wrapping_add(u / 7)
+        .wrapping_add(((seed >> 5) & 31) * 2)
+        .wrapping_add(cell.boundary_distance * 3);
+    let detail = runtime_sample_region_or_material_field(
+        material_fields,
+        region_body_fields,
+        region.id,
+        material,
+        cell,
+        region,
+        skew_u,
+        skew_v,
+    );
+
+    let cross_u = u.wrapping_add(v / 5).wrapping_add(((seed >> 10) & 15) * 5);
+    let cross_v = v.wrapping_add(u / 11).wrapping_add(((seed >> 14) & 15) * 4);
+    let cross = runtime_sample_region_or_material_field(
+        material_fields,
+        region_body_fields,
+        region.id,
+        material,
+        cell,
+        region,
+        cross_u,
+        cross_v,
+    );
+
+    let rotated_u = v.wrapping_add(u / 4).wrapping_add(((seed >> 19) & 15) * 7);
+    let rotated_v = u.wrapping_add(v / 9).wrapping_add(((seed >> 23) & 15) * 6);
+    let rotated = runtime_sample_region_or_material_field(
+        material_fields,
+        region_body_fields,
+        region.id,
+        material,
+        cell,
+        region,
+        rotated_u,
+        rotated_v,
+    );
+
+    let mixed = runtime_lerp_rgba(base, detail, 110);
+    let mixed = runtime_lerp_rgba(mixed, cross, 72);
+    let mut mixed = runtime_lerp_rgba(mixed, rotated, 84);
+
+    let deep_material = runtime_deep_material_for_stack(&cell.material_key);
+    if deep_material != material
+        && matches!(
+            cell.depth_band,
+            rpu_core::TerrainDepthBand::Interior | rpu_core::TerrainDepthBand::DeepInterior
+        )
+    {
+        let deep = runtime_sample_region_or_material_field(
+            material_fields,
+            region_body_fields,
+            region.id,
+            deep_material,
+            cell,
+            region,
+            rotated_u.wrapping_add(v / 6),
+            rotated_v.wrapping_add(u / 8),
+        );
+        if matches!(cell.depth_band, rpu_core::TerrainDepthBand::DeepInterior) {
+            return deep;
+        }
+        let max_depth = region.max_boundary_distance.max(1);
+        let depth_ratio = ((cell.boundary_distance.min(max_depth) * 255) / max_depth) as u8;
+        let depth_blend = match cell.depth_band {
+            rpu_core::TerrainDepthBand::Interior => depth_ratio.saturating_add(32).max(128),
+            rpu_core::TerrainDepthBand::DeepInterior => 255,
+            _ => 0,
+        };
+        mixed = runtime_lerp_rgba(mixed, deep, depth_blend);
+    }
+
+    mixed
+}
+
+fn runtime_sample_region_or_material_field(
+    material_fields: &HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    region_body_fields: &HashMap<(usize, String), ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    region_id: usize,
+    material: &str,
+    _cell: &rpu_core::ClassifiedMapCell,
+    _region: &rpu_core::TerrainRegion,
+    u: u32,
+    v: u32,
+) -> Rgba<u8> {
+    if let Some(image) = region_body_fields.get(&(region_id, material.to_string())) {
+        let x = u % image.width().max(1);
+        let y = v % image.height().max(1);
+        return *image.get_pixel(x, y);
+    }
+    runtime_sample_material_field(material_fields, material, u, v)
+}
+
+struct RegionSurfaceStrips {
+    flat: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    join: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    join_left: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    join_right: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ramp_left: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ramp_right: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    solved: ImageBuffer<Rgba<u8>, Vec<u8>>,
+}
+
+fn runtime_build_material_fields(
+    asset_base: &str,
+    classified: &rpu_core::ClassifiedAsciiMap,
+    use_synth_fields: bool,
+) -> HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let mut fields = HashMap::new();
+    let materials: std::collections::HashSet<_> = classified
+        .cells
+        .iter()
+        .flat_map(|cell| {
+            cell.material_key
+                .split('>')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for material in materials {
+        let source = runtime_load_material_source(asset_base, &material)
+            .unwrap_or_else(|| runtime_builtin_material_image(&material));
+        let image = if use_synth_fields {
+            runtime_wfc_material_field(&material, &source)
+                .unwrap_or_else(|| runtime_quilt_material_field(&material, &source))
+        } else {
+            source
+        };
+        fields.insert(material, image);
+    }
+    fields
+}
+
+fn runtime_build_region_body_fields(
+    asset_base: &str,
+    classified: &rpu_core::ClassifiedAsciiMap,
+    tile_w: u32,
+    tile_h: u32,
+    use_synth_fields: bool,
+) -> HashMap<(usize, String), ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let mut fields = HashMap::new();
+    let cells_by_region: HashMap<usize, &rpu_core::ClassifiedMapCell> = classified
+        .cells
+        .iter()
+        .map(|cell| (cell.region_id, cell))
+        .collect();
+
+    for region in &classified.regions {
+        let Some(cell) = cells_by_region.get(&region.id).copied() else {
+            continue;
+        };
+        let stack_materials: std::collections::HashSet<String> = cell
+            .material_key
+            .split('>')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        for material in stack_materials {
+            let source = runtime_load_material_source(asset_base, &material)
+                .unwrap_or_else(|| runtime_builtin_material_image(&material));
+            let width = ((region.max_col.saturating_sub(region.min_col) + 1) as u32)
+                .saturating_mul(tile_w)
+                .max(source.width());
+            let height = ((region.max_row.saturating_sub(region.min_row) + 1) as u32)
+                .saturating_mul(tile_h)
+                .max(source.height());
+            let image = if use_synth_fields {
+                let solve_width = width.min(96).max(source.width());
+                let solve_height = height.min(96).max(source.height());
+                runtime_wfc_source_field(
+                    &format!("{}:region_body:{}", material, region.id),
+                    &source,
+                    solve_width,
+                    solve_height,
+                    1,
+                )
+                .map(|solved| {
+                    runtime_quilt_image_to_size(
+                        &format!("{}:region_body_expand:{}", material, region.id),
+                        &solved,
+                        width,
+                        height,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    runtime_quilt_image_to_size(
+                        &format!("{}:region_body:{}", material, region.id),
+                        &source,
+                        width,
+                        height,
+                    )
+                })
+            } else {
+                runtime_quilt_image_to_size(
+                    &format!("{}:region_body:{}", material, region.id),
+                    &source,
+                    width,
+                    height,
+                )
+            };
+            fields.insert((region.id, material), image);
+        }
+    }
+
+    fields
+}
+
+fn runtime_build_surface_strip_fields(
+    asset_base: &str,
+    classified: &rpu_core::ClassifiedAsciiMap,
+    tile: u32,
+    use_synth_solve: bool,
+) -> HashMap<usize, RegionSurfaceStrips> {
+    let mut fields = HashMap::new();
+    let cells_by_region: HashMap<usize, &rpu_core::ClassifiedMapCell> = classified
+        .cells
+        .iter()
+        .map(|cell| (cell.region_id, cell))
+        .collect();
+
+    for region in &classified.regions {
+        let Some(cell) = cells_by_region.get(&region.id).copied() else {
+            continue;
+        };
+        let source = runtime_build_surface_strip_source(asset_base, &cell.material_key);
+        let ramp_left_source = runtime_build_ramp_strip_source(&source, -1);
+        let ramp_right_source = runtime_build_ramp_strip_source(&source, 1);
+        let width = (region.boundary_loop.len().max(1) as u32)
+            .saturating_mul(tile)
+            .max(source.width());
+        let flat =
+            runtime_solve_surface_strip_1d(&format!("{}:flat", &cell.material_key), &source, width)
+                .unwrap_or_else(|| {
+                    runtime_quilt_surface_strip_horizontally(
+                        &format!("{}:flat", &cell.material_key),
+                        &source,
+                        width,
+                    )
+                });
+        let (join_left_source, join_right_source, join_source) =
+            runtime_build_join_strip_sources(&source, &ramp_left_source, &ramp_right_source);
+        let join_left = runtime_solve_surface_strip_1d(
+            &format!("{}:join_left", &cell.material_key),
+            &join_left_source,
+            width,
+        )
+        .unwrap_or_else(|| {
+            runtime_quilt_surface_strip_horizontally(
+                &format!("{}:join_left", &cell.material_key),
+                &join_left_source,
+                width,
+            )
+        });
+        let join_right = runtime_solve_surface_strip_1d(
+            &format!("{}:join_right", &cell.material_key),
+            &join_right_source,
+            width,
+        )
+        .unwrap_or_else(|| {
+            runtime_quilt_surface_strip_horizontally(
+                &format!("{}:join_right", &cell.material_key),
+                &join_right_source,
+                width,
+            )
+        });
+        let join = runtime_solve_surface_strip_1d(
+            &format!("{}:join", &cell.material_key),
+            &join_source,
+            width,
+        )
+        .unwrap_or_else(|| {
+            runtime_quilt_surface_strip_horizontally(
+                &format!("{}:join", &cell.material_key),
+                &join_source,
+                width,
+            )
+        });
+        let ramp_left = runtime_tile_surface_strip_horizontally(&ramp_left_source, width);
+        let ramp_right = runtime_tile_surface_strip_horizontally(&ramp_right_source, width);
+        let solved = if use_synth_solve {
+            runtime_solve_state_constrained_surface_strip_2d(
+                &format!("{}:surface", &cell.material_key),
+                region,
+                classified,
+                tile,
+                &flat,
+                &join,
+                &ramp_right,
+            )
+            .unwrap_or_else(|| flat.clone())
+        } else {
+            flat.clone()
+        };
+        fields.insert(
+            region.id,
+            RegionSurfaceStrips {
+                flat,
+                join,
+                join_left,
+                join_right,
+                ramp_left,
+                ramp_right,
+                solved,
+            },
+        );
+    }
+
+    fields
+}
+
+fn runtime_build_surface_strip_source(
+    asset_base: &str,
+    stack_key: &str,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let materials = stack_key
+        .split('>')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let top = materials.first().copied().unwrap_or("rock");
+    let body = materials.get(1).copied().unwrap_or(top);
+
+    let top_source = runtime_load_material_source(asset_base, top)
+        .unwrap_or_else(|| runtime_builtin_material_image(top));
+    let body_source = runtime_load_material_source(asset_base, body)
+        .unwrap_or_else(|| runtime_builtin_material_image(body));
+
+    let width = top_source.width().max(body_source.width()).max(1);
+    let top_h = if top == "grass" {
+        (top_source.height().max(1) / 2).max(1)
+    } else {
+        top_source.height().max(1)
+    };
+    let body_h = body_source.height().max(1);
+    let body_sample_h = (body_h / 2).max(1);
+    let height = top_h + body_sample_h;
+    let mut image = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
+
+    for y in 0..top_h {
+        for x in 0..width {
+            let sy = if top == "grass" && top_source.height() > top_h {
+                top_source.height() - top_h + y
+            } else {
+                y % top_source.height().max(1)
+            };
+            let p = *top_source.get_pixel(x % top_source.width().max(1), sy);
+            image.put_pixel(x, y, p);
+        }
+    }
+    for y in 0..body_sample_h {
+        for x in 0..width {
+            let sy = (body_source.height().saturating_sub(body_sample_h) + y)
+                % body_source.height().max(1);
+            let p = *body_source.get_pixel(x % body_source.width().max(1), sy);
+            image.put_pixel(x, top_h + y, p);
+        }
+    }
+
+    image
+}
+
+fn runtime_build_join_strip_sources(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ramp_left_source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ramp_right_source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+) -> (
+    ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ImageBuffer<Rgba<u8>, Vec<u8>>,
+) {
+    let width = source.width().max(1);
+    let height = source.height().max(1);
+    let mut left = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
+    let mut right = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
+    let mut center = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
+    for y in 0..height {
+        for x in 0..width {
+            let flat = *source.get_pixel(x % width, y % height);
+            let x_t = x as f32 / width.saturating_sub(1).max(1) as f32;
+            let y_t = y as f32 / height.saturating_sub(1).max(1) as f32;
+
+            let left_depth_shift = ((1.0 - x_t) * y_t * height as f32 * 0.55).round() as u32;
+            let right_depth_shift = (x_t * y_t * height as f32 * 0.55).round() as u32;
+            let left_ramp_y = (y + left_depth_shift).min(height.saturating_sub(1));
+            let right_ramp_y = (y + right_depth_shift).min(height.saturating_sub(1));
+            let left_ramp = *ramp_left_source.get_pixel(x % width, left_ramp_y);
+            let right_ramp = *ramp_right_source.get_pixel(x % width, right_ramp_y);
+
+            let left_weight = ((1.0 - x_t).powf(1.35) * 255.0).round() as u8;
+            let right_weight = (x_t.powf(1.35) * 255.0).round() as u8;
+            let left_px = runtime_lerp_rgba(flat, left_ramp, left_weight);
+            let right_px = runtime_lerp_rgba(flat, right_ramp, right_weight);
+            let center_px = runtime_lerp_rgba(left_px, right_px, 128);
+            left.put_pixel(x, y, left_px);
+            right.put_pixel(x, y, right_px);
+            center.put_pixel(x, y, center_px);
+        }
+    }
+    (left, right, center)
+}
+
+fn runtime_build_ramp_strip_source(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    direction: i32,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let width = source.width().max(1);
+    let height = source.height().max(1);
+    let mut image = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
+    for y in 0..height {
+        let t = y as f32 / (height.saturating_sub(1).max(1)) as f32;
+        let shift = (t * (width as f32 * 0.35)).round() as u32;
+        for x in 0..width {
+            let src_x = if direction < 0 {
+                x.wrapping_add(width).wrapping_sub(shift % width) % width
+            } else {
+                (x + shift) % width
+            };
+            let base = *source.get_pixel(src_x, y);
+            let next_x = if direction < 0 {
+                src_x.wrapping_add(width).wrapping_sub(1) % width
+            } else {
+                (src_x + 1) % width
+            };
+            let next = *source.get_pixel(next_x, y);
+            let blended = runtime_lerp_rgba(base, next, (t * 160.0).round() as u8);
+            image.put_pixel(x, y, blended);
+        }
+    }
+    image
+}
+
+fn runtime_load_material_source(
+    asset_base: &str,
+    material: &str,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let base = Path::new(asset_base);
+    let candidates = [
+        base.join(format!("{material}.png")),
+        base.join("terrain").join(format!("{material}.png")),
+        base.join(format!("terrain_{material}.png")),
+    ];
+    for candidate in candidates {
+        if !candidate.exists() {
+            continue;
+        }
+        if let Ok(image) = image::open(&candidate) {
+            return Some(image.to_rgba8());
+        }
+    }
+    None
+}
+
+fn runtime_sample_material_field(
+    material_fields: &HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    material: &str,
+    u: u32,
+    v: u32,
+) -> Rgba<u8> {
+    if let Some(image) = material_fields.get(material) {
+        let x = u % image.width().max(1);
+        let y = v % image.height().max(1);
+        return *image.get_pixel(x, y);
+    }
+    runtime_sample_material_exemplar(material, u, v)
+}
+
+fn runtime_sample_top_material(
+    material_fields: &HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
+    material: &str,
+    u: u32,
+    local_inward: u32,
+    cap_depth: u32,
+) -> Rgba<u8> {
+    let source_h = material_fields
+        .get(material)
+        .map(|image| image.height().max(1))
+        .unwrap_or(16);
+    let sampled_h = if material == "grass" {
+        (source_h / 2).max(1)
+    } else {
+        source_h
+    };
+    let sampled_offset = if material == "grass" && source_h > sampled_h {
+        source_h - sampled_h
+    } else {
+        0
+    };
+    let cap_v = if cap_depth <= 1 {
+        0
+    } else {
+        sampled_offset
+            + (local_inward.saturating_mul(sampled_h.saturating_sub(1)))
+                / cap_depth.saturating_sub(1)
+    };
+    runtime_sample_material_field(material_fields, material, u, cap_v)
+}
+
+fn runtime_sample_surface_strip_pixel(
+    strips: &RegionSurfaceStrips,
+    cell: &rpu_core::ClassifiedMapCell,
+    px: u32,
+    local_inward: u32,
+    cap_depth: u32,
+    tile: u32,
+    use_synth_variation: bool,
+) -> Rgba<u8> {
+    let (sample_px, sample_inward) = runtime_cap_sample_coords(cell, px, local_inward, tile);
+    let solved_u = runtime_surface_strip_u_for_cell(cell, sample_px, sample_inward, tile);
+    let solved_v = runtime_cap_sample_v(&strips.solved, sample_inward, cap_depth);
+    let solved = runtime_sample_stack_field(&strips.solved, solved_u, solved_v);
+    let flat = runtime_sample_stack_field(&strips.flat, solved_u, solved_v);
+    let join = runtime_sample_stack_field(&strips.join, solved_u, solved_v);
+    let join_left = runtime_sample_stack_field(&strips.join_left, solved_u, solved_v);
+    let join_right = runtime_sample_stack_field(&strips.join_right, solved_u, solved_v);
+    let ramp_left = runtime_sample_stack_field(&strips.ramp_left, solved_u, solved_v);
+    let ramp_right = runtime_sample_stack_field(&strips.ramp_right, solved_u, solved_v);
+    let anchored = match (cell.contour, cell.transition_role) {
+        (rpu_core::TerrainContour::RampUpRight, _) => {
+            let t = (px.saturating_mul(255) / tile.saturating_sub(1).max(1)) as u8;
+            runtime_lerp_rgba(ramp_right, join_right, t)
+        }
+        (rpu_core::TerrainContour::RampUpLeft, _) => {
+            let t = ((tile.saturating_sub(1).saturating_sub(px)).saturating_mul(255)
+                / tile.saturating_sub(1).max(1)) as u8;
+            runtime_lerp_rgba(ramp_left, join_left, t)
+        }
+        (_, rpu_core::TerrainTransitionRole::JoinFromLeft) => {
+            let t = ((tile.saturating_sub(1).saturating_sub(px)).saturating_mul(255)
+                / tile.saturating_sub(1).max(1)) as u8;
+            runtime_lerp_rgba(flat, join_left, t)
+        }
+        (_, rpu_core::TerrainTransitionRole::JoinFromRight) => {
+            let t = (px.saturating_mul(255) / tile.saturating_sub(1).max(1)) as u8;
+            runtime_lerp_rgba(flat, join_right, t)
+        }
+        (_, rpu_core::TerrainTransitionRole::JoinBoth) => {
+            let center = tile.saturating_sub(1) as f32 * 0.5;
+            let distance = ((px as f32 - center).abs() / center.max(1.0)).clamp(0.0, 1.0);
+            let t = ((1.0 - distance) * 255.0).round() as u8;
+            runtime_lerp_rgba(flat, join, t)
+        }
+        _ => flat,
+    };
+
+    let blend = match (cell.contour, cell.transition_role) {
+        (rpu_core::TerrainContour::RampUpLeft, _) | (rpu_core::TerrainContour::RampUpRight, _) => {
+            72
+        }
+        (_, rpu_core::TerrainTransitionRole::JoinFromLeft)
+        | (_, rpu_core::TerrainTransitionRole::JoinFromRight)
+        | (_, rpu_core::TerrainTransitionRole::JoinBoth) => 96,
+        _ => 168,
+    };
+    if use_synth_variation {
+        runtime_lerp_rgba(anchored, solved, blend)
+    } else {
+        anchored
+    }
+}
+
+fn runtime_cap_sample_coords(
+    cell: &rpu_core::ClassifiedMapCell,
+    px: u32,
+    local_inward: u32,
+    tile: u32,
+) -> (u32, u32) {
+    let max = tile.saturating_sub(1).max(1);
+    match cell.contour {
+        rpu_core::TerrainContour::RampUpRight => {
+            let along = ((px + max.saturating_sub(local_inward.min(max))) / 2).min(max);
+            (along, local_inward)
+        }
+        rpu_core::TerrainContour::RampUpLeft => {
+            let along =
+                ((max.saturating_sub(px) + max.saturating_sub(local_inward.min(max))) / 2).min(max);
+            (max.saturating_sub(along), local_inward)
+        }
+        _ => (px, local_inward),
+    }
+}
+
+fn runtime_cap_sample_v(
+    image: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    local_inward: u32,
+    cap_depth: u32,
+) -> u32 {
+    if cap_depth <= 1 {
+        0
+    } else {
+        (local_inward.saturating_mul(image.height().saturating_sub(1)))
+            / cap_depth.saturating_sub(1)
+    }
+}
+
+fn runtime_surface_strip_u_for_cell(
+    cell: &rpu_core::ClassifiedMapCell,
+    px: u32,
+    local_inward: u32,
+    tile: u32,
+) -> u32 {
+    let along = runtime_along_surface_projection(cell.tangent, px, local_inward, tile);
+    let base = cell.surface_u.saturating_mul(tile).saturating_add(along);
+    let skew = match cell.contour {
+        rpu_core::TerrainContour::RampUpRight => local_inward,
+        rpu_core::TerrainContour::RampUpLeft => tile.saturating_sub(1).saturating_sub(local_inward),
+        rpu_core::TerrainContour::FlatTop => match cell.transition_role {
+            rpu_core::TerrainTransitionRole::JoinFromLeft => local_inward.saturating_mul(3) / 4,
+            rpu_core::TerrainTransitionRole::JoinFromRight => tile
+                .saturating_sub(1)
+                .saturating_sub(local_inward.saturating_mul(3) / 4),
+            rpu_core::TerrainTransitionRole::JoinBoth => tile / 2,
+            _ => 0,
+        },
+        _ => 0,
+    };
+    match (cell.contour, cell.transition_role) {
+        (rpu_core::TerrainContour::RampUpLeft, _)
+        | (rpu_core::TerrainContour::FlatTop, rpu_core::TerrainTransitionRole::JoinFromRight) => {
+            base.saturating_sub(tile.saturating_sub(1).saturating_sub(skew))
+        }
+        _ => base.saturating_add(skew),
+    }
+}
+
+fn runtime_sample_stack_field(field: &ImageBuffer<Rgba<u8>, Vec<u8>>, u: u32, v: u32) -> Rgba<u8> {
+    let x = u % field.width().max(1);
+    let y = v % field.height().max(1);
+    *field.get_pixel(x, y)
+}
+
+fn runtime_top_material_for_stack(stack_key: &str) -> &str {
+    stack_key
+        .split('>')
+        .map(str::trim)
+        .find(|part| !part.is_empty())
+        .unwrap_or("rock")
+}
+
+fn runtime_body_material_for_cell<'a>(cell: &'a rpu_core::ClassifiedMapCell) -> &'a str {
+    let stack = cell
+        .material_key
+        .split('>')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if stack.is_empty() {
+        return "rock";
+    }
+    if stack.len() == 1 {
+        return stack[0];
+    }
+    let top = stack[0];
+    if cell.material == top {
+        stack.get(1).copied().unwrap_or(top)
+    } else {
+        cell.material.as_str()
+    }
+}
+
+fn runtime_deep_material_for_stack(stack_key: &str) -> &str {
+    stack_key
+        .split('>')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .last()
+        .unwrap_or("rock")
+}
+
+fn runtime_cap_depth_for_cell(
+    cell: &rpu_core::ClassifiedMapCell,
+    style: &rpu_core::TerrainStyleSettings,
+    tile: u32,
+) -> u32 {
+    let (depth, min_depth) = match (cell.contour, cell.transition_role) {
+        (rpu_core::TerrainContour::RampUpLeft, _) | (rpu_core::TerrainContour::RampUpRight, _) => {
+            (style.ramp_cap_depth, 6)
+        }
+        (_, rpu_core::TerrainTransitionRole::JoinFromLeft)
+        | (_, rpu_core::TerrainTransitionRole::JoinFromRight)
+        | (_, rpu_core::TerrainTransitionRole::JoinBoth) => (style.join_cap_depth, 8),
+        _ => (style.cap_depth, 8),
+    };
+    let base = ((tile as f32) * depth).round() as u32;
+    let cap_variation = (cell.surface_u % 5) as i32 - 2;
+    (base as i32 + cap_variation).max(min_depth) as u32
+}
+
+fn runtime_surface_height_for_cell(
+    cell: &rpu_core::ClassifiedMapCell,
+    style: &rpu_core::TerrainStyleSettings,
+    px: u32,
+    tile: u32,
+) -> u32 {
+    let max = tile.saturating_sub(1).max(1);
+    let x = px.min(max);
+    let flat = 0u32;
+    let ramp = match cell.contour {
+        rpu_core::TerrainContour::RampUpRight => max.saturating_sub(x),
+        rpu_core::TerrainContour::RampUpLeft => x,
+        rpu_core::TerrainContour::CapLeft => x / 2,
+        rpu_core::TerrainContour::CapRight => max.saturating_sub(x) / 2,
+        rpu_core::TerrainContour::FlatTop | rpu_core::TerrainContour::None => 0,
+    };
+
+    let base = match cell.transition_role {
+        rpu_core::TerrainTransitionRole::RampUpRight
+        | rpu_core::TerrainTransitionRole::RampUpLeft => ramp,
+        rpu_core::TerrainTransitionRole::JoinFromLeft => {
+            runtime_shoulder_height(max.saturating_sub(x), max, style)
+        }
+        rpu_core::TerrainTransitionRole::JoinFromRight => runtime_shoulder_height(x, max, style),
+        rpu_core::TerrainTransitionRole::JoinBoth => {
+            runtime_shoulder_height(x.min(max.saturating_sub(x)), max / 2, style)
+        }
+        rpu_core::TerrainTransitionRole::None => flat,
+    };
+    let roughness = runtime_surface_profile_offset(cell, style, px, tile);
+    base.saturating_add(roughness).min(max)
+}
+
+fn runtime_shoulder_height(raw: u32, max: u32, style: &rpu_core::TerrainStyleSettings) -> u32 {
+    let width = style.shoulder_width.clamp(0.0, 1.0);
+    if width <= f32::EPSILON {
+        return 0;
+    }
+    let scaled_max = ((max as f32) * width).round().max(1.0);
+    let t = (raw as f32 / scaled_max).clamp(0.0, 1.0);
+    let shaped = match style.shoulder_shape {
+        rpu_core::TerrainShoulderShape::Linear => t,
+        rpu_core::TerrainShoulderShape::Bend => t * t * (3.0 - 2.0 * t),
+    };
+    (shaped * max as f32).round().clamp(0.0, max as f32) as u32
+}
+
+fn runtime_surface_profile_offset(
+    cell: &rpu_core::ClassifiedMapCell,
+    style: &rpu_core::TerrainStyleSettings,
+    px: u32,
+    tile: u32,
+) -> u32 {
+    if style.surface_roughness <= f32::EPSILON {
+        return 0;
+    }
+    if !matches!(
+        cell.contour,
+        rpu_core::TerrainContour::FlatTop
+            | rpu_core::TerrainContour::RampUpLeft
+            | rpu_core::TerrainContour::RampUpRight
+    ) {
+        return 0;
+    }
+
+    let max = tile.saturating_sub(1).max(1);
+    let x = px.min(max);
+    let edge_fade = match cell.contour {
+        rpu_core::TerrainContour::RampUpLeft | rpu_core::TerrainContour::RampUpRight => {
+            let edge = x.min(max.saturating_sub(x)) as f32 / (tile as f32 * 0.18).max(1.0);
+            edge.clamp(0.0, 1.0)
+        }
+        _ => 1.0,
+    };
+    let amplitude = (tile as f32 * style.surface_roughness)
+        .round()
+        .clamp(0.0, 8.0);
+    if amplitude <= 0.0 || edge_fade <= 0.0 {
+        return 0;
+    }
+
+    let world_x = (cell.col as u32).saturating_mul(tile).saturating_add(x);
+    let period = (tile / 5).max(5);
+    let a = runtime_surface_noise_value(world_x / period, cell.region_id as u32);
+    let b = runtime_surface_noise_value(world_x / period + 1, cell.region_id as u32);
+    let t = (world_x % period) as f32 / period as f32;
+    let smooth_t = t * t * (3.0 - 2.0 * t);
+    let noise = a * (1.0 - smooth_t) + b * smooth_t;
+    (noise.max(0.0) * amplitude * edge_fade).round() as u32
+}
+
+fn runtime_surface_noise_value(x: u32, seed: u32) -> f32 {
+    let mut n = x
+        .wrapping_mul(0x9e37_79b1)
+        .wrapping_add(seed.wrapping_mul(0x85eb_ca6b));
+    n ^= n >> 16;
+    n = n.wrapping_mul(0x7feb_352d);
+    n ^= n >> 15;
+    n = n.wrapping_mul(0x846c_a68b);
+    n ^= n >> 16;
+    (n as f32 / u32::MAX as f32) * 2.0 - 1.0
+}
+
+fn runtime_region_space_projection_for_cell(
+    cell: &rpu_core::ClassifiedMapCell,
+    region: &rpu_core::TerrainRegion,
+    style: &rpu_core::TerrainStyleSettings,
+    px: u32,
+    py: u32,
+    tile: u32,
+) -> (u32, u32) {
+    let region_x = (cell.col.saturating_sub(region.min_col) as u32) * tile + px;
+    let local_inward = py.saturating_sub(runtime_surface_height_for_cell(cell, style, px, tile));
+    let inward = cell.boundary_distance * tile + local_inward;
+    (region_x, inward)
+}
+
+fn runtime_along_surface_projection(
+    tangent: rpu_core::TerrainTangent,
+    px: u32,
+    py: u32,
+    tile: u32,
+) -> u32 {
+    match tangent {
+        rpu_core::TerrainTangent::None => px,
+        rpu_core::TerrainTangent::Right => px,
+        rpu_core::TerrainTangent::Left => tile.saturating_sub(1).saturating_sub(px),
+        rpu_core::TerrainTangent::Down => py,
+        rpu_core::TerrainTangent::Up => tile.saturating_sub(1).saturating_sub(py),
+        rpu_core::TerrainTangent::UpLeft => {
+            (tile.saturating_sub(1).saturating_sub(px) + tile.saturating_sub(1).saturating_sub(py))
+                / 2
+        }
+        rpu_core::TerrainTangent::UpRight => (px + tile.saturating_sub(1).saturating_sub(py)) / 2,
+        rpu_core::TerrainTangent::DownLeft => (tile.saturating_sub(1).saturating_sub(px) + py) / 2,
+        rpu_core::TerrainTangent::DownRight => (px + py) / 2,
+    }
+}
+
+fn runtime_alpha_over(top: Rgba<u8>, bottom: Rgba<u8>) -> Rgba<u8> {
+    let ta = top[3] as f32 / 255.0;
+    let ba = bottom[3] as f32 / 255.0;
+    let out_a = ta + ba * (1.0 - ta);
+    if out_a <= f32::EPSILON {
+        return rgba([0, 0, 0, 0]);
+    }
+    let blend = |tc: u8, bc: u8| -> u8 {
+        (((tc as f32 / 255.0) * ta + (bc as f32 / 255.0) * ba * (1.0 - ta)) / out_a * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    rgba([
+        blend(top[0], bottom[0]),
+        blend(top[1], bottom[1]),
+        blend(top[2], bottom[2]),
+        (out_a * 255.0).round().clamp(0.0, 255.0) as u8,
+    ])
+}
+
+fn runtime_sample_material_exemplar(material: &str, u: u32, v: u32) -> Rgba<u8> {
+    let (pattern, palette) = runtime_material_exemplar(material);
+    let w = pattern[0].len() as u32;
+    let h = pattern.len() as u32;
+    let ix = (u % w) as usize;
+    let iy = (v % h) as usize;
+    rgba(palette[pattern[iy][ix] as usize])
+}
+
+fn runtime_builtin_material_image(material: &str) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let (pattern, palette) = runtime_material_exemplar(material);
+    let width = pattern[0].len() as u32;
+    let height = pattern.len() as u32;
+    let mut image = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
+    for y in 0..height {
+        for x in 0..width {
+            image.put_pixel(
+                x,
+                y,
+                rgba(palette[pattern[y as usize][x as usize] as usize]),
+            );
+        }
+    }
+    image
+}
+
+fn runtime_material_exemplar(material: &str) -> (&'static [&'static [u8]], &'static [[u8; 4]]) {
+    match material {
+        "grass" => (
+            &[
+                &[0, 0, 1, 0, 1, 0, 1, 0],
+                &[0, 1, 2, 1, 2, 1, 2, 1],
+                &[2, 2, 3, 2, 3, 2, 3, 2],
+                &[3, 3, 4, 3, 4, 3, 4, 3],
+                &[4, 4, 4, 4, 4, 4, 4, 4],
+                &[4, 4, 4, 4, 4, 4, 4, 4],
+            ],
+            &[
+                [0, 0, 0, 0],
+                [116, 214, 95, 255],
+                [79, 176, 62, 255],
+                [53, 118, 43, 255],
+                [126, 82, 49, 255],
+            ],
+        ),
+        "dirt" => (
+            &[
+                &[0, 1, 0, 0, 1, 0, 0, 1],
+                &[1, 2, 1, 0, 2, 1, 0, 2],
+                &[0, 1, 2, 1, 0, 2, 1, 0],
+                &[2, 1, 0, 2, 1, 0, 2, 1],
+                &[1, 0, 2, 1, 0, 2, 1, 0],
+                &[0, 2, 1, 0, 2, 1, 0, 2],
+            ],
+            &[[114, 74, 48, 255], [138, 92, 59, 255], [93, 58, 38, 255]],
+        ),
+        _ => (
+            &[
+                &[0, 1, 0, 2, 0, 1, 0, 2],
+                &[1, 0, 2, 0, 1, 0, 2, 0],
+                &[0, 2, 0, 1, 0, 2, 0, 1],
+                &[2, 0, 1, 0, 2, 0, 1, 0],
+                &[0, 1, 0, 2, 0, 1, 0, 2],
+                &[1, 0, 2, 0, 1, 0, 2, 0],
+            ],
+            &[[78, 76, 88, 255], [108, 104, 122, 255], [57, 56, 65, 255]],
+        ),
+    }
+}
+
+fn rgba(color: [u8; 4]) -> Rgba<u8> {
+    Rgba(color)
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct RuntimeStripPattern {
+    pixels: Vec<[u8; 4]>,
+    width: usize,
+    height: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RuntimeStripState {
+    Flat,
+    Join,
+    Ramp,
+}
+
+#[derive(Clone)]
+struct RuntimeStateWfcPattern {
+    pixels: Vec<[u8; 4]>,
+    state: RuntimeStripState,
+}
+
+fn runtime_solve_surface_strip_1d(
+    material: &str,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    width: u32,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let pattern_width = 6usize.min(source.width().max(1) as usize);
+    if pattern_width < 2 {
+        return None;
+    }
+    let patterns = runtime_extract_strip_patterns(source, pattern_width);
+    if patterns.is_empty() {
+        return None;
+    }
+    let target_columns = width.max(pattern_width as u32) as usize;
+    let cells = target_columns
+        .saturating_sub(pattern_width)
+        .saturating_add(1);
+    let mut chosen = Vec::with_capacity(cells);
+
+    let start =
+        runtime_hash_material_seed(material, width, source.height()) as usize % patterns.len();
+    chosen.push(start);
+    for i in 1..cells {
+        let prev = chosen[i - 1];
+        let compatible = runtime_compatible_strip_patterns(&patterns, prev);
+        let pick_from: Vec<usize> = if compatible.is_empty() {
+            (0..patterns.len()).collect()
+        } else {
+            compatible
+        };
+        let choice = pick_from
+            [runtime_hash_material_seed(material, i as u32, width) as usize % pick_from.len()];
+        chosen.push(choice);
+    }
+
+    Some(runtime_reconstruct_strip_image(
+        &patterns,
+        &chosen,
+        target_columns,
+    ))
+}
+
+fn runtime_extract_strip_patterns(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    pattern_width: usize,
+) -> Vec<RuntimeStripPattern> {
+    use std::collections::HashSet;
+    let sw = source.width().max(1) as usize;
+    let sh = source.height().max(1) as usize;
+    let mut seen: HashSet<Vec<[u8; 4]>> = HashSet::new();
+    let mut patterns = Vec::new();
+    for sx in 0..sw {
+        let mut pixels = Vec::with_capacity(pattern_width * sh);
+        for y in 0..sh {
+            for x in 0..pattern_width {
+                pixels.push(source.get_pixel(((sx + x) % sw) as u32, y as u32).0);
+            }
+        }
+        if seen.insert(pixels.clone()) {
+            patterns.push(RuntimeStripPattern {
+                pixels,
+                width: pattern_width,
+                height: sh,
+            });
+        }
+    }
+    patterns
+}
+
+fn runtime_compatible_strip_patterns(
+    patterns: &[RuntimeStripPattern],
+    left_idx: usize,
+) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (right_idx, right) in patterns.iter().enumerate() {
+        if runtime_strip_patterns_compatible(&patterns[left_idx], right) {
+            out.push(right_idx);
+        }
+    }
+    out
+}
+
+fn runtime_strip_patterns_compatible(
+    left: &RuntimeStripPattern,
+    right: &RuntimeStripPattern,
+) -> bool {
+    for y in 0..left.height {
+        for x in 1..left.width {
+            let li = y * left.width + x;
+            let ri = y * right.width + (x - 1);
+            if left.pixels[li] != right.pixels[ri] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn runtime_reconstruct_strip_image(
+    patterns: &[RuntimeStripPattern],
+    chosen: &[usize],
+    target_columns: usize,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let height = patterns[0].height;
+    let mut image =
+        ImageBuffer::from_pixel(target_columns as u32, height as u32, rgba([0, 0, 0, 0]));
+    for y in 0..height {
+        for (i, pattern_idx) in chosen.iter().enumerate() {
+            let pattern = &patterns[*pattern_idx];
+            let x = i;
+            let p = pattern.pixels[y * pattern.width];
+            image.put_pixel(x as u32, y as u32, rgba(p));
+        }
+        let last = &patterns[*chosen.last().unwrap_or(&0)];
+        for extra in 1..last.width {
+            let x = chosen.len().saturating_sub(1) + extra;
+            if x >= target_columns {
+                break;
+            }
+            let p = last.pixels[y * last.width + extra];
+            image.put_pixel(x as u32, y as u32, rgba(p));
+        }
+    }
+    image
+}
+
+fn runtime_quilt_surface_strip_horizontally(
+    material: &str,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    width: u32,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let height = source.height().max(1);
+    let patch = 8u32.min(source.width().max(1));
+    let overlap = 3u32.min(patch.saturating_sub(1));
+    let step = patch.saturating_sub(overlap).max(1);
+    let mut field = ImageBuffer::from_pixel(width.max(1), height, rgba([0, 0, 0, 0]));
+    let mut filled = vec![false; (field.width() * field.height()) as usize];
+
+    let max_x = if width > patch { width - patch } else { 0 };
+    let mut bx = 0;
+    while bx <= max_x {
+        let sx = runtime_choose_strip_patch_origin(
+            material, source, &field, &filled, bx, patch, overlap,
+        );
+        runtime_blit_strip_patch(source, &mut field, &mut filled, sx, bx, patch);
+        if bx == max_x {
+            break;
+        }
+        bx = (bx + step).min(max_x);
+    }
+
+    field
+}
+
+fn runtime_tile_surface_strip_horizontally(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    width: u32,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let mut field =
+        ImageBuffer::from_pixel(width.max(1), source.height().max(1), rgba([0, 0, 0, 0]));
+    for y in 0..field.height() {
+        for x in 0..field.width() {
+            let p = *source.get_pixel(x % source.width().max(1), y % source.height().max(1));
+            field.put_pixel(x, y, p);
+        }
+    }
+    field
+}
+
+fn runtime_quilt_material_field(
+    material: &str,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    runtime_quilt_image_to_size(material, source, 256, 256)
+}
+
+fn runtime_quilt_image_to_size(
+    material: &str,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    width: u32,
+    height: u32,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let patch = 8u32.min(source.width().max(1)).min(source.height().max(1));
+    let overlap = 3u32.min(patch.saturating_sub(1));
+    let step = patch.saturating_sub(overlap).max(1);
+    let mut field = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
+    let mut filled = vec![false; (width * height) as usize];
+
+    let max_x = if width > patch { width - patch } else { 0 };
+    let max_y = if height > patch { height - patch } else { 0 };
+    let mut by = 0;
+    while by <= max_y {
+        let mut bx = 0;
+        while bx <= max_x {
+            let (sx, sy) = runtime_choose_patch_origin(
+                material, source, &field, &filled, bx, by, patch, overlap,
+            );
+            runtime_blit_patch(source, &mut field, &mut filled, sx, sy, bx, by, patch);
+            if bx == max_x {
+                break;
+            }
+            bx = (bx + step).min(max_x);
+        }
+        if by == max_y {
+            break;
+        }
+        by = (by + step).min(max_y);
+    }
+
+    field
+}
+
+#[derive(Clone)]
+struct RuntimeWfcPattern {
+    pixels: Vec<[u8; 4]>,
+    band: usize,
+}
+
+fn runtime_wfc_material_field(
+    material: &str,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    runtime_wfc_source_field(material, source, 64, 64, 1)
+}
+
+fn runtime_wfc_source_field(
+    material: &str,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    width: u32,
+    height: u32,
+    band_count: usize,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let n = 3usize
+        .min(source.width().max(1) as usize)
+        .min(source.height().max(1) as usize);
+    if n == 0 {
+        return None;
+    }
+    let band_height = (source.height().max(1) as usize / band_count.max(1)).max(1);
+    let patterns = runtime_extract_wfc_patterns(source, n, band_height, band_count);
+    if patterns.is_empty() {
+        return None;
+    }
+    let compat = runtime_build_wfc_compatibility(&patterns, n);
+    for salt in 0..2u32 {
+        if let Some(field) = runtime_solve_wfc_field(
+            material,
+            &patterns,
+            &compat,
+            n,
+            width.max(n as u32) as usize,
+            height.max(n as u32) as usize,
+            band_count,
+            salt,
+        ) {
+            return Some(field);
+        }
+    }
+    None
+}
+
+fn runtime_extract_wfc_patterns(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    n: usize,
+    band_height: usize,
+    band_count: usize,
+) -> Vec<RuntimeWfcPattern> {
+    use std::collections::HashSet;
+    let mut seen: HashSet<(usize, Vec<[u8; 4]>)> = HashSet::new();
+    let mut patterns = Vec::new();
+    let sw = source.width().max(1) as usize;
+    let sh = source.height().max(1) as usize;
+    for sy in 0..sh {
+        for sx in 0..sw {
+            let band = (sy / band_height).min(band_count.saturating_sub(1));
+            let mut pixels = Vec::with_capacity(n * n);
+            for py in 0..n {
+                for px in 0..n {
+                    let p = source.get_pixel(((sx + px) % sw) as u32, ((sy + py) % sh) as u32);
+                    pixels.push(p.0);
+                }
+            }
+            if seen.insert((band, pixels.clone())) {
+                patterns.push(RuntimeWfcPattern { pixels, band });
+            }
+        }
+    }
+    patterns
+}
+
+fn runtime_build_wfc_compatibility(
+    patterns: &[RuntimeWfcPattern],
+    n: usize,
+) -> [Vec<Vec<usize>>; 4] {
+    let mut right = vec![Vec::new(); patterns.len()];
+    let mut left = vec![Vec::new(); patterns.len()];
+    let mut down = vec![Vec::new(); patterns.len()];
+    let mut up = vec![Vec::new(); patterns.len()];
+    for (i, a) in patterns.iter().enumerate() {
+        for (j, b) in patterns.iter().enumerate() {
+            if runtime_patterns_compatible_right(a, b, n) {
+                right[i].push(j);
+                left[j].push(i);
+            }
+            if runtime_patterns_compatible_down(a, b, n) {
+                down[i].push(j);
+                up[j].push(i);
+            }
+        }
+    }
+    [right, left, down, up]
+}
+
+fn runtime_patterns_compatible_right(
+    a: &RuntimeWfcPattern,
+    b: &RuntimeWfcPattern,
+    n: usize,
+) -> bool {
+    for y in 0..n {
+        for x in 1..n {
+            if a.pixels[y * n + x] != b.pixels[y * n + (x - 1)] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn runtime_patterns_compatible_down(
+    a: &RuntimeWfcPattern,
+    b: &RuntimeWfcPattern,
+    n: usize,
+) -> bool {
+    for y in 1..n {
+        for x in 0..n {
+            if a.pixels[y * n + x] != b.pixels[(y - 1) * n + x] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn runtime_solve_wfc_field(
+    material: &str,
+    patterns: &[RuntimeWfcPattern],
+    compat: &[Vec<Vec<usize>>; 4],
+    n: usize,
+    width: usize,
+    height: usize,
+    band_count: usize,
+    salt: u32,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let cells = width * height;
+    let pcount = patterns.len();
+    let mut wave = vec![true; cells * pcount];
+    let mut counts = vec![0usize; cells];
+
+    let band_rows = (height / band_count.max(1)).max(1);
+    for y in 0..height {
+        let target_band = (y / band_rows).min(band_count.saturating_sub(1));
+        for x in 0..width {
+            let idx = y * width + x;
+            let mut count = 0usize;
+            for p in 0..pcount {
+                let allowed = patterns[p].band.abs_diff(target_band) <= 1;
+                wave[idx * pcount + p] = allowed;
+                if allowed {
+                    count += 1;
+                }
+            }
+            if count == 0 {
+                for p in 0..pcount {
+                    let allowed = patterns[p].band == target_band;
+                    wave[idx * pcount + p] = allowed;
+                    if allowed {
+                        count += 1;
+                    }
+                }
+            }
+            if count == 0 {
+                return None;
+            }
+            counts[idx] = count;
+        }
+    }
+
+    loop {
+        let mut best = None;
+        let mut best_count = usize::MAX;
+        for idx in 0..cells {
+            let c = counts[idx];
+            if c > 1 && c < best_count {
+                best_count = c;
+                best = Some(idx);
+            }
+        }
+        let Some(cell_idx) = best else { break };
+        let allowed: Vec<usize> = (0..pcount)
+            .filter(|&p| wave[cell_idx * pcount + p])
+            .collect();
+        if allowed.is_empty() {
+            return None;
+        }
+        let choice = allowed
+            [runtime_hash_material_seed(material, cell_idx as u32, salt) as usize % allowed.len()];
+        for p in 0..pcount {
+            wave[cell_idx * pcount + p] = p == choice;
+        }
+        counts[cell_idx] = 1;
+        if !runtime_propagate_wfc(
+            &mut wave,
+            &mut counts,
+            compat,
+            width,
+            height,
+            pcount,
+            cell_idx,
+        ) {
+            return None;
+        }
+    }
+
+    runtime_reconstruct_wfc_image(patterns, &wave, width, height, n, pcount)
+}
+
+fn runtime_propagate_wfc(
+    wave: &mut [bool],
+    counts: &mut [usize],
+    compat: &[Vec<Vec<usize>>; 4],
+    width: usize,
+    height: usize,
+    pcount: usize,
+    start_idx: usize,
+) -> bool {
+    use std::collections::VecDeque;
+    let mut queue = VecDeque::new();
+    queue.push_back(start_idx);
+    while let Some(idx) = queue.pop_front() {
+        let x = idx % width;
+        let y = idx / width;
+        let neighbors = [
+            if x + 1 < width {
+                Some((idx + 1, 0usize))
+            } else {
+                None
+            },
+            if x > 0 { Some((idx - 1, 1usize)) } else { None },
+            if y + 1 < height {
+                Some((idx + width, 2usize))
+            } else {
+                None
+            },
+            if y > 0 {
+                Some((idx - width, 3usize))
+            } else {
+                None
+            },
+        ];
+        for neighbor in neighbors.into_iter().flatten() {
+            let (nidx, dir) = neighbor;
+            let mut changed = false;
+            for np in 0..pcount {
+                if !wave[nidx * pcount + np] {
+                    continue;
+                }
+                let mut supported = false;
+                for p in 0..pcount {
+                    if wave[idx * pcount + p] && compat[dir][p].contains(&np) {
+                        supported = true;
+                        break;
+                    }
+                }
+                if !supported {
+                    wave[nidx * pcount + np] = false;
+                    counts[nidx] = counts[nidx].saturating_sub(1);
+                    changed = true;
+                }
+            }
+            if counts[nidx] == 0 {
+                return false;
+            }
+            if changed {
+                queue.push_back(nidx);
+            }
+        }
+    }
+    true
+}
+
+fn runtime_reconstruct_wfc_image(
+    patterns: &[RuntimeWfcPattern],
+    wave: &[bool],
+    width: usize,
+    height: usize,
+    n: usize,
+    pcount: usize,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let mut chosen = vec![0usize; width * height];
+    for idx in 0..chosen.len() {
+        let Some(pattern_idx) = (0..pcount).find(|&p| wave[idx * pcount + p]) else {
+            return None;
+        };
+        chosen[idx] = pattern_idx;
+    }
+
+    let out_w = width + n.saturating_sub(1);
+    let out_h = height + n.saturating_sub(1);
+    let mut sums = vec![[0u32; 4]; out_w * out_h];
+    let mut counts = vec![0u32; out_w * out_h];
+
+    for y in 0..height {
+        for x in 0..width {
+            let pattern = &patterns[chosen[y * width + x]];
+            for py in 0..n {
+                for px in 0..n {
+                    let ox = x + px;
+                    let oy = y + py;
+                    let idx = oy * out_w + ox;
+                    let pixel = pattern.pixels[py * n + px];
+                    for c in 0..4 {
+                        sums[idx][c] += pixel[c] as u32;
+                    }
+                    counts[idx] += 1;
+                }
+            }
+        }
+    }
+
+    let mut image = ImageBuffer::from_pixel(out_w as u32, out_h as u32, rgba([0, 0, 0, 0]));
+    for y in 0..out_h {
+        for x in 0..out_w {
+            let idx = y * out_w + x;
+            let count = counts[idx].max(1);
+            image.put_pixel(
+                x as u32,
+                y as u32,
+                rgba([
+                    (sums[idx][0] / count) as u8,
+                    (sums[idx][1] / count) as u8,
+                    (sums[idx][2] / count) as u8,
+                    (sums[idx][3] / count) as u8,
+                ]),
+            );
+        }
+    }
+    Some(image)
+}
+
+fn runtime_choose_patch_origin(
+    material: &str,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    field: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    filled: &[bool],
+    bx: u32,
+    by: u32,
+    patch: u32,
+    overlap: u32,
+) -> (u32, u32) {
+    let mut best = Vec::new();
+    let mut best_score = u64::MAX;
+    for sy in 0..source.height().max(1) {
+        for sx in 0..source.width().max(1) {
+            let score =
+                runtime_patch_overlap_score(source, field, filled, sx, sy, bx, by, patch, overlap);
+            if score < best_score {
+                best_score = score;
+                best.clear();
+                best.push((sx, sy));
+            } else if score == best_score {
+                best.push((sx, sy));
+            }
+        }
+    }
+    let choice = runtime_hash_material_seed(material, bx, by) as usize % best.len().max(1);
+    best.get(choice).copied().unwrap_or((0, 0))
+}
+
+fn runtime_patch_overlap_score(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    field: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    filled: &[bool],
+    sx: u32,
+    sy: u32,
+    bx: u32,
+    by: u32,
+    patch: u32,
+    overlap: u32,
+) -> u64 {
+    let mut score = 0u64;
+    for py in 0..patch {
+        for px in 0..patch {
+            let in_overlap = (px < overlap && bx > 0) || (py < overlap && by > 0);
+            if !in_overlap {
+                continue;
+            }
+            let fx = bx + px;
+            let fy = by + py;
+            let idx = (fy * field.width() + fx) as usize;
+            if !filled.get(idx).copied().unwrap_or(false) {
+                continue;
+            }
+            let src = *source.get_pixel(
+                sx.wrapping_add(px) % source.width().max(1),
+                sy.wrapping_add(py) % source.height().max(1),
+            );
+            let dst = *field.get_pixel(fx, fy);
+            score += runtime_pixel_distance(src, dst);
+        }
+    }
+    score
+}
+
+fn runtime_blit_patch(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    field: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    filled: &mut [bool],
+    sx: u32,
+    sy: u32,
+    bx: u32,
+    by: u32,
+    patch: u32,
+) {
+    for py in 0..patch {
+        for px in 0..patch {
+            let fx = bx + px;
+            let fy = by + py;
+            if fx >= field.width() || fy >= field.height() {
+                continue;
+            }
+            let src = *source.get_pixel(
+                sx.wrapping_add(px) % source.width().max(1),
+                sy.wrapping_add(py) % source.height().max(1),
+            );
+            field.put_pixel(fx, fy, src);
+            let idx = (fy * field.width() + fx) as usize;
+            if let Some(slot) = filled.get_mut(idx) {
+                *slot = true;
+            }
+        }
+    }
+}
+
+fn runtime_choose_strip_patch_origin(
+    material: &str,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    field: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    filled: &[bool],
+    bx: u32,
+    patch: u32,
+    overlap: u32,
+) -> u32 {
+    let mut best = Vec::new();
+    let mut best_score = u64::MAX;
+    for sx in 0..source.width().max(1) {
+        let score = runtime_strip_overlap_score(source, field, filled, sx, bx, patch, overlap);
+        if score < best_score {
+            best_score = score;
+            best.clear();
+            best.push(sx);
+        } else if score == best_score {
+            best.push(sx);
+        }
+    }
+    let choice = runtime_hash_material_seed(material, bx, 0) as usize % best.len().max(1);
+    best.get(choice).copied().unwrap_or(0)
+}
+
+fn runtime_strip_overlap_score(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    field: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    filled: &[bool],
+    sx: u32,
+    bx: u32,
+    patch: u32,
+    overlap: u32,
+) -> u64 {
+    let mut score = 0u64;
+    if bx == 0 {
+        return score;
+    }
+    for px in 0..patch.min(overlap) {
+        let fx = bx + px;
+        for y in 0..field.height() {
+            let idx = (y * field.width() + fx) as usize;
+            if !filled.get(idx).copied().unwrap_or(false) {
+                continue;
+            }
+            let src = *source.get_pixel(
+                (sx + px) % source.width().max(1),
+                y % source.height().max(1),
+            );
+            let dst = *field.get_pixel(fx, y);
+            score += runtime_pixel_distance(src, dst);
+        }
+    }
+    score
+}
+
+fn runtime_blit_strip_patch(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    field: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    filled: &mut [bool],
+    sx: u32,
+    bx: u32,
+    patch: u32,
+) {
+    for px in 0..patch {
+        let fx = bx + px;
+        if fx >= field.width() {
+            break;
+        }
+        for y in 0..field.height() {
+            let p = *source.get_pixel(
+                (sx + px) % source.width().max(1),
+                y % source.height().max(1),
+            );
+            field.put_pixel(fx, y, p);
+            let idx = (y * field.width() + fx) as usize;
+            if let Some(slot) = filled.get_mut(idx) {
+                *slot = true;
+            }
+        }
+    }
+}
+
+fn runtime_solve_state_constrained_surface_strip_2d(
+    material: &str,
+    region: &rpu_core::TerrainRegion,
+    classified: &rpu_core::ClassifiedAsciiMap,
+    tile: u32,
+    flat: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    join: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ramp: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let width = flat.width().max(join.width()).max(ramp.width()).max(1) as usize;
+    let height = flat.height().max(join.height()).max(ramp.height()).max(1) as usize;
+    let n = 4usize.min(width).min(height);
+    if n < 2 {
+        return None;
+    }
+
+    let states = runtime_build_region_surface_states(region, classified, tile, width as u32);
+    let patterns = runtime_extract_state_wfc_patterns(flat, join, ramp, n);
+    if patterns.is_empty() {
+        return None;
+    }
+    let compat = runtime_build_state_wfc_compatibility(&patterns, n);
+    runtime_solve_state_wfc_field(material, &states, &patterns, &compat, width, height, n)
+}
+
+fn runtime_build_region_surface_states(
+    region: &rpu_core::TerrainRegion,
+    classified: &rpu_core::ClassifiedAsciiMap,
+    tile: u32,
+    width: u32,
+) -> Vec<RuntimeStripState> {
+    let mut states = vec![RuntimeStripState::Flat; width.max(1) as usize];
+    for cell in classified
+        .cells
+        .iter()
+        .filter(|cell| cell.region_id == region.id)
+    {
+        let state = match (cell.contour, cell.transition_role) {
+            (rpu_core::TerrainContour::RampUpLeft, _)
+            | (rpu_core::TerrainContour::RampUpRight, _) => RuntimeStripState::Ramp,
+            (_, rpu_core::TerrainTransitionRole::JoinFromLeft)
+            | (_, rpu_core::TerrainTransitionRole::JoinFromRight)
+            | (_, rpu_core::TerrainTransitionRole::JoinBoth) => RuntimeStripState::Join,
+            _ => RuntimeStripState::Flat,
+        };
+        let start = cell
+            .surface_u
+            .saturating_mul(tile)
+            .min(width.saturating_sub(1));
+        let end = (start + tile).min(width);
+        for u in start..end {
+            let idx = u as usize;
+            states[idx] = match (states[idx], state) {
+                (RuntimeStripState::Ramp, _) | (_, RuntimeStripState::Ramp) => {
+                    RuntimeStripState::Ramp
+                }
+                (RuntimeStripState::Join, _) | (_, RuntimeStripState::Join) => {
+                    RuntimeStripState::Join
+                }
+                _ => RuntimeStripState::Flat,
+            };
+        }
+    }
+    states
+}
+
+fn runtime_required_strip_state(
+    states: &[RuntimeStripState],
+    start: usize,
+    width: usize,
+) -> RuntimeStripState {
+    let center = start + width / 2;
+    states
+        .get(center.min(states.len().saturating_sub(1)))
+        .copied()
+        .unwrap_or(RuntimeStripState::Flat)
+}
+
+fn runtime_extract_state_wfc_patterns(
+    flat: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    join: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ramp: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    n: usize,
+) -> Vec<RuntimeStateWfcPattern> {
+    let mut patterns = Vec::new();
+    patterns.extend(runtime_extract_family_wfc_patterns(
+        flat,
+        n,
+        RuntimeStripState::Flat,
+    ));
+    patterns.extend(runtime_extract_family_wfc_patterns(
+        join,
+        n,
+        RuntimeStripState::Join,
+    ));
+    patterns.extend(runtime_extract_family_wfc_patterns(
+        ramp,
+        n,
+        RuntimeStripState::Ramp,
+    ));
+    patterns
+}
+
+fn runtime_extract_family_wfc_patterns(
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    n: usize,
+    state: RuntimeStripState,
+) -> Vec<RuntimeStateWfcPattern> {
+    use std::collections::HashSet;
+    let sw = source.width().max(1) as usize;
+    let sh = source.height().max(1) as usize;
+    let mut seen: HashSet<Vec<[u8; 4]>> = HashSet::new();
+    let mut patterns = Vec::new();
+    for sy in 0..sh {
+        for sx in 0..sw {
+            let mut variants = Vec::new();
+
+            let mut forward = Vec::with_capacity(n * n);
+            for py in 0..n {
+                for px in 0..n {
+                    forward.push(
+                        source
+                            .get_pixel(((sx + px) % sw) as u32, ((sy + py) % sh) as u32)
+                            .0,
+                    );
+                }
+            }
+            variants.push(forward);
+
+            let mut mirrored = Vec::with_capacity(n * n);
+            for py in 0..n {
+                for px in 0..n {
+                    mirrored.push(
+                        source
+                            .get_pixel(((sx + (n - 1 - px)) % sw) as u32, ((sy + py) % sh) as u32)
+                            .0,
+                    );
+                }
+            }
+            variants.push(mirrored);
+
+            for pixels in variants {
+                if seen.insert(pixels.clone()) {
+                    patterns.push(RuntimeStateWfcPattern { pixels, state });
+                }
+            }
+        }
+    }
+    patterns
+}
+
+fn runtime_build_state_wfc_compatibility(
+    patterns: &[RuntimeStateWfcPattern],
+    n: usize,
+) -> [Vec<Vec<usize>>; 4] {
+    let mut right = vec![Vec::new(); patterns.len()];
+    let mut left = vec![Vec::new(); patterns.len()];
+    let mut down = vec![Vec::new(); patterns.len()];
+    let mut up = vec![Vec::new(); patterns.len()];
+    for (i, a) in patterns.iter().enumerate() {
+        for (j, b) in patterns.iter().enumerate() {
+            if runtime_state_wfc_patterns_compatible_right(a, b, n) {
+                right[i].push(j);
+                left[j].push(i);
+            }
+            if runtime_state_wfc_patterns_compatible_down(a, b, n) {
+                down[i].push(j);
+                up[j].push(i);
+            }
+        }
+    }
+    [right, left, down, up]
+}
+
+fn runtime_state_wfc_patterns_compatible_right(
+    a: &RuntimeStateWfcPattern,
+    b: &RuntimeStateWfcPattern,
+    n: usize,
+) -> bool {
+    for y in 0..n {
+        for x in 1..n {
+            if a.pixels[y * n + x] != b.pixels[y * n + (x - 1)] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn runtime_state_wfc_patterns_compatible_down(
+    a: &RuntimeStateWfcPattern,
+    b: &RuntimeStateWfcPattern,
+    n: usize,
+) -> bool {
+    for y in 1..n {
+        for x in 0..n {
+            if a.pixels[y * n + x] != b.pixels[(y - 1) * n + x] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn runtime_solve_state_wfc_field(
+    material: &str,
+    states: &[RuntimeStripState],
+    patterns: &[RuntimeStateWfcPattern],
+    compat: &[Vec<Vec<usize>>; 4],
+    width: usize,
+    height: usize,
+    n: usize,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let cells_w = width.saturating_sub(n).saturating_add(1);
+    let cells_h = height.saturating_sub(n).saturating_add(1);
+    let cells = cells_w * cells_h;
+    let pcount = patterns.len();
+    let mut wave = vec![true; cells * pcount];
+    let mut counts = vec![0usize; cells];
+
+    for y in 0..cells_h {
+        for x in 0..cells_w {
+            let idx = y * cells_w + x;
+            let required = runtime_required_strip_state(states, x, n);
+            let mut count = 0usize;
+            for p in 0..pcount {
+                let allowed = patterns[p].state == required;
+                wave[idx * pcount + p] = allowed;
+                if allowed {
+                    count += 1;
+                }
+            }
+            if count == 0 {
+                for p in 0..pcount {
+                    wave[idx * pcount + p] = true;
+                }
+                count = pcount;
+            }
+            counts[idx] = count;
+        }
+    }
+
+    loop {
+        let mut best = None;
+        let mut best_count = usize::MAX;
+        for idx in 0..cells {
+            let c = counts[idx];
+            if c > 1 && c < best_count {
+                best_count = c;
+                best = Some(idx);
+            }
+        }
+        let Some(cell_idx) = best else { break };
+        let allowed: Vec<usize> = (0..pcount)
+            .filter(|&p| wave[cell_idx * pcount + p])
+            .collect();
+        if allowed.is_empty() {
+            return None;
+        }
+        let choice = allowed[runtime_hash_material_seed(material, cell_idx as u32, width as u32)
+            as usize
+            % allowed.len()];
+        for p in 0..pcount {
+            wave[cell_idx * pcount + p] = p == choice;
+        }
+        counts[cell_idx] = 1;
+        if !runtime_propagate_state_wfc(
+            &mut wave,
+            &mut counts,
+            compat,
+            cells_w,
+            cells_h,
+            pcount,
+            cell_idx,
+        ) {
+            return None;
+        }
+    }
+
+    runtime_reconstruct_state_wfc_image(patterns, &wave, cells_w, cells_h, n, pcount)
+}
+
+fn runtime_propagate_state_wfc(
+    wave: &mut [bool],
+    counts: &mut [usize],
+    compat: &[Vec<Vec<usize>>; 4],
+    width: usize,
+    height: usize,
+    pcount: usize,
+    start_idx: usize,
+) -> bool {
+    use std::collections::VecDeque;
+    let mut queue = VecDeque::new();
+    queue.push_back(start_idx);
+    while let Some(idx) = queue.pop_front() {
+        let x = idx % width;
+        let y = idx / width;
+        let neighbors = [
+            if x + 1 < width {
+                Some((idx + 1, 0usize))
+            } else {
+                None
+            },
+            if x > 0 { Some((idx - 1, 1usize)) } else { None },
+            if y + 1 < height {
+                Some((idx + width, 2usize))
+            } else {
+                None
+            },
+            if y > 0 {
+                Some((idx - width, 3usize))
+            } else {
+                None
+            },
+        ];
+        for neighbor in neighbors.into_iter().flatten() {
+            let (nidx, dir) = neighbor;
+            let mut changed = false;
+            for np in 0..pcount {
+                if !wave[nidx * pcount + np] {
+                    continue;
+                }
+                let mut supported = false;
+                for p in 0..pcount {
+                    if wave[idx * pcount + p] && compat[dir][p].contains(&np) {
+                        supported = true;
+                        break;
+                    }
+                }
+                if !supported {
+                    wave[nidx * pcount + np] = false;
+                    counts[nidx] = counts[nidx].saturating_sub(1);
+                    changed = true;
+                }
+            }
+            if counts[nidx] == 0 {
+                return false;
+            }
+            if changed {
+                queue.push_back(nidx);
+            }
+        }
+    }
+    true
+}
+
+fn runtime_reconstruct_state_wfc_image(
+    patterns: &[RuntimeStateWfcPattern],
+    wave: &[bool],
+    cells_w: usize,
+    cells_h: usize,
+    n: usize,
+    pcount: usize,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let mut chosen = vec![0usize; cells_w * cells_h];
+    for idx in 0..chosen.len() {
+        let Some(pattern_idx) = (0..pcount).find(|&p| wave[idx * pcount + p]) else {
+            return None;
+        };
+        chosen[idx] = pattern_idx;
+    }
+
+    let out_w = cells_w + n.saturating_sub(1);
+    let out_h = cells_h + n.saturating_sub(1);
+    let mut sums = vec![[0u32; 4]; out_w * out_h];
+    let mut counts = vec![0u32; out_w * out_h];
+
+    for y in 0..cells_h {
+        for x in 0..cells_w {
+            let pattern = &patterns[chosen[y * cells_w + x]];
+            for py in 0..n {
+                for px in 0..n {
+                    let ox = x + px;
+                    let oy = y + py;
+                    let idx = oy * out_w + ox;
+                    let pixel = pattern.pixels[py * n + px];
+                    for c in 0..4 {
+                        sums[idx][c] += pixel[c] as u32;
+                    }
+                    counts[idx] += 1;
+                }
+            }
+        }
+    }
+
+    let mut image = ImageBuffer::from_pixel(out_w as u32, out_h as u32, rgba([0, 0, 0, 0]));
+    for y in 0..out_h {
+        for x in 0..out_w {
+            let idx = y * out_w + x;
+            let count = counts[idx].max(1);
+            image.put_pixel(
+                x as u32,
+                y as u32,
+                rgba([
+                    (sums[idx][0] / count) as u8,
+                    (sums[idx][1] / count) as u8,
+                    (sums[idx][2] / count) as u8,
+                    (sums[idx][3] / count) as u8,
+                ]),
+            );
+        }
+    }
+    Some(image)
+}
+
+fn runtime_pixel_distance(a: Rgba<u8>, b: Rgba<u8>) -> u64 {
+    let dr = a[0] as i32 - b[0] as i32;
+    let dg = a[1] as i32 - b[1] as i32;
+    let db = a[2] as i32 - b[2] as i32;
+    let da = a[3] as i32 - b[3] as i32;
+    (dr * dr + dg * dg + db * db + da * da) as u64
+}
+
+fn runtime_hash_material_seed(material: &str, x: u32, y: u32) -> u32 {
+    let mut hash = 2166136261u32;
+    for byte in material.bytes() {
+        hash = hash.wrapping_mul(16777619) ^ byte as u32;
+    }
+    hash ^ x.wrapping_mul(0x9e3779b1) ^ y.wrapping_mul(0x85ebca6b)
+}
+
+fn runtime_lerp_rgba(a: Rgba<u8>, b: Rgba<u8>, t: u8) -> Rgba<u8> {
+    let tf = t as f32 / 255.0;
+    let blend = |av: u8, bv: u8| -> u8 {
+        ((av as f32) * (1.0 - tf) + (bv as f32) * tf)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    rgba([
+        blend(a[0], b[0]),
+        blend(a[1], b[1]),
+        blend(a[2], b[2]),
+        blend(a[3], b[3]),
+    ])
+}
+
 fn terrain_shape_debug_color(shape: rpu_core::TerrainShape) -> [f32; 4] {
     match shape {
         rpu_core::TerrainShape::Empty => [0.0, 0.0, 0.0, 0.0],
@@ -2493,12 +5095,20 @@ fn terrain_shape_debug_color(shape: rpu_core::TerrainShape) -> [f32; 4] {
         rpu_core::TerrainShape::Right => [250.0 / 255.0, 143.0 / 255.0, 46.0 / 255.0, 1.0],
         rpu_core::TerrainShape::TopLeftOuter => [66.0 / 255.0, 235.0 / 255.0, 235.0 / 255.0, 1.0],
         rpu_core::TerrainShape::TopRightOuter => [48.0 / 255.0, 209.0 / 255.0, 250.0 / 255.0, 1.0],
-        rpu_core::TerrainShape::BottomLeftOuter => [224.0 / 255.0, 105.0 / 255.0, 207.0 / 255.0, 1.0],
-        rpu_core::TerrainShape::BottomRightOuter => [191.0 / 255.0, 84.0 / 255.0, 242.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::BottomLeftOuter => {
+            [224.0 / 255.0, 105.0 / 255.0, 207.0 / 255.0, 1.0]
+        }
+        rpu_core::TerrainShape::BottomRightOuter => {
+            [191.0 / 255.0, 84.0 / 255.0, 242.0 / 255.0, 1.0]
+        }
         rpu_core::TerrainShape::TopLeftInner => [158.0 / 255.0, 240.0 / 255.0, 158.0 / 255.0, 1.0],
         rpu_core::TerrainShape::TopRightInner => [140.0 / 255.0, 224.0 / 255.0, 140.0 / 255.0, 1.0],
-        rpu_core::TerrainShape::BottomLeftInner => [237.0 / 255.0, 148.0 / 255.0, 148.0 / 255.0, 1.0],
-        rpu_core::TerrainShape::BottomRightInner => [219.0 / 255.0, 125.0 / 255.0, 125.0 / 255.0, 1.0],
+        rpu_core::TerrainShape::BottomLeftInner => {
+            [237.0 / 255.0, 148.0 / 255.0, 148.0 / 255.0, 1.0]
+        }
+        rpu_core::TerrainShape::BottomRightInner => {
+            [219.0 / 255.0, 125.0 / 255.0, 125.0 / 255.0, 1.0]
+        }
     }
 }
 
@@ -2677,7 +5287,15 @@ fn submit_draw_command(
                 rect.width,
                 rect.height,
             );
-            frame.push_rect(rect.layer, rect.z * 1000 + stable_order, x, y, width, height, rect.color);
+            frame.push_rect(
+                rect.layer,
+                rect.z * 1000 + stable_order,
+                x,
+                y,
+                width,
+                height,
+                rect.color,
+            );
         }
         DrawCommand::Sprite(sprite) => {
             let texture_name = current_texture_frame(
@@ -2688,9 +5306,13 @@ fn submit_draw_command(
                 elapsed_time,
                 0.0,
             );
-            let texture_path = texture_name
-                .as_deref()
-                .map(|texture| format!("{}/{}", asset_base.trim_end_matches('/'), texture));
+            let texture_path = texture_name.as_deref().map(|texture| {
+                if texture.starts_with("generated://") {
+                    texture.to_string()
+                } else {
+                    format!("{}/{}", asset_base.trim_end_matches('/'), texture)
+                }
+            });
             if sprite.anchor != Anchor::World && !sprite.repeat_x && !sprite.repeat_y {
                 let (sx, sy, sw, sh) = screen_rect_for_anchor(
                     sprite.anchor,
@@ -2824,9 +5446,7 @@ fn log_compilation(label: &str, compiled: &CompiledProject) {
             ),
             (None, Some(line)) => eprintln!(
                 "rpu: {:?}: {} (line {})",
-                diagnostic.severity,
-                diagnostic.message,
-                line
+                diagnostic.severity, diagnostic.message, line
             ),
             (None, None) => eprintln!("rpu: {:?}: {}", diagnostic.severity, diagnostic.message),
         }
@@ -2989,8 +5609,15 @@ fn submit_sprite(
     let scrolled_y = y + scroll[1] * elapsed_time;
 
     if !repeat_x && !repeat_y {
-        let (sx, sy, sw, sh) =
-            screen_rect_for_anchor(Anchor::World, camera, view, scrolled_x, scrolled_y, width, height);
+        let (sx, sy, sw, sh) = screen_rect_for_anchor(
+            Anchor::World,
+            camera,
+            view,
+            scrolled_x,
+            scrolled_y,
+            width,
+            height,
+        );
         frame.push_sprite(
             layer,
             order,

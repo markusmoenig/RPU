@@ -3,25 +3,61 @@ use anyhow::{Context as AnyhowContext, Result, anyhow};
 use base64::Engine;
 use bytemuck::{Pod, Zeroable};
 use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
-use rpu_core::{Anchor, TextAlign};
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-use std::ffi::c_void;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "tvos"),
+    not(target_os = "ios")
+))]
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rpu_core::{Anchor, TextAlign};
 use std::collections::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "macos", target_os = "tvos", target_os = "ios")
+))]
+use std::ffi::c_void;
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "tvos", target_os = "ios")
+))]
+use std::ffi::CString;
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "tvos"),
+    not(target_os = "ios")
+))]
 use std::io::Cursor;
-use wgpu::util::DeviceExt;
+use std::sync::{Mutex, OnceLock};
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "tvos", target_os = "ios")
+))]
+use std::{fs::File, io::Write, path::PathBuf};
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 #[cfg(target_arch = "wasm32")]
 use web_sys::{HtmlAudioElement, HtmlCanvasElement, KeyboardEvent, MouseEvent, WheelEvent};
+use wgpu::util::DeviceExt;
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     static WEB_ASSETS: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
+}
+
+#[derive(Clone)]
+struct GeneratedTextureAsset {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+static GENERATED_TEXTURES: OnceLock<Mutex<HashMap<String, GeneratedTextureAsset>>> =
+    OnceLock::new();
+
+fn generated_textures() -> &'static Mutex<HashMap<String, GeneratedTextureAsset>> {
+    GENERATED_TEXTURES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -35,6 +71,26 @@ pub fn register_web_asset(path: &str, bytes: &[u8]) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn register_web_asset(_path: &str, _bytes: &[u8]) {}
+
+pub fn register_generated_rgba_texture(path: &str, width: u32, height: u32, rgba: &[u8]) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let expected = width.saturating_mul(height).saturating_mul(4) as usize;
+    if rgba.len() != expected {
+        return;
+    }
+    if let Ok(mut textures) = generated_textures().lock() {
+        textures.insert(
+            path.to_string(),
+            GeneratedTextureAsset {
+                width,
+                height,
+                rgba: rgba.to_vec(),
+            },
+        );
+    }
+}
 
 pub trait RpuSceneApp {
     fn initial_window_size(&self) -> Option<(u32, u32)> {
@@ -161,7 +217,11 @@ impl RuntimeContext {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "tvos"),
+    not(target_os = "ios")
+))]
 struct AudioState {
     output_stream: Option<OutputStream>,
     output_handle: Option<OutputStreamHandle>,
@@ -169,7 +229,11 @@ struct AudioState {
     current_music: Option<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "tvos"),
+    not(target_os = "ios")
+))]
 impl AudioState {
     fn new() -> Self {
         match OutputStream::try_default() {
@@ -238,6 +302,127 @@ impl AudioState {
     fn activate(&mut self) {
         let _ = self.output_stream.as_ref();
     }
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "tvos", target_os = "ios")
+))]
+struct AudioState;
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "tvos", target_os = "ios")
+))]
+unsafe extern "C" {
+    fn rpu_apple_play_sound(asset_path: *const std::os::raw::c_char);
+    fn rpu_apple_play_music(asset_path: *const std::os::raw::c_char);
+    fn rpu_apple_stop_music();
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "tvos", target_os = "ios")
+))]
+impl AudioState {
+    fn new() -> Self {
+        Self
+    }
+
+    fn play_sound(&mut self, asset_path: &str) {
+        let playable_path = apple_playable_audio_path(asset_path);
+        let Ok(asset_path) = CString::new(playable_path.as_str()) else {
+            return;
+        };
+        unsafe { rpu_apple_play_sound(asset_path.as_ptr()) };
+    }
+
+    fn play_music(&mut self, asset_path: &str) {
+        let playable_path = apple_playable_audio_path(asset_path);
+        let Ok(asset_path) = CString::new(playable_path.as_str()) else {
+            return;
+        };
+        unsafe { rpu_apple_play_music(asset_path.as_ptr()) };
+    }
+
+    fn stop_music(&mut self) {
+        unsafe { rpu_apple_stop_music() };
+    }
+
+    fn activate(&mut self) {}
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "tvos", target_os = "ios")
+))]
+fn apple_playable_audio_path(asset_path: &str) -> String {
+    if !asset_path.to_ascii_lowercase().ends_with(".ogg") {
+        return asset_path.to_string();
+    }
+    convert_ogg_to_wav(asset_path).unwrap_or_else(|| asset_path.to_string())
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "tvos", target_os = "ios")
+))]
+fn convert_ogg_to_wav(asset_path: &str) -> Option<String> {
+    let src = PathBuf::from(asset_path);
+    let metadata = std::fs::metadata(&src).ok()?;
+    let modified = metadata.modified().ok()?;
+    let modified = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    let stem = src.file_stem()?.to_string_lossy();
+    let out_dir = std::env::temp_dir().join("rpu-audio-cache");
+    std::fs::create_dir_all(&out_dir).ok()?;
+    let out_path = out_dir.join(format!("{stem}-{modified}.wav"));
+    if out_path.exists() {
+        return Some(out_path.to_string_lossy().to_string());
+    }
+
+    let file = File::open(&src).ok()?;
+    let mut reader = lewton::inside_ogg::OggStreamReader::new(file).ok()?;
+    let channels = reader.ident_hdr.audio_channels as u16;
+    let sample_rate = reader.ident_hdr.audio_sample_rate;
+    let mut pcm = Vec::new();
+    while let Some(packet) = reader.read_dec_packet_itl().ok()? {
+        pcm.extend(packet);
+    }
+    write_pcm16_wav(&out_path, channels, sample_rate, &pcm).ok()?;
+    Some(out_path.to_string_lossy().to_string())
+}
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "tvos", target_os = "ios")
+))]
+fn write_pcm16_wav(path: &PathBuf, channels: u16, sample_rate: u32, samples: &[i16]) -> std::io::Result<()> {
+    let data_len = samples.len().saturating_mul(2) as u32;
+    let byte_rate = sample_rate
+        .saturating_mul(channels as u32)
+        .saturating_mul(2);
+    let block_align = channels.saturating_mul(2);
+    let mut file = File::create(path)?;
+    file.write_all(b"RIFF")?;
+    file.write_all(&(36u32.saturating_add(data_len)).to_le_bytes())?;
+    file.write_all(b"WAVE")?;
+    file.write_all(b"fmt ")?;
+    file.write_all(&16u32.to_le_bytes())?;
+    file.write_all(&1u16.to_le_bytes())?;
+    file.write_all(&channels.to_le_bytes())?;
+    file.write_all(&sample_rate.to_le_bytes())?;
+    file.write_all(&byte_rate.to_le_bytes())?;
+    file.write_all(&block_align.to_le_bytes())?;
+    file.write_all(&16u16.to_le_bytes())?;
+    file.write_all(b"data")?;
+    file.write_all(&data_len.to_le_bytes())?;
+    for sample in samples {
+        file.write_all(&sample.to_le_bytes())?;
+    }
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -566,7 +751,11 @@ impl<A: RpuSceneApp> WebRunner<A> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "tvos"),
+    not(target_os = "ios")
+))]
 pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
     use pollster::block_on;
     use std::sync::Arc;
@@ -594,10 +783,8 @@ pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
                 return;
             }
 
-            let mut attrs =
-                WindowAttributes::default().with_title(self.app.window_title().unwrap_or_else(|| {
-                    "RPU".to_string()
-                }));
+            let mut attrs = WindowAttributes::default()
+                .with_title(self.app.window_title().unwrap_or_else(|| "RPU".to_string()));
             if let Some((w, h)) = self.app.initial_window_size() {
                 attrs = attrs.with_inner_size(LogicalSize::new(w as f64, h as f64));
             }
@@ -731,9 +918,8 @@ pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
                     window.request_redraw();
                     event_loop.set_control_flow(ControlFlow::WaitUntil(now + frame_interval));
                 } else {
-                    event_loop.set_control_flow(ControlFlow::WaitUntil(
-                        self.last_frame + frame_interval,
-                    ));
+                    event_loop
+                        .set_control_flow(ControlFlow::WaitUntil(self.last_frame + frame_interval));
                 }
             } else {
                 window.request_redraw();
@@ -766,6 +952,11 @@ pub fn run_app<A: RpuSceneApp + 'static>(app: A) -> Result<()> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "tvos"),
+    not(target_os = "ios")
+))]
 fn key_name_from_event(key: &winit::keyboard::Key) -> Option<String> {
     match key {
         winit::keyboard::Key::Character(value) => Some(value.to_uppercase()),
@@ -793,7 +984,9 @@ fn normalize_key_name(key: &str) -> String {
         "Up" => "ArrowUp".to_string(),
         "Down" => "ArrowDown".to_string(),
         "" | " " | "Spacebar" => "Space".to_string(),
-        other => other.to_uppercase().replace("ARROWLEFT", "ArrowLeft")
+        other => other
+            .to_uppercase()
+            .replace("ARROWLEFT", "ArrowLeft")
             .replace("ARROWRIGHT", "ArrowRight")
             .replace("ARROWUP", "ArrowUp")
             .replace("ARROWDOWN", "ArrowDown")
@@ -822,7 +1015,11 @@ struct GpuState {
 }
 
 impl GpuState {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(target_os = "tvos"),
+        not(target_os = "ios")
+    ))]
     async fn new(window: std::sync::Arc<winit::window::Window>) -> Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
@@ -895,8 +1092,15 @@ impl GpuState {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        let white_texture =
-            GpuTexture::from_rgba(&device, &queue, &sampler, &bind_group_layout, 1, 1, &[255; 4]);
+        let white_texture = GpuTexture::from_rgba(
+            &device,
+            &queue,
+            &sampler,
+            &bind_group_layout,
+            1,
+            1,
+            &[255; 4],
+        );
 
         Ok(Self {
             surface,
@@ -985,8 +1189,15 @@ impl GpuState {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        let white_texture =
-            GpuTexture::from_rgba(&device, &queue, &sampler, &bind_group_layout, 1, 1, &[255; 4]);
+        let white_texture = GpuTexture::from_rgba(
+            &device,
+            &queue,
+            &sampler,
+            &bind_group_layout,
+            1,
+            1,
+            &[255; 4],
+        );
 
         Ok(Self {
             surface,
@@ -1003,7 +1214,10 @@ impl GpuState {
         })
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        any(target_os = "macos", target_os = "tvos", target_os = "ios")
+    ))]
     fn new_core_animation_layer(layer_ptr: *mut c_void, width: u32, height: u32) -> Result<Self> {
         let width = width.max(1);
         let height = height.max(1);
@@ -1074,8 +1288,15 @@ impl GpuState {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        let white_texture =
-            GpuTexture::from_rgba(&device, &queue, &sampler, &bind_group_layout, 1, 1, &[255; 4]);
+        let white_texture = GpuTexture::from_rgba(
+            &device,
+            &queue,
+            &sampler,
+            &bind_group_layout,
+            1,
+            1,
+            &[255; 4],
+        );
 
         Ok(Self {
             surface,
@@ -1140,11 +1361,12 @@ impl GpuState {
                 pass.set_pipeline(&self.quad_pipeline);
                 for batch in &batches {
                     let vertex_buffer =
-                        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("rpu-quad-vertices"),
-                            contents: bytemuck::cast_slice(&batch.vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                        self.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("rpu-quad-vertices"),
+                                contents: bytemuck::cast_slice(&batch.vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
                     let texture = self.texture_for_key(batch.texture_path.as_deref());
                     pass.set_bind_group(0, &texture.bind_group, &[]);
                     pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -1159,6 +1381,21 @@ impl GpuState {
 
     fn ensure_texture(&mut self, path: &str) {
         if !self.texture_cache.contains_key(path) {
+            if let Ok(textures) = generated_textures().lock() {
+                if let Some(asset) = textures.get(path) {
+                    let texture = GpuTexture::from_rgba(
+                        &self.device,
+                        &self.queue,
+                        &self.sampler,
+                        &self.bind_group_layout,
+                        asset.width,
+                        asset.height,
+                        &asset.rgba,
+                    );
+                    self.texture_cache.insert(path.to_string(), texture);
+                    return;
+                }
+            }
             #[cfg(not(target_arch = "wasm32"))]
             let image = std::fs::read(path)
                 .ok()
@@ -1283,12 +1520,8 @@ impl GpuState {
             #[cfg(not(target_arch = "wasm32"))]
             let bytes = std::fs::read(path).ok()?;
             #[cfg(target_arch = "wasm32")]
-            let bytes = WEB_ASSETS.with(|assets| {
-                assets
-                    .borrow()
-                    .get(path.trim_start_matches('/'))
-                    .cloned()
-            })?;
+            let bytes = WEB_ASSETS
+                .with(|assets| assets.borrow().get(path.trim_start_matches('/')).cloned())?;
             let font = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()?;
             self.font_cache.insert(path.to_string(), font);
         }
@@ -1303,14 +1536,20 @@ impl GpuState {
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "macos", target_os = "tvos", target_os = "ios")
+))]
 pub struct MetalLayerRunner<A: RpuSceneApp> {
     app: A,
     gpu: GpuState,
     ctx: RuntimeContext,
 }
 
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "macos", target_os = "tvos", target_os = "ios")
+))]
 impl<A: RpuSceneApp> MetalLayerRunner<A> {
     pub fn new(
         mut app: A,
@@ -1414,7 +1653,10 @@ async fn start_web_app<A: RpuSceneApp + 'static>(
     device_scale: f32,
 ) -> Result<()> {
     let gpu = GpuState::new_canvas(canvas.clone()).await?;
-    let mut ctx = RuntimeContext::new((canvas.width().max(1), canvas.height().max(1)), device_scale);
+    let mut ctx = RuntimeContext::new(
+        (canvas.width().max(1), canvas.height().max(1)),
+        device_scale,
+    );
     app.set_native_mode(false);
     app.set_scale(device_scale);
     app.init(&mut ctx);
@@ -1486,7 +1728,11 @@ async fn start_web_app<A: RpuSceneApp + 'static>(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn configure_canvas(canvas: &HtmlCanvasElement, logical_size: (u32, u32), scale: f32) -> Result<()> {
+fn configure_canvas(
+    canvas: &HtmlCanvasElement,
+    logical_size: (u32, u32),
+    scale: f32,
+) -> Result<()> {
     let style = canvas.style();
     style
         .set_property("width", &format!("{}px", logical_size.0))
@@ -1522,7 +1768,9 @@ fn fit_canvas_to_viewport(
         .max(1.0);
     let logical_w = logical_size.0.max(1) as f64;
     let logical_h = logical_size.1.max(1) as f64;
-    let fit_scale = (viewport_w / logical_w).min(viewport_h / logical_h).max(0.1);
+    let fit_scale = (viewport_w / logical_w)
+        .min(viewport_h / logical_h)
+        .max(0.1);
     let css_w = (logical_w * fit_scale).round().max(1.0) as u32;
     let css_h = (logical_h * fit_scale).round().max(1.0) as u32;
     let device_scale = window.device_pixel_ratio().max(1.0) as f32;
@@ -1571,7 +1819,16 @@ fn register_web_input_handlers<A: RpuSceneApp + 'static>(
         let runner = runner.clone();
         let keydown = Closure::wrap(Box::new(move |event: KeyboardEvent| {
             let key = event.key();
-            if matches!(key.as_str(), " " | "Spacebar" | "Space" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Enter") {
+            if matches!(
+                key.as_str(),
+                " " | "Spacebar"
+                    | "Space"
+                    | "ArrowUp"
+                    | "ArrowDown"
+                    | "ArrowLeft"
+                    | "ArrowRight"
+                    | "Enter"
+            ) {
                 event.prevent_default();
             }
             runner.borrow_mut().ctx.set_key_pressed(&key, true);
@@ -1586,7 +1843,16 @@ fn register_web_input_handlers<A: RpuSceneApp + 'static>(
         let runner = runner.clone();
         let keyup = Closure::wrap(Box::new(move |event: KeyboardEvent| {
             let key = event.key();
-            if matches!(key.as_str(), " " | "Spacebar" | "Space" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Enter") {
+            if matches!(
+                key.as_str(),
+                " " | "Spacebar"
+                    | "Space"
+                    | "ArrowUp"
+                    | "ArrowDown"
+                    | "ArrowLeft"
+                    | "ArrowRight"
+                    | "Enter"
+            ) {
                 event.prevent_default();
             }
             runner.borrow_mut().ctx.set_key_pressed(&key, false);
@@ -1662,7 +1928,11 @@ fn register_web_input_handlers<A: RpuSceneApp + 'static>(
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "tvos"),
+    not(target_os = "ios")
+))]
 fn logical_size(window: &winit::window::Window) -> (u32, u32) {
     let size = window.inner_size();
     let logical = size.to_logical::<f64>(window.scale_factor());
@@ -1800,7 +2070,16 @@ fn build_vertices(
     let mut out = Vec::with_capacity(rects.len() * 6);
     for rect in rects {
         let (x, y, width, height, rotation, color, flip_x, flip_y) = match rect {
-            RenderItem::Rect(rect) => (rect.x, rect.y, rect.width, rect.height, 0.0, rect.color, false, false),
+            RenderItem::Rect(rect) => (
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                0.0,
+                rect.color,
+                false,
+                false,
+            ),
             RenderItem::Sprite(rect) => (
                 rect.x,
                 rect.y,
@@ -1849,12 +2128,36 @@ fn build_vertices(
         let p2 = rotate(half_w, half_h);
         let p3 = rotate(-half_w, half_h);
         out.extend_from_slice(&[
-            QuadVertex { position: p0, color, uv: uv0 },
-            QuadVertex { position: p1, color, uv: uv1 },
-            QuadVertex { position: p2, color, uv: uv2 },
-            QuadVertex { position: p0, color, uv: uv0 },
-            QuadVertex { position: p2, color, uv: uv2 },
-            QuadVertex { position: p3, color, uv: uv3 },
+            QuadVertex {
+                position: p0,
+                color,
+                uv: uv0,
+            },
+            QuadVertex {
+                position: p1,
+                color,
+                uv: uv1,
+            },
+            QuadVertex {
+                position: p2,
+                color,
+                uv: uv2,
+            },
+            QuadVertex {
+                position: p0,
+                color,
+                uv: uv0,
+            },
+            QuadVertex {
+                position: p2,
+                color,
+                uv: uv2,
+            },
+            QuadVertex {
+                position: p3,
+                color,
+                uv: uv3,
+            },
         ]);
     }
     out

@@ -133,11 +133,23 @@ The generated export currently includes:
 - `RustBridge/`
 - `Project/`
 - `RPUAppleApp.xcodeproj/`
+- `RPUAppleTVApp.xcodeproj/`
+- `tvOS-Info.plist`
 
-The generated macOS host is a native AppKit app. It creates the Apple window and `CAMetalLayer`, while Rust renders into that surface through FFI using the same renderer as the normal desktop runtime.
+The generated macOS host is a native AppKit app. The generated tvOS host is a native UIKit app using the `UIScene` lifecycle. Both create a native `CAMetalLayer`, while Rust renders into that surface through FFI using the same renderer as the normal desktop runtime.
 
 Current metadata and sizing behavior:
 
 - uses `[meta].display_name` for the app display name
 - uses `[meta].bundle_id` for the bundle identifier
+- uses `[meta].development_team` for generated Xcode signing settings when present
 - uses `[window].width`, `[window].height`, and `[window].default_scale` for the startup content size
+
+For tvOS builds, Xcode runs `RustBridge/build-rust.sh` during the app build. If a required Rust target is missing, install it with the exact command printed by the build log. Common targets are:
+
+```bash
+rustup target add aarch64-apple-tvos
+rustup target add aarch64-apple-tvos-sim
+```
+
+tvOS remote and controller input is normalized to the same RPU keys used elsewhere. Directional input maps to movement keys, while action input maps to `Space`. Audio uses the Apple host bridge, so sound effects and background music work in the generated tvOS app as well as on desktop.

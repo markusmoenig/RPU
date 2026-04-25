@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+image.workspace = true
 rpu-core = { path = "../rpu-core" }
 rpu-scenevm = { path = "../rpu-scenevm" }
 web-time = "1.1"

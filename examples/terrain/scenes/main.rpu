@@ -12,6 +12,13 @@ scene Main {
     map Terrain {
         origin = (80, 128)
         cell = (48, 48)
+        render = synth
+        cap_depth = 0.68
+        ramp_cap_depth = 0.62
+        join_cap_depth = 0.72
+        shoulder_width = 0.82
+        surface_roughness = 0.045
+        shoulder_shape = bend
 
         legend {
             # = grass>dirt>rock

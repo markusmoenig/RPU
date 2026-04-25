@@ -16,6 +16,7 @@ This is intentionally basic and is meant as a foundation for later terrain exper
 map Terrain {
     origin = (80, 176)
     cell = (48, 48)
+    render = basic
 
     legend {
         x = marker
@@ -40,6 +41,7 @@ Current map support includes:
 
 - `origin`
 - `cell`
+- `render`
 - `legend`
 - `ascii`
 - color-mapped cells rendered as rects
@@ -115,3 +117,66 @@ From those authored cells, RPU derives a neighborhood-based terrain shape such a
 - `Interior`
 
 Right now terrain entries render as generated debug colors so these derived shape classes are visible while the system is still being built out.
+
+## Terrain Render Modes
+
+Terrain maps can choose how the main terrain render/preview path behaves:
+
+```rpu
+map Terrain {
+    origin = (80, 176)
+    cell = (48, 48)
+    render = basic
+}
+```
+
+Supported values:
+
+- `debug`
+  - uses the structural debug-colored terrain view
+- `basic`
+  - uses the explicit cap/body terrain renderer
+  - no WFC or solved surface strip is used
+- `synth`
+  - uses the current solved surface-cap path on top of the same body fill
+
+This lets users keep the same topology/material authoring and choose later whether they want:
+
+- pure debugging
+- a simple non-synth terrain render
+- or the experimental synthesized surface pass
+
+## Terrain Style Controls
+
+Terrain maps can also tune the generated cap and shoulder shape:
+
+```rpu
+map Terrain {
+    render = synth
+    cap_depth = 0.68
+    ramp_cap_depth = 0.62
+    join_cap_depth = 0.72
+    shoulder_width = 0.82
+    surface_roughness = 0.045
+    shoulder_shape = bend
+}
+```
+
+Supported style properties:
+
+- `cap_depth`
+  - grass/cap thickness on flat top surfaces, as a fraction of tile height
+- `ramp_cap_depth`
+  - cap thickness on explicit `/` and `\` ramp tiles
+- `join_cap_depth`
+  - cap thickness on plateau cells that connect to a ramp
+- `shoulder_width`
+  - how much of a plateau join cell is shaped by the ramp shoulder
+- `surface_roughness`
+  - small world-coordinate surface waviness applied to caps
+  - `0.0` keeps authored terrain perfectly geometric
+- `shoulder_shape`
+  - `linear` for a straight shoulder
+  - `bend` for a smoother eased shoulder
+
+These controls affect `basic` and `synth` terrain rendering. They do not change the ASCII topology; they only change how the generated terrain surface is shaped and sampled.

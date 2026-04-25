@@ -1978,6 +1978,7 @@ name = "rpu-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "image",
  "rpu-core",
  "rpu-scenevm",
  "web-time",
@@ -1993,6 +1994,7 @@ dependencies = [
  "console_error_panic_hook",
  "fontdue",
  "image",
+ "lewton",
  "pollster",
  "rodio",
  "rpu-core",
