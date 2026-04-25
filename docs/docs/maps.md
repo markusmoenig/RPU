@@ -21,6 +21,7 @@ map Terrain {
     legend {
         x = marker
         # = #c58c35
+        g = "tile-grass-top.png"
         - = #4dc7ff
         / = #7b8cff
         \ = #5970d8
@@ -45,7 +46,10 @@ Current map support includes:
 - `legend`
 - `ascii`
 - color-mapped cells rendered as rects
+- texture-mapped cells rendered as sprites
 - marker cells used for sprite placement
+- typed spawn markers used for entity placement
+- solid collision rect generation for platformer physics
 - terrain legend entries with topology + material parsing
 - derived terrain shape classification for debug rendering
 
@@ -62,13 +66,63 @@ sprite Player {
 }
 ```
 
+Typed spawn markers bind a map cell to an entity name:
+
+```rpu
+map Terrain {
+    legend {
+        p = spawn(Player)
+    }
+
+    ascii {
+        p
+        ####
+    }
+}
+
+sprite Player {
+    physics = platformer
+    texture = "foxy_idle1.png"
+}
+```
+
+`spawn(Player)` places the scene sprite named `Player` at that map cell. This is often more readable than assigning a separate `pos` to the sprite.
+
+## Direct Tile Textures
+
+For tile-based games that do not want terrain synthesis, legend entries can map symbols directly to texture filenames:
+
+```rpu
+map Terrain {
+    origin = (0, 84)
+    cell = (24, 24)
+
+    legend {
+        # = "tile-grass-top.png"
+        d = "tile-dirt.png"
+        < = "tile-slope-left.png"
+        > = "tile-slope-right.png"
+    }
+
+    ascii {
+         ####
+    ############
+    dddddddddddd
+    }
+}
+```
+
+Quoted texture entries are drawn one sprite per map cell using the map `cell` size. This path is deterministic and does not use terrain classification, material stacks, WFC, or synthesized caps.
+
+Direct texture cells currently also generate solid platformer collision. Spawn and marker cells do not collide.
+
 ## Current limits
 
 The map system does not yet provide:
 
 - tile rules
 - procedural terrain generation
-- collision generation
+- per-tile collision policies such as `one_way` or `none`
 - slope semantics beyond authored symbols
 - texture synthesis
 

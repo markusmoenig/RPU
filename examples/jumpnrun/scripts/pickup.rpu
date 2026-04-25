@@ -1,0 +1,9 @@
+state base_y = 0
+
+on ready() {
+    base_y = self.y
+}
+
+on update(dt) {
+    self.y = base_y + lerp(-2.0, 2.0, pulse(0.9))
+}

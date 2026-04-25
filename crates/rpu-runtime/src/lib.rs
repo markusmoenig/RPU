@@ -1,10 +1,10 @@
 use anyhow::Result;
 use image::{ImageBuffer, Rgba};
 use rpu_core::{
-    Anchor, AnimationMode, AsciiMapNode, BinaryOp, BundledProject, BytecodeOp, CompareOp,
-    CompiledProject, Condition, DestroyTarget, DrawCommand, Expr, MapLegendMeaning, OpCode,
-    RectNode, ResizeMode, RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget,
-    SpriteNode, TextAlign, TextNode, WindowConfig, apply_scene_layout,
+    Anchor, AnimationMode, AsciiMapNode, BinaryOp, BundledProject, BytecodeOp, CompiledProject,
+    Condition, DestroyTarget, DrawCommand, Expr, MapLegendMeaning, OpCode, RectNode, ResizeMode,
+    RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget, SpriteNode, TextAlign,
+    TextNode, WindowConfig, apply_scene_layout,
 };
 #[cfg(any(
     target_arch = "wasm32",
@@ -161,7 +161,7 @@ impl RpuSceneApp for RuntimeApp {
                         *animation_fps,
                         *animation_mode,
                         self.session.query_state.elapsed_time,
-                        entity.spawn_time,
+                        entity.animation_start_time,
                     );
                     let texture_path = texture_name
                         .as_deref()
@@ -244,8 +244,17 @@ struct RuntimeSession {
 
 struct RuntimeWorld {
     static_draw_commands: Vec<DrawCommand>,
+    colliders: Vec<RuntimeCollider>,
     templates: Vec<RuntimeEntity>,
     entities: Vec<RuntimeEntity>,
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeCollider {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 }
 
 #[derive(Clone)]
@@ -254,6 +263,7 @@ struct RuntimeEntity {
     template: bool,
     visible: bool,
     spawn_time: f32,
+    animation_start_time: f32,
     group: Option<String>,
     anchor: Anchor,
     layer: i32,
@@ -267,9 +277,20 @@ struct RuntimeEntity {
     repeat_y: bool,
     flip_x: bool,
     flip_y: bool,
+    physics: RuntimePhysics,
     script: Option<String>,
     script_state: HashMap<String, Value>,
     kind: RuntimeEntityKind,
+}
+
+#[derive(Clone)]
+struct RuntimePhysics {
+    mode: rpu_core::PhysicsMode,
+    settings: rpu_core::PlatformerPhysicsSettings,
+    velocity: [f32; 2],
+    move_x: f32,
+    jump_requested: bool,
+    grounded: bool,
 }
 
 #[derive(Clone)]
@@ -278,6 +299,8 @@ enum RuntimeEntityKind {
     Sprite {
         texture: Option<String>,
         frames: Vec<String>,
+        current_animation: Option<String>,
+        animations: HashMap<String, rpu_core::SpriteAnimation>,
         animation_fps: f32,
         animation_mode: AnimationMode,
         destroy_on_animation_end: bool,
@@ -424,6 +447,7 @@ impl RuntimeSession {
         if self.initialized {
             self.ticks = self.ticks.saturating_add(1);
             self.execute_event("update", dt);
+            self.world.apply_platformer_physics(dt);
             self.world
                 .remove_finished_animations(self.query_state.elapsed_time);
             self.capture_persistent_entity_state();
@@ -631,16 +655,18 @@ impl RuntimeSession {
                     entity_index,
                     entity.name.clone(),
                     script.path.clone(),
+                    handler.params.clone(),
                     handler.ops.clone(),
                 ));
             }
         }
 
-        for (_entity_index, entity_name, script_path, ops) in scheduled {
+        for (_entity_index, entity_name, script_path, params, ops) in scheduled {
             let Some(current_index) = self.world.find_entity_index(&entity_name) else {
                 continue;
             };
             let mut locals = HashMap::new();
+            bind_handler_args(&params, &[Value::Scalar(dt)], &mut locals);
             self.apply_ops(
                 current_index,
                 &entity_name,
@@ -658,6 +684,16 @@ impl RuntimeSession {
     }
 
     fn execute_entity_event(&mut self, entity_index: usize, event: &str, dt: f32) {
+        self.execute_entity_event_with_args(entity_index, event, dt, &[Value::Scalar(dt)]);
+    }
+
+    fn execute_entity_event_with_args(
+        &mut self,
+        entity_index: usize,
+        event: &str,
+        dt: f32,
+        args: &[Value],
+    ) {
         let Some(entity) = self.world.entities.get(entity_index) else {
             return;
         };
@@ -673,27 +709,30 @@ impl RuntimeSession {
         else {
             return;
         };
-        let ops: Vec<BytecodeOp> = script
+        let handlers: Vec<(Vec<String>, Vec<BytecodeOp>)> = script
             .handlers
             .iter()
             .filter(|handler| handler.event == event)
-            .flat_map(|handler| handler.ops.clone())
+            .map(|handler| (handler.params.clone(), handler.ops.clone()))
             .collect();
-        if ops.is_empty() {
+        if handlers.is_empty() {
             return;
         }
         let entity_name = entity.name.clone();
-        let mut locals = HashMap::new();
-        let _ = self.apply_ops(
-            entity_index,
-            &entity_name,
-            &script_path,
-            event,
-            &ops,
-            dt,
-            &mut locals,
-            0,
-        );
+        for (params, ops) in handlers {
+            let mut locals = HashMap::new();
+            bind_handler_args(&params, args, &mut locals);
+            let _ = self.apply_ops(
+                entity_index,
+                &entity_name,
+                &script_path,
+                event,
+                &ops,
+                dt,
+                &mut locals,
+                0,
+            );
+        }
         let _ = self.apply_pending_scene_change();
     }
 
@@ -1233,6 +1272,40 @@ impl RuntimeSession {
         call_depth: usize,
     ) -> Option<ExecSignal> {
         match name {
+            "emit" if args.len() == 2 => {
+                let event_name = self
+                    .eval_expr(
+                        entity_index,
+                        entity_name,
+                        script_path,
+                        event,
+                        line,
+                        &args[0],
+                        dt,
+                        locals,
+                        call_depth,
+                    )?
+                    .as_string()?
+                    .to_string();
+                let value = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[1],
+                    dt,
+                    locals,
+                    call_depth,
+                )?;
+                self.execute_entity_event_with_args(
+                    entity_index,
+                    "event",
+                    dt,
+                    &[Value::String(event_name), value],
+                );
+                Some(ExecSignal::Continue)
+            }
             "set_scene" if args.len() == 1 => {
                 let scene_name = self
                     .eval_expr(
@@ -1469,40 +1542,29 @@ impl RuntimeSession {
     ) -> Option<bool> {
         Some(match condition {
             Condition::Compare { left, op, right } => {
-                let left = self
-                    .eval_expr(
-                        entity_index,
-                        entity_name,
-                        script_path,
-                        event,
-                        line,
-                        left,
-                        dt,
-                        locals,
-                        call_depth,
-                    )?
-                    .as_scalar()?;
-                let right = self
-                    .eval_expr(
-                        entity_index,
-                        entity_name,
-                        script_path,
-                        event,
-                        line,
-                        right,
-                        dt,
-                        locals,
-                        call_depth,
-                    )?
-                    .as_scalar()?;
-                match op {
-                    CompareOp::Less => left < right,
-                    CompareOp::LessEqual => left <= right,
-                    CompareOp::Greater => left > right,
-                    CompareOp::GreaterEqual => left >= right,
-                    CompareOp::Equal => (left - right).abs() < f32::EPSILON,
-                    CompareOp::NotEqual => (left - right).abs() >= f32::EPSILON,
-                }
+                let left = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    left,
+                    dt,
+                    locals,
+                    call_depth,
+                )?;
+                let right = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    right,
+                    dt,
+                    locals,
+                    call_depth,
+                )?;
+                compare_values(&left, *op, &right)?
             }
             Condition::And(left, right) => {
                 self.eval_condition(
@@ -2123,6 +2185,7 @@ impl RuntimeSession {
             return false;
         };
 
+        let elapsed_time = self.query_state.elapsed_time;
         match (target_property(target), value) {
             (ScriptProperty::X, Value::Scalar(value)) => entity.pos[0] = value,
             (ScriptProperty::Y, Value::Scalar(value)) => entity.pos[1] = value,
@@ -2132,19 +2195,64 @@ impl RuntimeSession {
             (ScriptProperty::Size, Value::Vec2(value)) => entity.size = value,
             (ScriptProperty::Rotation, Value::Scalar(value)) => entity.rotation = value,
             (ScriptProperty::Color, Value::Color(value)) => entity.color = value,
+            (ScriptProperty::FlipX, Value::Scalar(value)) => entity.flip_x = value != 0.0,
+            (ScriptProperty::FlipY, Value::Scalar(value)) => entity.flip_y = value != 0.0,
+            (ScriptProperty::Vx, Value::Scalar(value)) => entity.physics.velocity[0] = value,
+            (ScriptProperty::Vy, Value::Scalar(value)) => entity.physics.velocity[1] = value,
+            (ScriptProperty::MoveX, Value::Scalar(value)) => {
+                entity.physics.move_x = value.clamp(-1.0, 1.0)
+            }
+            (ScriptProperty::Jump, Value::Scalar(value)) => {
+                entity.physics.jump_requested = value != 0.0
+            }
+            (ScriptProperty::Grounded, Value::Scalar(value)) => {
+                entity.physics.grounded = value != 0.0
+            }
             (ScriptProperty::Texture, Value::String(value)) => match &mut entity.kind {
                 RuntimeEntityKind::Sprite {
                     texture,
                     frames,
+                    current_animation,
+                    animation_fps,
+                    animation_mode,
+                    destroy_on_animation_end,
+                    ..
+                } => {
+                    *texture = Some(value.clone());
+                    *frames = vec![value];
+                    *current_animation = None;
+                    *animation_fps = 0.0;
+                    *animation_mode = AnimationMode::Loop;
+                    *destroy_on_animation_end = false;
+                }
+                RuntimeEntityKind::Rect | RuntimeEntityKind::Text { .. } => return false,
+            },
+            (ScriptProperty::Animation, Value::String(value)) => match &mut entity.kind {
+                RuntimeEntityKind::Sprite {
+                    texture,
+                    frames,
+                    current_animation,
+                    animations,
                     animation_fps,
                     animation_mode,
                     destroy_on_animation_end,
                 } => {
-                    *texture = Some(value.clone());
-                    *frames = vec![value];
-                    *animation_fps = 0.0;
-                    *animation_mode = AnimationMode::Loop;
+                    let Some(animation) = animations.get(&value) else {
+                        return false;
+                    };
+                    if current_animation.as_deref() == Some(value.as_str()) {
+                        return true;
+                    }
+                    if animation.textures.is_empty() {
+                        return false;
+                    }
+                    *texture = animation.textures.first().cloned();
+                    *frames = animation.textures.clone();
+                    *current_animation = Some(value);
+                    *animation_fps = animation.fps;
+                    *animation_mode = animation.mode;
                     *destroy_on_animation_end = false;
+                    entity.animation_start_time = elapsed_time;
                 }
                 RuntimeEntityKind::Rect | RuntimeEntityKind::Text { .. } => return false,
             },
@@ -2176,10 +2284,23 @@ impl RuntimeSession {
             ScriptProperty::Size => Value::Vec2(entity.size),
             ScriptProperty::Rotation => Value::Scalar(entity.rotation),
             ScriptProperty::Color => Value::Color(entity.color),
+            ScriptProperty::FlipX => Value::Scalar(entity.flip_x as i32 as f32),
+            ScriptProperty::FlipY => Value::Scalar(entity.flip_y as i32 as f32),
+            ScriptProperty::Vx => Value::Scalar(entity.physics.velocity[0]),
+            ScriptProperty::Vy => Value::Scalar(entity.physics.velocity[1]),
+            ScriptProperty::MoveX => Value::Scalar(entity.physics.move_x),
+            ScriptProperty::Jump => Value::Scalar(entity.physics.jump_requested as i32 as f32),
+            ScriptProperty::Grounded => Value::Scalar(entity.physics.grounded as i32 as f32),
             ScriptProperty::Texture => match &entity.kind {
                 RuntimeEntityKind::Sprite { texture, .. } => {
                     Value::String(texture.clone().unwrap_or_default())
                 }
+                RuntimeEntityKind::Rect | RuntimeEntityKind::Text { .. } => return None,
+            },
+            ScriptProperty::Animation => match &entity.kind {
+                RuntimeEntityKind::Sprite {
+                    current_animation, ..
+                } => Value::String(current_animation.clone().unwrap_or_default()),
                 RuntimeEntityKind::Rect | RuntimeEntityKind::Text { .. } => return None,
             },
             ScriptProperty::Text => match &entity.kind {
@@ -2209,6 +2330,7 @@ impl RuntimeSession {
 impl RuntimeWorld {
     fn from_compiled_scene(compiled: &CompiledProject, scene_name: &str, asset_base: &str) -> Self {
         let mut static_draw_commands = Vec::new();
+        let mut colliders = Vec::new();
         let mut templates = Vec::new();
         let mut entities = Vec::new();
 
@@ -2219,6 +2341,7 @@ impl RuntimeWorld {
                 }
                 let scene = apply_scene_layout(scene);
                 static_draw_commands.extend(compile_static_map_commands(&scene.maps, asset_base));
+                colliders.extend(compile_map_colliders(&scene.maps));
                 for high_score in &scene.high_scores {
                     if !high_score.visual.visible || high_score.visual.template {
                         continue;
@@ -2269,6 +2392,7 @@ impl RuntimeWorld {
 
         Self {
             static_draw_commands,
+            colliders,
             templates,
             entities,
         }
@@ -2305,6 +2429,7 @@ impl RuntimeWorld {
         entity.visible = true;
         entity.pos = pos;
         entity.spawn_time = spawn_time;
+        entity.animation_start_time = spawn_time;
         self.entities.push(entity);
         Some(self.entities.len() - 1)
     }
@@ -2313,6 +2438,82 @@ impl RuntimeWorld {
         let original = self.entities.len();
         self.entities.retain(|entity| entity.name != name);
         self.entities.len() != original
+    }
+
+    fn apply_platformer_physics(&mut self, dt: f32) {
+        let colliders = &self.colliders;
+        for entity in &mut self.entities {
+            if entity.physics.mode != rpu_core::PhysicsMode::Platformer {
+                continue;
+            }
+            let settings = entity.physics.settings;
+
+            if entity.physics.move_x != 0.0 {
+                entity.physics.velocity[0] += entity.physics.move_x * settings.acceleration * dt;
+                entity.physics.velocity[0] =
+                    entity.physics.velocity[0].clamp(-settings.max_speed, settings.max_speed);
+            } else if entity.physics.velocity[0] > 0.0 {
+                entity.physics.velocity[0] =
+                    (entity.physics.velocity[0] - settings.friction * dt).max(0.0);
+            } else if entity.physics.velocity[0] < 0.0 {
+                entity.physics.velocity[0] =
+                    (entity.physics.velocity[0] + settings.friction * dt).min(0.0);
+            }
+
+            if entity.physics.jump_requested && entity.physics.grounded {
+                entity.physics.velocity[1] = -settings.jump_speed;
+                entity.physics.grounded = false;
+            }
+            entity.physics.jump_requested = false;
+
+            let vx = entity.physics.velocity[0];
+            entity.pos[0] += vx * dt;
+            if vx != 0.0 {
+                for collider in colliders {
+                    if !runtime_aabb_intersects(
+                        entity.pos[0],
+                        entity.pos[1],
+                        entity.size[0],
+                        entity.size[1],
+                        collider,
+                    ) {
+                        continue;
+                    }
+                    if vx > 0.0 {
+                        entity.pos[0] = collider.x - entity.size[0];
+                    } else {
+                        entity.pos[0] = collider.x + collider.width;
+                    }
+                    entity.physics.velocity[0] = 0.0;
+                }
+            }
+
+            entity.physics.velocity[1] = (entity.physics.velocity[1] + settings.gravity * dt)
+                .clamp(-settings.jump_speed, settings.max_fall_speed);
+            let vy = entity.physics.velocity[1];
+            entity.pos[1] += vy * dt;
+            entity.physics.grounded = false;
+            if vy != 0.0 {
+                for collider in colliders {
+                    if !runtime_aabb_intersects(
+                        entity.pos[0],
+                        entity.pos[1],
+                        entity.size[0],
+                        entity.size[1],
+                        collider,
+                    ) {
+                        continue;
+                    }
+                    if vy > 0.0 {
+                        entity.pos[1] = collider.y - entity.size[1];
+                        entity.physics.grounded = true;
+                    } else {
+                        entity.pos[1] = collider.y + collider.height;
+                    }
+                    entity.physics.velocity[1] = 0.0;
+                }
+            }
+        }
     }
 
     fn remove_finished_animations(&mut self, elapsed_time: f32) {
@@ -2334,7 +2535,7 @@ impl RuntimeWorld {
                     return true;
                 }
                 let duration = frames.len() as f32 / *animation_fps;
-                elapsed_time - entity.spawn_time < duration
+                elapsed_time - entity.animation_start_time < duration
             }
         });
     }
@@ -2354,6 +2555,44 @@ impl Value {
             _ => None,
         }
     }
+}
+
+fn bind_handler_args(params: &[String], args: &[Value], locals: &mut HashMap<String, Value>) {
+    for (param, value) in params.iter().zip(args.iter()) {
+        locals.insert(param.clone(), value.clone());
+    }
+}
+
+fn compare_values(left: &Value, op: rpu_core::CompareOp, right: &Value) -> Option<bool> {
+    match (left, right) {
+        (Value::Scalar(left), Value::Scalar(right)) => Some(match op {
+            rpu_core::CompareOp::Less => left < right,
+            rpu_core::CompareOp::LessEqual => left <= right,
+            rpu_core::CompareOp::Greater => left > right,
+            rpu_core::CompareOp::GreaterEqual => left >= right,
+            rpu_core::CompareOp::Equal => (left - right).abs() < f32::EPSILON,
+            rpu_core::CompareOp::NotEqual => (left - right).abs() >= f32::EPSILON,
+        }),
+        (Value::String(left), Value::String(right)) => match op {
+            rpu_core::CompareOp::Equal => Some(left == right),
+            rpu_core::CompareOp::NotEqual => Some(left != right),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn runtime_aabb_intersects(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    collider: &RuntimeCollider,
+) -> bool {
+    x < collider.x + collider.width
+        && x + width > collider.x
+        && y < collider.y + collider.height
+        && y + height > collider.y
 }
 
 impl RenderView {
@@ -2512,6 +2751,7 @@ fn runtime_rect_entity(rect: &RectNode) -> RuntimeEntity {
         template: rect.visual.template,
         visible: rect.visual.visible,
         spawn_time: 0.0,
+        animation_start_time: 0.0,
         anchor: rect.visual.anchor,
         layer: rect.visual.layer,
         z: rect.visual.z,
@@ -2525,6 +2765,14 @@ fn runtime_rect_entity(rect: &RectNode) -> RuntimeEntity {
         repeat_y: false,
         flip_x: false,
         flip_y: false,
+        physics: RuntimePhysics {
+            mode: rpu_core::PhysicsMode::None,
+            settings: rpu_core::PlatformerPhysicsSettings::default(),
+            velocity: [0.0, 0.0],
+            move_x: 0.0,
+            jump_requested: false,
+            grounded: false,
+        },
         script: rect.visual.script_binding.clone(),
         script_state: HashMap::new(),
         kind: RuntimeEntityKind::Rect,
@@ -2539,6 +2787,7 @@ fn runtime_sprite_entity(
         .symbol
         .as_deref()
         .and_then(|symbol| markers.get(symbol))
+        .or_else(|| markers.get(&sprite.name))
         .copied()
         .unwrap_or(sprite.visual.pos);
 
@@ -2547,6 +2796,7 @@ fn runtime_sprite_entity(
         template: sprite.visual.template,
         visible: sprite.visual.visible,
         spawn_time: 0.0,
+        animation_start_time: 0.0,
         anchor: sprite.visual.anchor,
         layer: sprite.visual.layer,
         z: sprite.visual.z,
@@ -2560,11 +2810,21 @@ fn runtime_sprite_entity(
         repeat_y: sprite.repeat_y,
         flip_x: sprite.flip_x,
         flip_y: sprite.flip_y,
+        physics: RuntimePhysics {
+            mode: sprite.physics,
+            settings: sprite.physics_settings,
+            velocity: [0.0, 0.0],
+            move_x: 0.0,
+            jump_requested: false,
+            grounded: false,
+        },
         script: sprite.visual.script_binding.clone(),
         script_state: HashMap::new(),
         kind: RuntimeEntityKind::Sprite {
             texture: sprite.textures.first().cloned(),
             frames: sprite.textures.clone(),
+            current_animation: None,
+            animations: sprite.animations.clone(),
             animation_fps: sprite.animation_fps,
             animation_mode: sprite.animation_mode,
             destroy_on_animation_end: sprite.destroy_on_animation_end,
@@ -2578,6 +2838,7 @@ fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
         template: text.visual.template,
         visible: text.visual.visible,
         spawn_time: 0.0,
+        animation_start_time: 0.0,
         anchor: text.visual.anchor,
         layer: text.visual.layer,
         z: text.visual.z,
@@ -2591,6 +2852,14 @@ fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
         repeat_y: false,
         flip_x: false,
         flip_y: false,
+        physics: RuntimePhysics {
+            mode: rpu_core::PhysicsMode::None,
+            settings: rpu_core::PlatformerPhysicsSettings::default(),
+            velocity: [0.0, 0.0],
+            move_x: 0.0,
+            jump_requested: false,
+            grounded: false,
+        },
         script: text.visual.script_binding.clone(),
         script_state: HashMap::new(),
         kind: RuntimeEntityKind::Text {
@@ -2638,6 +2907,30 @@ fn compile_static_map_commands(maps: &[AsciiMapNode], asset_base: &str) -> Vec<D
                             width: map.cell[0],
                             height: map.cell[1],
                             color: *color,
+                            visible: true,
+                        }));
+                    }
+                    if let Some(MapLegendMeaning::Texture(texture)) = legend.get(&ch) {
+                        commands.push(DrawCommand::Sprite(rpu_core::SceneSprite {
+                            anchor: Anchor::World,
+                            layer: -10,
+                            z: (row as i32) * 100 + col as i32,
+                            x: map.origin[0] + col as f32 * map.cell[0],
+                            y: map.origin[1] + row as f32 * map.cell[1],
+                            width: map.cell[0],
+                            height: map.cell[1],
+                            rotation: 0.0,
+                            color: [1.0, 1.0, 1.0, 1.0],
+                            textures: vec![texture.clone()],
+                            animations: HashMap::new(),
+                            animation_fps: 0.0,
+                            animation_mode: rpu_core::AnimationMode::Loop,
+                            destroy_on_animation_end: false,
+                            scroll: [0.0, 0.0],
+                            repeat_x: false,
+                            repeat_y: false,
+                            flip_x: false,
+                            flip_y: false,
                             visible: true,
                         }));
                     }
@@ -2745,6 +3038,7 @@ fn generated_terrain_map_command(
         rotation: 0.0,
         color: [1.0, 1.0, 1.0, 1.0],
         textures: vec![key],
+        animations: HashMap::new(),
         animation_fps: 0.0,
         animation_mode: AnimationMode::Loop,
         destroy_on_animation_end: false,
@@ -5254,16 +5548,61 @@ fn compile_map_markers(maps: &[AsciiMapNode]) -> HashMap<String, [f32; 2]> {
             .collect();
         for (row, line) in map.rows.iter().enumerate() {
             for (col, ch) in line.chars().enumerate() {
-                if let Some(MapLegendMeaning::Marker) = legend.get(&ch) {
-                    markers.entry(ch.to_string()).or_insert([
-                        map.origin[0] + col as f32 * map.cell[0],
-                        map.origin[1] + row as f32 * map.cell[1],
-                    ]);
+                let Some(meaning) = legend.get(&ch) else {
+                    continue;
+                };
+                let pos = [
+                    map.origin[0] + col as f32 * map.cell[0],
+                    map.origin[1] + row as f32 * map.cell[1],
+                ];
+                match meaning {
+                    MapLegendMeaning::Marker => {
+                        markers.entry(ch.to_string()).or_insert(pos);
+                    }
+                    MapLegendMeaning::Spawn(name) => {
+                        markers.entry(ch.to_string()).or_insert(pos);
+                        markers.entry(name.clone()).or_insert(pos);
+                    }
+                    _ => {}
                 }
             }
         }
     }
     markers
+}
+
+fn compile_map_colliders(maps: &[AsciiMapNode]) -> Vec<RuntimeCollider> {
+    let mut colliders = Vec::new();
+    for map in maps {
+        let legend: HashMap<char, &MapLegendMeaning> = map
+            .legend
+            .iter()
+            .map(|entry| (entry.symbol, &entry.meaning))
+            .collect();
+        for (row, line) in map.rows.iter().enumerate() {
+            for (col, ch) in line.chars().enumerate() {
+                if !map_symbol_is_solid(ch, &legend) {
+                    continue;
+                }
+                colliders.push(RuntimeCollider {
+                    x: map.origin[0] + col as f32 * map.cell[0],
+                    y: map.origin[1] + row as f32 * map.cell[1],
+                    width: map.cell[0],
+                    height: map.cell[1],
+                });
+            }
+        }
+    }
+    colliders
+}
+
+fn map_symbol_is_solid(ch: char, legend: &HashMap<char, &MapLegendMeaning>) -> bool {
+    matches!(
+        legend.get(&ch),
+        Some(MapLegendMeaning::Texture(_))
+            | Some(MapLegendMeaning::Color(_))
+            | Some(MapLegendMeaning::Terrain(_))
+    )
 }
 
 fn submit_draw_command(

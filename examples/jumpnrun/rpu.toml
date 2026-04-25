@@ -1,0 +1,14 @@
+[project]
+name = "Jumpnrun Prototype"
+version = "0.1.0"
+start_scene = "Main"
+
+[window]
+width = 320
+height = 180
+default_scale = 4.0
+resize = "letterbox"
+
+[meta]
+bundle_id = "org.rpu.jumpnrun_prototype"
+display_name = "Jumpnrun Prototype"

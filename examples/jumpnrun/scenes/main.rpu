@@ -1,0 +1,176 @@
+scene Main {
+    meta {
+        title = "Jumpnrun Prototype"
+    }
+
+    camera MainCamera {
+        pos = (160, 90)
+        zoom = 1.0
+        background = #79d4ff
+    }
+
+    sprite BackgroundBack {
+        visible = false
+        layer = -100
+        z = 0
+        pos = (0, 0)
+        size = (320, 200)
+        color = #ffffff
+        texture = "background-back.png"
+    }
+
+    sprite BackgroundMiddle {
+        visible = false
+        layer = -90
+        z = 1
+        pos = (20, -115)
+        size = (154, 322)
+        color = #ffffff
+        texture = "background-middle.png"
+    }
+
+    map Terrain {
+        origin = (0, 60)
+        cell = (24, 24)
+
+        legend {
+            # = "tile-grass-top.png"
+            d = "tile-dirt.png"
+            < = "tile-slope-left.png"
+            > = "tile-slope-right.png"
+            p = spawn(Player)
+        }
+
+        ascii {
+           ####      
+         p           
+        #############
+        ddddddddddddd
+        }
+    }
+
+    sprite Player {
+        layer = 20
+        z = 30
+        size = (24, 24)
+        color = #ffffff
+        physics = platformer
+        acceleration = 520.0
+        friction = 840.0
+        max_speed = 96.0
+        gravity = 560.0
+        jump_speed = 255.0
+        max_fall_speed = 280.0
+        texture = "foxy_idle1.png"
+        animation_idle = ["foxy_idle1.png", "foxy_idle2.png"]
+        animation_idle_fps = 1.25
+        animation_run = ["foxy_run1.png", "foxy_run2.png", "foxy_run3.png"]
+        animation_run_fps = 9.0
+        animation_jump = ["foxy_jump.png"]
+        animation_fall = ["foxy_fall.png"]
+        animation_hurt = ["foxy_hurt.png"]
+        script = "player.rpu"
+    }
+
+    sprite Coin {
+        visible = false
+        group = "pickup"
+        layer = 10
+        z = 20
+        pos = (82, 44)
+        size = (16, 16)
+        color = #ffffff
+        texture = ["gem-1.png", "gem-2.png", "gem-3.png", "gem-4.png", "gem-5.png"]
+        animation_fps = 7.0
+        script = "pickup.rpu"
+    }
+
+    sprite Coin2 {
+        visible = false
+        group = "pickup"
+        layer = 10
+        z = 20
+        pos = (218, 32)
+        size = (16, 16)
+        color = #ffffff
+        texture = ["cherry-1.png", "cherry-2.png", "cherry-3.png", "cherry-4.png", "cherry-5.png", "cherry-6.png", "cherry-7.png"]
+        animation_fps = 7.0
+        script = "pickup.rpu"
+    }
+
+    sprite Opossum {
+        visible = false
+        group = "hazard"
+        layer = 15
+        z = 25
+        pos = (192, 108)
+        size = (28, 22)
+        color = #ffffff
+        texture = ["opossum1.png", "opossum2.png", "opossum3.png", "opossum4.png", "opossum5.png", "opossum6.png"]
+        animation_fps = 9.0
+        script = "patrol.rpu"
+    }
+
+    sprite Palm {
+        visible = false
+        layer = 8
+        z = 11
+        pos = (274, -16)
+        size = (44, 98)
+        color = #ffffff
+        texture = "palm.png"
+    }
+
+    sprite Sign {
+        visible = false
+        layer = 7
+        z = 16
+        pos = (42, 108)
+        size = (18, 20)
+        color = #ffffff
+        texture = "sign.png"
+    }
+
+    sprite Bush {
+        visible = false
+        layer = 7
+        z = 16
+        pos = (108, 108)
+        size = (32, 20)
+        color = #ffffff
+        texture = "bush.png"
+    }
+
+    sprite Crate {
+        visible = false
+        layer = 7
+        z = 16
+        pos = (146, 104)
+        size = (24, 24)
+        color = #ffffff
+        texture = "crate.png"
+    }
+
+    sprite RockProp {
+        visible = false
+        layer = 7
+        z = 16
+        pos = (244, 114)
+        size = (28, 15)
+        color = #ffffff
+        texture = "rock-prop.png"
+    }
+
+    text Hint {
+        visible = false
+        anchor = top_left
+        align = left
+        layer = 50
+        z = 80
+        pos = (8, 7)
+        value = "ARROWS MOVE  SPACE JUMPS"
+        font = "BetterPixels.ttf"
+        font_size = 7.0
+        color = #e8f3ff
+    }
+}

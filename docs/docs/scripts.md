@@ -51,6 +51,7 @@ Supported today:
 - property reads and writes
 - local bindings with `let`
 - persistent per-entity script state with `state`
+- entity-local event dispatch with `emit(...)`
 - `if` / `else`
 - boolean conditions with `&&`, `||`, `!`
 - top-level reusable functions
@@ -70,6 +71,14 @@ Current readable/writable properties:
 - `self.rotation`
 - `self.color`
 - `self.texture` for sprites
+- `self.animation` for named sprite animations
+- `self.flip_x` for sprites
+- `self.flip_y` for sprites
+- `self.vx` for platformer sprites
+- `self.vy` for platformer sprites
+- `self.move_x` for platformer sprites
+- `self.jump` for platformer sprites
+- `self.grounded` for platformer sprites
 - `self.text` for text nodes
 - `self.some_state`
 - `Name.x`
@@ -81,6 +90,14 @@ Current readable/writable properties:
 - `Name.rotation`
 - `Name.color`
 - `Name.texture` for sprites
+- `Name.animation` for named sprite animations
+- `Name.flip_x`
+- `Name.flip_y`
+- `Name.vx`
+- `Name.vy`
+- `Name.move_x`
+- `Name.jump`
+- `Name.grounded`
 - `Name.text` for text nodes
 - `Name.some_state`
 
@@ -92,6 +109,56 @@ self.pos = Mascot.pos
 self.width = 96.0
 self.rotation = self.rotation + 1.6 * dt
 ```
+
+`flip_x`, `flip_y`, `jump`, and `grounded` are represented as scalar `0` or `1` values in scripts.
+
+## Script Events
+
+Scripts can dispatch entity-local events:
+
+```rpu
+emit("motion", "run")
+```
+
+The same entity can receive them through a generic event handler:
+
+```rpu
+on event(event, value) {
+    if event == "motion" {
+        if value == "run" {
+            self.animation = "run"
+        } else if value == "idle" {
+            self.animation = "idle"
+        }
+    }
+}
+```
+
+String equality and inequality are supported in conditions, so `event == "motion"` and `value != "idle"` are valid.
+
+## Platformer Input
+
+For sprites using `physics = platformer`, scripts should express input intent and let the runtime handle acceleration, friction, gravity, jumping, and collision:
+
+```rpu
+on update(dt) {
+    if input_left() {
+        self.move_x = -1
+        self.flip_x = 1
+    } else if input_right() {
+        self.move_x = 1
+        self.flip_x = 0
+    } else {
+        self.move_x = 0
+    }
+
+    if input_action() && self.grounded {
+        self.jump = 1
+    }
+}
+```
+
+The runtime updates `self.vx`, `self.vy`, and `self.grounded`.
 
 ## Locals
 

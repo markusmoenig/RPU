@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use image::{ImageBuffer, Rgba};
+use image::{ImageBuffer, Rgba, imageops::FilterType};
 use rpu_core::{Diagnostic, RpuProject};
 use std::env;
 use std::fs;
@@ -293,16 +293,20 @@ pub fn export_xcode(project_root: &Path, output: Option<&Path>) -> Result<()> {
         output_root.join("tvOS-Info.plist"),
         generated_xcode_tvos_info_plist(),
     )
-        .with_context(|| {
-            format!(
-                "failed to write {}",
-                output_root.join("tvOS-Info.plist").display()
-            )
-        })?;
+    .with_context(|| {
+        format!(
+            "failed to write {}",
+            output_root.join("tvOS-Info.plist").display()
+        )
+    })?;
 
     fs::write(
         xcodeproj_dir.join("project.pbxproj"),
-        generated_xcode_pbxproj(&app_display_name, &app_identifier, development_team.as_deref()),
+        generated_xcode_pbxproj(
+            &app_display_name,
+            &app_identifier,
+            development_team.as_deref(),
+        ),
     )
     .with_context(|| {
         format!(
@@ -2324,6 +2328,10 @@ fn export_terrain_debug_images(
 ) -> Result<()> {
     let output_dir = build_dir.join("debug/maps");
     let mut wrote_any = false;
+    if output_dir.exists() {
+        fs::remove_dir_all(&output_dir)
+            .with_context(|| format!("failed to clear {}", output_dir.display()))?;
+    }
 
     for document in &compiled.parsed_scenes {
         let document_stem = document
@@ -2334,126 +2342,54 @@ fn export_terrain_debug_images(
 
         for scene in &document.scenes {
             for map in &scene.maps {
+                fs::create_dir_all(&output_dir)
+                    .with_context(|| format!("failed to create {}", output_dir.display()))?;
+                let debug_prefix = format!(
+                    "{}__{}__{}",
+                    sanitize_debug_name(document_stem),
+                    sanitize_debug_name(&scene.name),
+                    sanitize_debug_name(&map.name)
+                );
+                let layout_path = output_dir.join(format!("{debug_prefix}__layout.png"));
+                write_map_layout_png(project_root, scene, map, &compiled.window, &layout_path)?;
+                wrote_any = true;
+
                 let classified = map.classify_terrain();
                 if classified.cells.is_empty() {
                     continue;
                 }
 
-                fs::create_dir_all(&output_dir)
-                    .with_context(|| format!("failed to create {}", output_dir.display()))?;
-                let filename = format!(
-                    "{}__{}__{}.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let path = output_dir.join(filename);
+                let path = output_dir.join(format!("{debug_prefix}.png"));
                 write_terrain_debug_png(&classified, &path)?;
-                let region_filename = format!(
-                    "{}__{}__{}__regions.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let region_path = output_dir.join(region_filename);
+                let region_path = output_dir.join(format!("{debug_prefix}__regions.png"));
                 write_terrain_regions_png(&classified, &region_path)?;
-                let tangent_filename = format!(
-                    "{}__{}__{}__tangents.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let tangent_path = output_dir.join(tangent_filename);
+                let tangent_path = output_dir.join(format!("{debug_prefix}__tangents.png"));
                 write_terrain_tangents_png(&classified, &tangent_path)?;
-                let material_filename = format!(
-                    "{}__{}__{}__materials.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let material_path = output_dir.join(material_filename);
+                let material_path = output_dir.join(format!("{debug_prefix}__materials.png"));
                 write_terrain_materials_png(&classified, &material_path)?;
-                let synth_filename = format!(
-                    "{}__{}__{}__synth.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let synth_path = output_dir.join(synth_filename);
-                write_terrain_synth_png(project_root, map, &classified, &synth_path)?;
-                let strip_filename = format!(
-                    "{}__{}__{}__surface_strips.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let strip_path = output_dir.join(strip_filename);
+                if matches!(classified.render, rpu_core::TerrainRenderMode::Synth) {
+                    let synth_path = output_dir.join(format!("{debug_prefix}__synth.png"));
+                    write_terrain_synth_png(project_root, map, &classified, &synth_path)?;
+                    let synth_layers_path =
+                        output_dir.join(format!("{debug_prefix}__synth_layers.png"));
+                    write_terrain_synth_layers_png(project_root, &classified, &synth_layers_path)?;
+                }
+                let strip_path = output_dir.join(format!("{debug_prefix}__surface_strips.png"));
                 write_terrain_surface_strips_png(project_root, &classified, &strip_path)?;
-                let synth_layers_filename = format!(
-                    "{}__{}__{}__synth_layers.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let synth_layers_path = output_dir.join(synth_layers_filename);
-                write_terrain_synth_layers_png(project_root, &classified, &synth_layers_path)?;
-                let transition_filename = format!(
-                    "{}__{}__{}__transitions.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let transition_path = output_dir.join(transition_filename);
+                let transition_path = output_dir.join(format!("{debug_prefix}__transitions.png"));
                 write_terrain_transitions_png(&classified, &transition_path)?;
-                let band_filename = format!(
-                    "{}__{}__{}__bands.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let band_path = output_dir.join(band_filename);
+                let band_path = output_dir.join(format!("{debug_prefix}__bands.png"));
                 write_terrain_bands_png(&classified, &band_path)?;
-                let loop_filename = format!(
-                    "{}__{}__{}__loops.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let loop_path = output_dir.join(loop_filename);
+                let loop_path = output_dir.join(format!("{debug_prefix}__loops.png"));
                 write_terrain_loops_png(&classified, &loop_path)?;
-                let contour_filename = format!(
-                    "{}__{}__{}__contours.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let contour_path = output_dir.join(contour_filename);
+                let contour_path = output_dir.join(format!("{debug_prefix}__contours.png"));
                 write_terrain_contours_png(&classified, &contour_path)?;
-                let influence_filename = format!(
-                    "{}__{}__{}__influences.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let influence_path = output_dir.join(influence_filename);
+                let influence_path = output_dir.join(format!("{debug_prefix}__influences.png"));
                 write_terrain_influences_png(&classified, &influence_path)?;
-                let heightfield_filename = format!(
-                    "{}__{}__{}__heightfield.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let heightfield_path = output_dir.join(heightfield_filename);
+                let heightfield_path = output_dir.join(format!("{debug_prefix}__heightfield.png"));
                 write_terrain_heightfield_png(&classified, &heightfield_path)?;
-                let fragments_filename = format!(
-                    "{}__{}__{}__fragments.png",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let fragments_path = output_dir.join(fragments_filename);
+                let fragments_path = output_dir.join(format!("{debug_prefix}__fragments.png"));
                 write_terrain_fragments_png(map, &fragments_path)?;
-                wrote_any = true;
             }
         }
     }
@@ -2465,10 +2401,343 @@ fn export_terrain_debug_images(
                 output_dir.join("README.txt").display()
             )
         })?;
-        println!("Wrote terrain debug images to {}", output_dir.display());
+        println!("Wrote map debug images to {}", output_dir.display());
     }
 
     Ok(())
+}
+
+fn write_map_layout_png(
+    project_root: &Path,
+    scene: &rpu_core::SceneNode,
+    map: &rpu_core::AsciiMapNode,
+    window: &rpu_core::WindowConfig,
+    path: &Path,
+) -> Result<()> {
+    let scale = 2.0f32;
+    let width = (window.width.max(1) as f32 * scale).round() as u32;
+    let height = (window.height.max(1) as f32 * scale).round() as u32;
+    let (view_x, view_y) = scene
+        .camera
+        .as_ref()
+        .map(|camera| {
+            (
+                camera.pos[0] - window.width as f32 * 0.5,
+                camera.pos[1] - window.height as f32 * 0.5,
+            )
+        })
+        .unwrap_or((0.0, 0.0));
+    let background = scene
+        .camera
+        .as_ref()
+        .map(|camera| scene_color_rgba(camera.background))
+        .unwrap_or_else(|| rgba([14, 18, 24, 255]));
+    let mut image = ImageBuffer::from_pixel(width, height, background);
+    let legend: std::collections::HashMap<char, &rpu_core::MapLegendMeaning> = map
+        .legend
+        .iter()
+        .map(|entry| (entry.symbol, &entry.meaning))
+        .collect();
+    let markers = map_debug_markers(map);
+
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            if map_cell_is_empty(ch) {
+                continue;
+            }
+            let x = map.origin[0] + col as f32 * map.cell[0];
+            let y = map.origin[1] + row as f32 * map.cell[1];
+            let ix = ((x - view_x) * scale).round() as i32;
+            let iy = ((y - view_y) * scale).round() as i32;
+            let iw = (map.cell[0] * scale).round().max(1.0) as u32;
+            let ih = (map.cell[1] * scale).round().max(1.0) as u32;
+            match legend.get(&ch) {
+                Some(rpu_core::MapLegendMeaning::Texture(texture)) => {
+                    if let Some(tile) = load_layout_texture(project_root, texture, iw, ih) {
+                        blit_rgba(&mut image, &tile, ix, iy);
+                    } else {
+                        fill_rect_i32(&mut image, ix, iy, iw, ih, rgba([80, 84, 94, 255]));
+                    }
+                }
+                Some(rpu_core::MapLegendMeaning::Color(color)) => {
+                    fill_rect_i32(&mut image, ix, iy, iw, ih, scene_color_rgba(*color));
+                }
+                Some(rpu_core::MapLegendMeaning::Terrain(terrain)) => {
+                    fill_rect_i32(
+                        &mut image,
+                        ix,
+                        iy,
+                        iw,
+                        ih,
+                        material_fill_rgba(&terrain.material),
+                    );
+                }
+                Some(rpu_core::MapLegendMeaning::Marker)
+                | Some(rpu_core::MapLegendMeaning::Spawn(_)) => {
+                    draw_spawn_marker(&mut image, ix, iy, iw, ih);
+                }
+                _ => fill_rect_i32(&mut image, ix, iy, iw, ih, rgba([80, 84, 94, 255])),
+            }
+        }
+    }
+
+    draw_map_top_collision_edges(&mut image, map, &legend, view_x, view_y, scale);
+
+    for rect in &scene.rects {
+        if !rect.visual.visible || rect.visual.template {
+            continue;
+        }
+        draw_world_outline(
+            &mut image,
+            rect.visual.pos[0],
+            rect.visual.pos[1],
+            rect.visual.size[0],
+            rect.visual.size[1],
+            view_x,
+            view_y,
+            scale,
+            rgba([255, 80, 80, 230]),
+        );
+    }
+
+    for sprite in &scene.sprites {
+        if !sprite.visual.visible || sprite.visual.template {
+            continue;
+        }
+        let pos = sprite
+            .symbol
+            .as_ref()
+            .and_then(|symbol| markers.get(symbol))
+            .or_else(|| markers.get(&sprite.name))
+            .copied()
+            .unwrap_or(sprite.visual.pos);
+        draw_world_outline(
+            &mut image,
+            pos[0],
+            pos[1],
+            sprite.visual.size[0],
+            sprite.visual.size[1],
+            view_x,
+            view_y,
+            scale,
+            rgba([255, 0, 255, 240]),
+        );
+        let cx = ((pos[0] + sprite.visual.size[0] * 0.5 - view_x) * scale).round() as i32;
+        let cy = ((pos[1] + sprite.visual.size[1] * 0.5 - view_y) * scale).round() as i32;
+        draw_line(&mut image, cx - 4, cy, cx + 4, cy, rgba([255, 0, 255, 240]));
+        draw_line(&mut image, cx, cy - 4, cx, cy + 4, rgba([255, 0, 255, 240]));
+    }
+
+    image
+        .save(path)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn draw_map_top_collision_edges(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    map: &rpu_core::AsciiMapNode,
+    legend: &std::collections::HashMap<char, &rpu_core::MapLegendMeaning>,
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+) {
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            if !map_cell_is_solid(ch, legend) {
+                continue;
+            }
+            let has_solid_above = row > 0
+                && map
+                    .rows
+                    .get(row - 1)
+                    .and_then(|above| above.chars().nth(col))
+                    .is_some_and(|above| map_cell_is_solid(above, legend));
+            if has_solid_above {
+                continue;
+            }
+            let x0 = ((map.origin[0] + col as f32 * map.cell[0] - view_x) * scale).round() as i32;
+            let y = ((map.origin[1] + row as f32 * map.cell[1] - view_y) * scale).round() as i32;
+            let x1 = ((map.origin[0] + (col as f32 + 1.0) * map.cell[0] - view_x) * scale).round()
+                as i32;
+            for dy in 0..3 {
+                draw_line(image, x0, y + dy, x1, y + dy, rgba([255, 232, 64, 245]));
+            }
+        }
+    }
+}
+
+fn map_debug_markers(map: &rpu_core::AsciiMapNode) -> std::collections::HashMap<String, [f32; 2]> {
+    let legend: std::collections::HashMap<char, &rpu_core::MapLegendMeaning> = map
+        .legend
+        .iter()
+        .map(|entry| (entry.symbol, &entry.meaning))
+        .collect();
+    let mut markers = std::collections::HashMap::new();
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            let Some(meaning) = legend.get(&ch) else {
+                continue;
+            };
+            let pos = [
+                map.origin[0] + col as f32 * map.cell[0],
+                map.origin[1] + row as f32 * map.cell[1],
+            ];
+            match meaning {
+                rpu_core::MapLegendMeaning::Marker => {
+                    markers.entry(ch.to_string()).or_insert(pos);
+                }
+                rpu_core::MapLegendMeaning::Spawn(name) => {
+                    markers.entry(ch.to_string()).or_insert(pos);
+                    markers.entry(name.clone()).or_insert(pos);
+                }
+                _ => {}
+            }
+        }
+    }
+    markers
+}
+
+fn draw_spawn_marker(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) {
+    let color = rgba([255, 0, 255, 245]);
+    let cx = x + width as i32 / 2;
+    let cy = y + height as i32 / 2;
+    draw_line(image, cx - 8, cy, cx + 8, cy, color);
+    draw_line(image, cx, cy - 8, cx, cy + 8, color);
+    draw_world_outline(
+        image,
+        x as f32,
+        y as f32,
+        width as f32,
+        height as f32,
+        0.0,
+        0.0,
+        1.0,
+        color,
+    );
+}
+
+fn draw_world_outline(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+    color: Rgba<u8>,
+) {
+    let x0 = ((x - view_x) * scale).round() as i32;
+    let y0 = ((y - view_y) * scale).round() as i32;
+    let x1 = ((x + width - view_x) * scale).round() as i32;
+    let y1 = ((y + height - view_y) * scale).round() as i32;
+    draw_line(image, x0, y0, x1, y0, color);
+    draw_line(image, x1, y0, x1, y1, color);
+    draw_line(image, x1, y1, x0, y1, color);
+    draw_line(image, x0, y1, x0, y0, color);
+}
+
+fn fill_rect_i32(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    color: Rgba<u8>,
+) {
+    let x0 = x.max(0) as u32;
+    let y0 = y.max(0) as u32;
+    let x1 = (x + width as i32).max(0) as u32;
+    let y1 = (y + height as i32).max(0) as u32;
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    fill_rect(image, x0, y0, x1 - x0, y1 - y0, color);
+}
+
+fn blit_rgba(
+    target: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    x: i32,
+    y: i32,
+) {
+    for sy in 0..source.height() {
+        for sx in 0..source.width() {
+            let tx = x + sx as i32;
+            let ty = y + sy as i32;
+            if tx < 0 || ty < 0 || tx as u32 >= target.width() || ty as u32 >= target.height() {
+                continue;
+            }
+            let src = *source.get_pixel(sx, sy);
+            let alpha = src[3] as u16;
+            if alpha == 255 {
+                target.put_pixel(tx as u32, ty as u32, src);
+            } else if alpha > 0 {
+                let dst = *target.get_pixel(tx as u32, ty as u32);
+                target.put_pixel(
+                    tx as u32,
+                    ty as u32,
+                    rgba([
+                        blend_channel(src[0], dst[0], alpha),
+                        blend_channel(src[1], dst[1], alpha),
+                        blend_channel(src[2], dst[2], alpha),
+                        255,
+                    ]),
+                );
+            }
+        }
+    }
+}
+
+fn blend_channel(src: u8, dst: u8, alpha: u16) -> u8 {
+    (((src as u16 * alpha) + (dst as u16 * (255 - alpha))) / 255) as u8
+}
+
+fn load_layout_texture(
+    project_root: &Path,
+    texture: &str,
+    width: u32,
+    height: u32,
+) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+    let path = project_root.join("assets").join(texture);
+    let image = image::open(path).ok()?;
+    Some(
+        image
+            .resize_exact(width.max(1), height.max(1), FilterType::Nearest)
+            .to_rgba8(),
+    )
+}
+
+fn scene_color_rgba(color: [f32; 4]) -> Rgba<u8> {
+    rgba([
+        (color[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+    ])
+}
+
+fn map_cell_is_empty(ch: char) -> bool {
+    matches!(ch, ' ' | '.')
+}
+
+fn map_cell_is_solid(
+    ch: char,
+    legend: &std::collections::HashMap<char, &rpu_core::MapLegendMeaning>,
+) -> bool {
+    matches!(
+        legend.get(&ch),
+        Some(rpu_core::MapLegendMeaning::Texture(_))
+            | Some(rpu_core::MapLegendMeaning::Color(_))
+            | Some(rpu_core::MapLegendMeaning::Terrain(_))
+    )
 }
 
 fn write_terrain_debug_png(classified: &rpu_core::ClassifiedAsciiMap, path: &Path) -> Result<()> {
@@ -5780,6 +6049,12 @@ fn terrain_debug_readme() -> String {
 
 Files:
 
+- direct texture or color maps always get *__layout.png
+- terrain maps additionally get terrain analysis files
+- synth files are only written for `render = synth`
+
+- *__layout.png
+  Camera-space map layout preview with direct tiles, inferred top collision edges, and visible sprite/rect spawn boxes.
 - *_terrain.png
   Per-cell shape classification debug image.
 - *__tangents.png
@@ -5787,9 +6062,9 @@ Files:
 - *__materials.png
   Resolved material-layer debug image.
 - *__synth.png
-  First build-time synthesized terrain preview.
+  First build-time synthesized terrain preview. Only written for maps with `render = synth`.
 - *__synth_layers.png
-  Per-pixel winning material layer in the synth preview.
+  Per-pixel winning material layer in the synth preview. Only written for maps with `render = synth`.
 - *__transitions.png
   Surface-coordinate transition debug image.
 - *__bands.png
@@ -5806,6 +6081,15 @@ Files:
   Per-cell local contour heightfield debug image.
 - *__fragments.png
   Per-pixel terrain fragment mask debug image.
+
+In *__layout.png:
+
+- background = scene camera background color
+- direct texture map cells are drawn with their tile textures
+- direct color map cells are drawn with their legend colors
+- yellow horizontal lines = inferred top collision surfaces
+- magenta outlines = visible sprite spawn/collision boxes
+- red outlines = visible rect boxes
 
 In *_terrain.png:
 

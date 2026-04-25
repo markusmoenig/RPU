@@ -52,9 +52,7 @@ pub struct MetaConfig {
 
 impl MetaConfig {
     fn is_empty(&self) -> bool {
-        self.bundle_id.is_none()
-            && self.display_name.is_none()
-            && self.development_team.is_none()
+        self.bundle_id.is_none() && self.display_name.is_none() && self.development_team.is_none()
     }
 }
 
@@ -168,6 +166,7 @@ pub struct BytecodeState {
 #[derive(Debug, Clone)]
 pub struct BytecodeHandler {
     pub event: String,
+    pub params: Vec<String>,
     pub ops: Vec<BytecodeOp>,
 }
 
@@ -195,6 +194,14 @@ pub enum ScriptProperty {
     Rotation,
     Color,
     Texture,
+    Animation,
+    FlipX,
+    FlipY,
+    Vx,
+    Vy,
+    MoveX,
+    Jump,
+    Grounded,
     Text,
     State(String),
 }
@@ -376,6 +383,7 @@ pub struct SpriteNode {
     pub visual: VisualNode,
     pub rotation: f32,
     pub textures: Vec<String>,
+    pub animations: std::collections::HashMap<String, SpriteAnimation>,
     pub animation_fps: f32,
     pub animation_mode: AnimationMode,
     pub destroy_on_animation_end: bool,
@@ -385,12 +393,50 @@ pub struct SpriteNode {
     pub repeat_y: bool,
     pub flip_x: bool,
     pub flip_y: bool,
+    pub physics: PhysicsMode,
+    pub physics_settings: PlatformerPhysicsSettings,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpriteAnimation {
+    pub textures: Vec<String>,
+    pub fps: f32,
+    pub mode: AnimationMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimationMode {
     Loop,
     Once,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicsMode {
+    None,
+    Platformer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlatformerPhysicsSettings {
+    pub acceleration: f32,
+    pub friction: f32,
+    pub max_speed: f32,
+    pub gravity: f32,
+    pub jump_speed: f32,
+    pub max_fall_speed: f32,
+}
+
+impl Default for PlatformerPhysicsSettings {
+    fn default() -> Self {
+        Self {
+            acceleration: 520.0,
+            friction: 840.0,
+            max_speed: 96.0,
+            gravity: 560.0,
+            jump_speed: 255.0,
+            max_fall_speed: 280.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -650,7 +696,9 @@ pub enum TerrainDepthBand {
 #[derive(Debug, Clone)]
 pub enum MapLegendMeaning {
     Marker,
+    Spawn(String),
     Color([f32; 4]),
+    Texture(String),
     Terrain(MapTerrainEntry),
 }
 
@@ -794,6 +842,7 @@ pub struct SceneSprite {
     pub rotation: f32,
     pub color: [f32; 4],
     pub textures: Vec<String>,
+    pub animations: std::collections::HashMap<String, SpriteAnimation>,
     pub animation_fps: f32,
     pub animation_mode: AnimationMode,
     pub destroy_on_animation_end: bool,
@@ -1599,6 +1648,7 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                     ..default_visual_node(1, [128.0, 128.0], [1.0, 1.0, 1.0, 1.0])
                 },
                 textures: Vec::new(),
+                animations: std::collections::HashMap::new(),
                 animation_fps: 0.0,
                 animation_mode: AnimationMode::Loop,
                 destroy_on_animation_end: false,
@@ -1609,6 +1659,8 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 repeat_y: false,
                 flip_x: false,
                 flip_y: false,
+                physics: PhysicsMode::None,
+                physics_settings: PlatformerPhysicsSettings::default(),
             });
             continue;
         }
@@ -1995,10 +2047,21 @@ fn extract_texture_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
         .iter()
         .flat_map(|document| document.scenes.iter())
         .flat_map(|scene| {
-            scene
-                .sprites
-                .iter()
-                .flat_map(|sprite| sprite.textures.iter().cloned())
+            let sprite_textures = scene.sprites.iter().flat_map(|sprite| {
+                sprite.textures.iter().cloned().chain(
+                    sprite
+                        .animations
+                        .values()
+                        .flat_map(|animation| animation.textures.iter().cloned()),
+                )
+            });
+            let map_textures = scene.maps.iter().flat_map(|map| {
+                map.legend.iter().filter_map(|entry| match &entry.meaning {
+                    MapLegendMeaning::Texture(texture) => Some(texture.clone()),
+                    _ => None,
+                })
+            });
+            sprite_textures.chain(map_textures)
         })
         .collect()
 }
@@ -2267,6 +2330,7 @@ fn compile_scene_draw_commands(parsed_scenes: &[SceneDocument]) -> Vec<DrawComma
                     .symbol
                     .as_deref()
                     .and_then(|symbol| markers.get(symbol))
+                    .or_else(|| markers.get(&sprite.name))
                     .copied()
                     .unwrap_or(sprite.visual.pos);
                 commands.push(DrawCommand::Sprite(SceneSprite {
@@ -2280,6 +2344,7 @@ fn compile_scene_draw_commands(parsed_scenes: &[SceneDocument]) -> Vec<DrawComma
                     rotation: sprite.rotation,
                     color: sprite.visual.color,
                     textures: sprite.textures.clone(),
+                    animations: sprite.animations.clone(),
                     animation_fps: sprite.animation_fps,
                     animation_mode: sprite.animation_mode,
                     destroy_on_animation_end: sprite.destroy_on_animation_end,
@@ -2365,6 +2430,30 @@ fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
                     visible: true,
                 }));
             }
+            if let Some(MapLegendMeaning::Texture(texture)) = legend.get(&ch) {
+                commands.push(DrawCommand::Sprite(SceneSprite {
+                    anchor: Anchor::World,
+                    layer: -10,
+                    z: (row as i32) * 100 + col as i32,
+                    x: map.origin[0] + col as f32 * map.cell[0],
+                    y: map.origin[1] + row as f32 * map.cell[1],
+                    width: map.cell[0],
+                    height: map.cell[1],
+                    rotation: 0.0,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    textures: vec![texture.clone()],
+                    animations: std::collections::HashMap::new(),
+                    animation_fps: 0.0,
+                    animation_mode: AnimationMode::Loop,
+                    destroy_on_animation_end: false,
+                    scroll: [0.0, 0.0],
+                    repeat_x: false,
+                    repeat_y: false,
+                    flip_x: false,
+                    flip_y: false,
+                    visible: true,
+                }));
+            }
             if let Some(MapLegendMeaning::Terrain(_)) = legend.get(&ch) {
                 let Some(cell) = terrain_cells.get(&(row, col)) else {
                     continue;
@@ -2396,11 +2485,22 @@ fn compile_map_markers(maps: &[AsciiMapNode]) -> std::collections::HashMap<Strin
             .collect();
         for (row, line) in map.rows.iter().enumerate() {
             for (col, ch) in line.chars().enumerate() {
-                if let Some(MapLegendMeaning::Marker) = legend.get(&ch) {
-                    markers.entry(ch.to_string()).or_insert([
-                        map.origin[0] + col as f32 * map.cell[0],
-                        map.origin[1] + row as f32 * map.cell[1],
-                    ]);
+                let Some(meaning) = legend.get(&ch) else {
+                    continue;
+                };
+                let pos = [
+                    map.origin[0] + col as f32 * map.cell[0],
+                    map.origin[1] + row as f32 * map.cell[1],
+                ];
+                match meaning {
+                    MapLegendMeaning::Marker => {
+                        markers.entry(ch.to_string()).or_insert(pos);
+                    }
+                    MapLegendMeaning::Spawn(name) => {
+                        markers.entry(ch.to_string()).or_insert(pos);
+                        markers.entry(name.clone()).or_insert(pos);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -2545,6 +2645,34 @@ const SPRITE_SCHEMA: &[SchemaEntry] = &[
     SchemaEntry {
         key: "flip_y",
         kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "physics",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "acceleration",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "friction",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "max_speed",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "gravity",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "jump_speed",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "max_fall_speed",
+        kind: PropertyKind::F32,
     },
     SchemaEntry {
         key: "animation_fps",
@@ -3206,6 +3334,10 @@ fn apply_sprite_property(
     path: &Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    if apply_sprite_animation_property(sprite, property, line, path, diagnostics) {
+        return;
+    }
+
     if let Some((key, value)) =
         parse_schema_value(SPRITE_SCHEMA, property, line, "sprite", path, diagnostics)
     {
@@ -3213,10 +3345,7 @@ fn apply_sprite_property(
             ("texture", PropertyValue::StringList(textures)) => sprite.textures = textures,
             ("animation_fps", PropertyValue::F32(fps)) => sprite.animation_fps = fps.max(0.0),
             ("animation_mode", PropertyValue::String(mode)) => {
-                sprite.animation_mode = match mode.as_str() {
-                    "once" => AnimationMode::Once,
-                    _ => AnimationMode::Loop,
-                }
+                sprite.animation_mode = parse_animation_mode(&mode)
             }
             ("destroy_on_animation_end", PropertyValue::Bool(value)) => {
                 sprite.destroy_on_animation_end = value
@@ -3228,6 +3357,30 @@ fn apply_sprite_property(
             ("repeat_y", PropertyValue::Bool(repeat_y)) => sprite.repeat_y = repeat_y,
             ("flip_x", PropertyValue::Bool(flip_x)) => sprite.flip_x = flip_x,
             ("flip_y", PropertyValue::Bool(flip_y)) => sprite.flip_y = flip_y,
+            ("physics", PropertyValue::String(mode)) => {
+                sprite.physics = match mode.as_str() {
+                    "platformer" => PhysicsMode::Platformer,
+                    _ => PhysicsMode::None,
+                }
+            }
+            ("acceleration", PropertyValue::F32(value)) => {
+                sprite.physics_settings.acceleration = value.max(0.0)
+            }
+            ("friction", PropertyValue::F32(value)) => {
+                sprite.physics_settings.friction = value.max(0.0)
+            }
+            ("max_speed", PropertyValue::F32(value)) => {
+                sprite.physics_settings.max_speed = value.max(0.0)
+            }
+            ("gravity", PropertyValue::F32(value)) => {
+                sprite.physics_settings.gravity = value.max(0.0)
+            }
+            ("jump_speed", PropertyValue::F32(value)) => {
+                sprite.physics_settings.jump_speed = value.max(0.0)
+            }
+            ("max_fall_speed", PropertyValue::F32(value)) => {
+                sprite.physics_settings.max_fall_speed = value.max(0.0)
+            }
             _ => apply_visual_property(
                 &mut sprite.visual,
                 property,
@@ -3237,6 +3390,86 @@ fn apply_sprite_property(
                 diagnostics,
             ),
         }
+    }
+}
+
+fn apply_sprite_animation_property(
+    sprite: &mut SpriteNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    if matches!(property.key, "animation_fps" | "animation_mode") {
+        return false;
+    }
+    let Some(rest) = property.key.strip_prefix("animation_") else {
+        return false;
+    };
+    if let Some(name) = rest.strip_suffix("_fps") {
+        match property.as_f32() {
+            Some(fps) => {
+                sprite
+                    .animations
+                    .entry(name.to_string())
+                    .or_insert_with(default_sprite_animation)
+                    .fps = fps.max(0.0);
+            }
+            None => diagnostics.push(Diagnostic::warning_at(
+                "invalid sprite animation fps",
+                Some(path.to_path_buf()),
+                line,
+            )),
+        }
+        return true;
+    }
+    if let Some(name) = rest.strip_suffix("_mode") {
+        match property.as_string().or_else(|| property.as_bare_string()) {
+            Some(mode) => {
+                sprite
+                    .animations
+                    .entry(name.to_string())
+                    .or_insert_with(default_sprite_animation)
+                    .mode = parse_animation_mode(&mode);
+            }
+            None => diagnostics.push(Diagnostic::warning_at(
+                "invalid sprite animation mode",
+                Some(path.to_path_buf()),
+                line,
+            )),
+        }
+        return true;
+    }
+
+    match parse_string_list(property.raw) {
+        Some(textures) => {
+            sprite
+                .animations
+                .entry(rest.to_string())
+                .or_insert_with(default_sprite_animation)
+                .textures = textures;
+        }
+        None => diagnostics.push(Diagnostic::warning_at(
+            "invalid sprite animation texture list",
+            Some(path.to_path_buf()),
+            line,
+        )),
+    }
+    true
+}
+
+fn default_sprite_animation() -> SpriteAnimation {
+    SpriteAnimation {
+        textures: Vec::new(),
+        fps: 0.0,
+        mode: AnimationMode::Loop,
+    }
+}
+
+fn parse_animation_mode(mode: &str) -> AnimationMode {
+    match mode {
+        "once" => AnimationMode::Once,
+        _ => AnimationMode::Loop,
     }
 }
 
@@ -3407,6 +3640,10 @@ fn apply_map_legend_property(
 
 fn parse_map_legend_meaning(value: &str) -> Option<MapLegendMeaning> {
     let value = value.trim();
+    if let Some(name) = parse_named_legend_call(value, "spawn") {
+        return Some(MapLegendMeaning::Spawn(name));
+    }
+
     if matches!(value, "marker" | "spawn" | "entity") {
         return Some(MapLegendMeaning::Marker);
     }
@@ -3415,7 +3652,20 @@ fn parse_map_legend_meaning(value: &str) -> Option<MapLegendMeaning> {
         return Some(MapLegendMeaning::Color(color));
     }
 
+    if let Some(texture) = parse_string(value) {
+        return Some(MapLegendMeaning::Texture(texture));
+    }
+
     parse_terrain_legend_entry(value).map(MapLegendMeaning::Terrain)
+}
+
+fn parse_named_legend_call(value: &str, name: &str) -> Option<String> {
+    let inner = value.strip_prefix(name)?.trim();
+    let inner = inner.strip_prefix('(')?.strip_suffix(')')?.trim();
+    if inner.is_empty() {
+        return None;
+    }
+    Some(inner.to_string())
 }
 
 fn parse_terrain_render_mode(value: &str) -> Option<TerrainRenderMode> {
@@ -4287,18 +4537,18 @@ fn compile_script(script: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -> Byt
         }
 
         if let Some(rest) = line.strip_prefix("on ") {
-            let event = rest
-                .split_once('(')
-                .map(|(event, _)| event.trim())
-                .unwrap_or(rest.trim())
-                .trim_end_matches('{')
-                .trim();
+            let Some((event, params)) = parse_callable_signature(rest) else {
+                diagnostics.push(Diagnostic::warning_at(
+                    "invalid event handler signature",
+                    Some(script.relative_path.clone()),
+                    *line_no,
+                ));
+                index += 1;
+                continue;
+            };
             index += 1;
             let ops = compile_script_block(&lines, &mut index, script, diagnostics);
-            handlers.push(BytecodeHandler {
-                event: event.to_string(),
-                ops,
-            });
+            handlers.push(BytecodeHandler { event, params, ops });
             continue;
         }
 
@@ -4482,6 +4732,10 @@ fn compile_statement(line: &str) -> Option<OpCode> {
         return Some(OpCode::Call(name, args));
     }
 
+    if let Some((name, args)) = parse_call_statement(line) {
+        return Some(OpCode::Call(name, args));
+    }
+
     if let Some(rest) = line.strip_prefix("let ") {
         let (name, right) = rest.split_once('=')?;
         let name = name.trim();
@@ -4589,7 +4843,7 @@ fn parse_call_statement(value: &str) -> Option<(String, Vec<Expr>)> {
     let value = value.trim();
     let (name, args) = value.split_once('(')?;
     let name = name.trim();
-    if name.is_empty() {
+    if !is_state_identifier(name) {
         return None;
     }
     let args = args.strip_suffix(')')?.trim();
@@ -4614,6 +4868,14 @@ fn parse_script_target(value: &str) -> Option<ScriptTarget> {
         "rotation" => ScriptProperty::Rotation,
         "color" => ScriptProperty::Color,
         "texture" => ScriptProperty::Texture,
+        "animation" => ScriptProperty::Animation,
+        "flip_x" => ScriptProperty::FlipX,
+        "flip_y" => ScriptProperty::FlipY,
+        "vx" => ScriptProperty::Vx,
+        "vy" => ScriptProperty::Vy,
+        "move_x" => ScriptProperty::MoveX,
+        "jump" => ScriptProperty::Jump,
+        "grounded" => ScriptProperty::Grounded,
         "text" => ScriptProperty::Text,
         other if is_state_identifier(other) => ScriptProperty::State(other.to_string()),
         _ => return None,

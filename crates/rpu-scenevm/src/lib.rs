@@ -13,14 +13,14 @@ use rpu_core::{Anchor, TextAlign};
 use std::collections::{HashMap, HashSet};
 #[cfg(all(
     not(target_arch = "wasm32"),
-    any(target_os = "macos", target_os = "tvos", target_os = "ios")
-))]
-use std::ffi::c_void;
-#[cfg(all(
-    not(target_arch = "wasm32"),
     any(target_os = "tvos", target_os = "ios")
 ))]
 use std::ffi::CString;
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(target_os = "macos", target_os = "tvos", target_os = "ios")
+))]
+use std::ffi::c_void;
 #[cfg(all(
     not(target_arch = "wasm32"),
     not(target_os = "tvos"),
@@ -28,13 +28,13 @@ use std::ffi::CString;
 ))]
 use std::io::Cursor;
 use std::sync::{Mutex, OnceLock};
+#[cfg(target_arch = "wasm32")]
+use std::{cell::RefCell, rc::Rc};
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(target_os = "tvos", target_os = "ios")
 ))]
 use std::{fs::File, io::Write, path::PathBuf};
-#[cfg(target_arch = "wasm32")]
-use std::{cell::RefCell, rc::Rc};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 #[cfg(target_arch = "wasm32")]
@@ -399,7 +399,12 @@ fn convert_ogg_to_wav(asset_path: &str) -> Option<String> {
     not(target_arch = "wasm32"),
     any(target_os = "tvos", target_os = "ios")
 ))]
-fn write_pcm16_wav(path: &PathBuf, channels: u16, sample_rate: u32, samples: &[i16]) -> std::io::Result<()> {
+fn write_pcm16_wav(
+    path: &PathBuf,
+    channels: u16,
+    sample_rate: u32,
+    samples: &[i16],
+) -> std::io::Result<()> {
     let data_len = samples.len().saturating_mul(2) as u32;
     let byte_rate = sample_rate
         .saturating_mul(channels as u32)

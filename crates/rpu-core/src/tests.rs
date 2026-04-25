@@ -75,6 +75,55 @@ scene Main {
 }
 
 #[test]
+fn map_spawn_legend_positions_sprite_by_name() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    map Terrain {
+        origin = (10, 20)
+        cell = (8, 12)
+
+        legend {
+            p = spawn(Player)
+        }
+
+        ascii {
+            p
+        }
+    }
+
+    sprite Player {
+        size = (16, 24)
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let map = &parsed.scenes[0].maps[0];
+    match &map.legend[0].meaning {
+        MapLegendMeaning::Spawn(name) => assert_eq!(name, "Player"),
+        other => panic!("expected spawn legend entry, got {other:?}"),
+    }
+
+    let commands = compile_scene_draw_commands(&[parsed]);
+    assert_eq!(commands.len(), 1);
+    match &commands[0] {
+        DrawCommand::Sprite(sprite) => {
+            assert_eq!(sprite.x, 10.0);
+            assert_eq!(sprite.y, 20.0);
+            assert_eq!(sprite.width, 16.0);
+            assert_eq!(sprite.height, 24.0);
+        }
+        other => panic!("expected sprite, got {other:?}"),
+    }
+}
+
+#[test]
 fn scene_parser_supports_terrain_material_entries_and_shape_classification() {
     let scene = source_file(
         "scenes/main.rpu",
@@ -762,6 +811,7 @@ on update(dt) {
 
     let handler = &compiled.handlers[0];
     assert_eq!(handler.event, "update");
+    assert_eq!(handler.params, vec!["dt"]);
     assert!(matches!(
         &handler.ops[0].op,
         OpCode::Let(name, Expr::Binary(_, BinaryOp::Sub, _)) if name == "next_x"
@@ -799,6 +849,39 @@ on update(dt) {
         }
         other => panic!("unexpected function op: {other:?}"),
     }
+}
+
+#[test]
+fn script_compiler_supports_event_handler_params_and_direct_calls() {
+    let script = source_file(
+        "scripts/main.rpu",
+        r#"
+on event(event, value) {
+    if event == "motion" && value == "idle" {
+        self.texture = "idle.png"
+    }
+}
+
+on update(dt) {
+    emit("motion", "idle")
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let compiled = compile_script(&script, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    assert_eq!(compiled.handlers.len(), 2);
+    assert_eq!(compiled.handlers[0].event, "event");
+    assert_eq!(compiled.handlers[0].params, vec!["event", "value"]);
+    assert!(matches!(
+        &compiled.handlers[1].ops[0].op,
+        OpCode::Call(name, args)
+            if name == "emit"
+                && matches!(&args[0], Expr::String(value) if value == "motion")
+                && matches!(&args[1], Expr::String(value) if value == "idle")
+    ));
 }
 
 #[test]

@@ -1,0 +1,62 @@
+state hurt_until = 0
+
+fn emit_motion_state() {
+    if time() < hurt_until {
+        emit("motion", "hurt")
+    } else if !self.grounded {
+        if self.vy < 0.0 {
+            emit("motion", "jump")
+        } else {
+            emit("motion", "fall")
+        }
+    } else if self.vx > 4.0 || self.vx < -4.0 {
+        emit("motion", "run")
+    } else {
+        emit("motion", "idle")
+    }
+}
+
+on event(event, value) {
+    if event == "motion" {
+        if value == "hurt" {
+            self.animation = "hurt"
+        } else if value == "jump" {
+            self.animation = "jump"
+        } else if value == "fall" {
+            self.animation = "fall"
+        } else if value == "run" {
+            self.animation = "run"
+        } else if value == "idle" {
+            self.animation = "idle"
+        }
+    }
+}
+
+on ready() {
+    self.animation = "idle"
+    self.vx = 0
+    self.vy = 0
+}
+
+on update(dt) {
+    if input_left() {
+        self.move_x = -1
+        self.flip_x = 1
+    } else if input_right() {
+        self.move_x = 1
+        self.flip_x = 0
+    } else {
+        self.move_x = 0
+    }
+
+    if input_action() && self.grounded {
+        self.jump = 1
+    }
+
+    emit_motion_state()
+    if time() < hurt_until {
+        self.color = alpha(#ffffff, lerp(0.45, 1.0, pulse(0.08)))
+    } else {
+        self.color = #ffffff
+    }
+}

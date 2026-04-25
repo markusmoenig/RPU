@@ -1,0 +1,11 @@
+state dir = -1
+
+on update(dt) {
+    self.x = self.x + dir * 28.0 * dt
+    if self.x < 178.0 {
+        dir = 1
+    }
+    if self.x > 250.0 {
+        dir = -1
+    }
+}

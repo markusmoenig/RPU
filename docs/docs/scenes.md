@@ -147,10 +147,20 @@ For `sprite` nodes, `size` is optional. If a sprite has a `texture` and no expli
 Sprites also support:
 
 - `texture`
+- `animation_<name>`
+- `animation_<name>_fps`
+- `animation_<name>_mode`
 - `animation_fps`
 - `animation_mode`
 - `destroy_on_animation_end`
 - `symbol`
+- `physics`
+- `acceleration`
+- `friction`
+- `max_speed`
+- `gravity`
+- `jump_speed`
+- `max_fall_speed`
 - `rotation`
 - `scroll`
 - `repeat_x`
@@ -187,6 +197,64 @@ texture = ["shoot1.png", "shoot2.png"]
 `animation_mode = "once"` plays the frame list once and then holds on the last frame.
 
 `destroy_on_animation_end = true` removes a runtime sprite instance automatically when a `once` animation finishes. This is useful for short-lived effects such as explosions.
+
+Named animations keep reusable frame lists in scene data instead of script logic:
+
+```rpu
+sprite Player {
+    texture = "foxy_idle1.png"
+
+    animation_idle = ["foxy_idle1.png", "foxy_idle2.png"]
+    animation_idle_fps = 1.25
+
+    animation_run = ["foxy_run1.png", "foxy_run2.png", "foxy_run3.png"]
+    animation_run_fps = 9.0
+
+    animation_jump = ["foxy_jump.png"]
+}
+```
+
+Scripts switch named animations through `self.animation = "idle"` or `self.animation = "run"`.
+
+## Platformer Physics
+
+Sprites can opt into the built-in kinematic platformer physics layer:
+
+```rpu
+sprite Player {
+    physics = platformer
+    acceleration = 520.0
+    friction = 840.0
+    max_speed = 96.0
+    gravity = 560.0
+    jump_speed = 255.0
+    max_fall_speed = 280.0
+}
+```
+
+The runtime applies acceleration, friction, gravity, jump impulse, and axis-separated AABB collision against solid map cells.
+
+Current collision generation treats color, texture, and terrain map cells as solid. `marker` and `spawn(...)` cells are ignored.
+
+Scripts drive platformer physics through intent properties:
+
+```rpu
+self.move_x = -1
+self.move_x = 1
+self.move_x = 0
+
+if input_action() && self.grounded {
+    self.jump = 1
+}
+```
+
+Runtime physics exposes:
+
+- `self.vx`
+- `self.vy`
+- `self.move_x`
+- `self.jump`
+- `self.grounded`
 
 `rotation = 1.57` rotates the sprite in radians around its center. Rotation is also script-visible through `self.rotation` and `Name.rotation`.
 
