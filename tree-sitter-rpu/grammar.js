@@ -43,6 +43,8 @@ module.exports = grammar({
         $.rect_definition,
         $.sprite_definition,
         $.text_definition,
+        $.stack_definition,
+        $.highscore_definition,
         $.map_definition,
       ),
 
@@ -60,12 +62,21 @@ module.exports = grammar({
     text_definition: ($) =>
       seq("text", field("name", $.identifier), $.visual_block),
 
+    stack_definition: ($) =>
+      seq("stack", field("name", $.identifier), $.visual_block),
+
+    highscore_definition: ($) =>
+      seq("highscore", field("name", $.identifier), $.visual_block),
+
     visual_block: ($) =>
       seq(
         "{",
-        repeat(choice($.property_assignment, $.state_declaration, $.function_definition, $.event_handler)),
+        repeat(choice($.property_assignment, $.animation_definition, $.state_declaration, $.function_definition, $.event_handler)),
         "}",
       ),
+
+    animation_definition: ($) =>
+      seq("animation", field("name", $.identifier), $.property_block),
 
     property_block: ($) =>
       seq("{", repeat($.property_assignment), "}"),
@@ -85,10 +96,11 @@ module.exports = grammar({
       seq(
         field("symbol", $.legend_symbol),
         "=",
-        field("value", choice($.identifier, $.color_literal, $.string)),
+        field("value", $.legend_value),
       ),
 
-    legend_symbol: ($) => token(/[^=\s{}]/),
+    legend_symbol: ($) => token(/[^=\s{}]+/),
+    legend_value: ($) => token(/[^\s{}\n][^{}\n]*/),
 
     ascii_block: ($) => seq("ascii", "{", repeat($.ascii_row), "}"),
 

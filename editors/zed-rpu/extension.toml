@@ -1,0 +1,11 @@
+id = "rpu"
+name = "RPU"
+version = "0.0.1"
+schema_version = 1
+authors = ["Markus Moenig"]
+description = "RPU language support"
+repository = "https://github.com/markusmoenig/RPU"
+
+[grammars.rpu]
+repository = "file:///Users/markusmoenig/RPU/editors/zed-rpu/local-tree-sitter-rpu"
+rev = "afd267f7bd74da60b5484e54a4e70d4268f35c4f"

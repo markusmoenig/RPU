@@ -1,5 +1,31 @@
 [
   {
+    "type": "animation_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "property_block",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "argument_list",
     "named": true,
     "fields": {},
@@ -365,6 +391,32 @@
     }
   },
   {
+    "type": "highscore_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "visual_block",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "if_statement",
     "named": true,
     "fields": {
@@ -438,15 +490,7 @@
         "required": true,
         "types": [
           {
-            "type": "color_literal",
-            "named": true
-          },
-          {
-            "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "string",
+            "type": "legend_value",
             "named": true
           }
         ]
@@ -703,6 +747,10 @@
           "named": true
         },
         {
+          "type": "highscore_definition",
+          "named": true
+        },
+        {
           "type": "map_definition",
           "named": true
         },
@@ -716,6 +764,10 @@
         },
         {
           "type": "sprite_definition",
+          "named": true
+        },
+        {
+          "type": "stack_definition",
           "named": true
         },
         {
@@ -805,6 +857,32 @@
   },
   {
     "type": "sprite_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "visual_block",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "stack_definition",
     "named": true,
     "fields": {
       "name": {
@@ -974,6 +1052,10 @@
       "required": false,
       "types": [
         {
+          "type": "animation_definition",
+          "named": true
+        },
+        {
           "type": "event_handler",
           "named": true
         },
@@ -1073,6 +1155,10 @@
     "named": false
   },
   {
+    "type": "animation",
+    "named": false
+  },
+  {
     "type": "ascii",
     "named": false
   },
@@ -1109,6 +1195,10 @@
     "named": false
   },
   {
+    "type": "highscore",
+    "named": false
+  },
+  {
     "type": "identifier",
     "named": true
   },
@@ -1122,6 +1212,10 @@
   },
   {
     "type": "legend_symbol",
+    "named": true
+  },
+  {
+    "type": "legend_value",
     "named": true
   },
   {
@@ -1162,6 +1256,10 @@
   },
   {
     "type": "sprite",
+    "named": false
+  },
+  {
+    "type": "stack",
     "named": false
   },
   {

@@ -11,8 +11,8 @@ Use them as smoke-test projects while evolving the DSL and renderer.
 `terrain`
 - Terrain-focused example for embedded `map`, `legend`, `ascii`, marker placement, and derived terrain shape/material classification.
 
-`jumpnrun`
-- Platformer prototype with Sunnyland assets, basic ASCII terrain rendering, script-side gravity/jump physics, pickups, and hazards.
+`sunnyland`
+- Platformer prototype with Sunnyland assets, basic ASCII terrain rendering, built-in platformer physics, pickups, and hazards.
 
 `warped_space_shooter`
 - Small game-focused example for keyboard movement, runtime query calls, textured sprites, and a concrete “progress target” built from the bundled shooter art reference.

@@ -10,6 +10,8 @@ pub struct ProjectManifest {
     pub project: ProjectInfo,
     #[serde(default)]
     pub window: WindowConfig,
+    #[serde(default)]
+    pub debug: DebugConfig,
     #[serde(default, alias = "apple", skip_serializing_if = "MetaConfig::is_empty")]
     pub meta: MetaConfig,
 }
@@ -48,6 +50,12 @@ pub struct MetaConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub development_team: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DebugConfig {
+    #[serde(default)]
+    pub physics: bool,
 }
 
 impl MetaConfig {
@@ -116,6 +124,7 @@ pub struct CompiledProject {
     pub version: String,
     pub start_scene: String,
     pub window: WindowConfig,
+    pub debug: DebugConfig,
     pub scenes: Vec<SourceFile>,
     pub parsed_scenes: Vec<SceneDocument>,
     pub scripts: Vec<SourceFile>,
@@ -343,6 +352,12 @@ pub struct CameraNode {
     pub pos: [f32; 2],
     pub zoom: f32,
     pub background: [f32; 4],
+    pub follow: Option<String>,
+    pub follow_offset: [f32; 2],
+    pub bounds_min: Option<[f32; 2]>,
+    pub bounds_max: Option<[f32; 2]>,
+    pub follow_smoothing: f32,
+    pub dead_zone: [f32; 2],
 }
 
 #[derive(Debug, Clone)]
@@ -393,6 +408,8 @@ pub struct SpriteNode {
     pub repeat_y: bool,
     pub flip_x: bool,
     pub flip_y: bool,
+    pub collider_offset: [f32; 2],
+    pub collider_size: Option<[f32; 2]>,
     pub physics: PhysicsMode,
     pub physics_settings: PlatformerPhysicsSettings,
 }
@@ -424,6 +441,8 @@ pub struct PlatformerPhysicsSettings {
     pub gravity: f32,
     pub jump_speed: f32,
     pub max_fall_speed: f32,
+    pub coyote_time: f32,
+    pub jump_buffer: f32,
 }
 
 impl Default for PlatformerPhysicsSettings {
@@ -435,6 +454,8 @@ impl Default for PlatformerPhysicsSettings {
             gravity: 560.0,
             jump_speed: 255.0,
             max_fall_speed: 280.0,
+            coyote_time: 0.08,
+            jump_buffer: 0.10,
         }
     }
 }
@@ -698,8 +719,22 @@ pub enum MapLegendMeaning {
     Marker,
     Spawn(String),
     Color([f32; 4]),
+    Tile(MapTileEntry),
     Texture(String),
     Terrain(MapTerrainEntry),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapTileEntry {
+    pub texture: String,
+    pub collision: MapTileCollision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapTileCollision {
+    Solid,
+    OneWay,
+    None,
 }
 
 impl AsciiMapNode {
@@ -906,6 +941,7 @@ impl RpuProject {
                 start_scene: default_start_scene(),
             },
             window: WindowConfig::default(),
+            debug: DebugConfig::default(),
             meta: MetaConfig::default(),
         };
 
@@ -1171,17 +1207,29 @@ impl CompiledProject {
                 y: camera.pos[1],
                 zoom: camera.zoom,
                 background: camera.background,
+                follow: camera.follow.clone(),
+                follow_offset: camera.follow_offset,
+                bounds_min: camera.bounds_min,
+                bounds_max: camera.bounds_max,
+                follow_smoothing: camera.follow_smoothing,
+                dead_zone: camera.dead_zone,
             })
             .unwrap_or_else(SceneCamera::default)
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SceneCamera {
     pub x: f32,
     pub y: f32,
     pub zoom: f32,
     pub background: [f32; 4],
+    pub follow: Option<String>,
+    pub follow_offset: [f32; 2],
+    pub bounds_min: Option<[f32; 2]>,
+    pub bounds_max: Option<[f32; 2]>,
+    pub follow_smoothing: f32,
+    pub dead_zone: [f32; 2],
 }
 
 impl Default for SceneCamera {
@@ -1191,6 +1239,12 @@ impl Default for SceneCamera {
             y: 0.0,
             zoom: 1.0,
             background: [0.04, 0.05, 0.08, 1.0],
+            follow: None,
+            follow_offset: [0.0, 0.0],
+            bounds_min: None,
+            bounds_max: None,
+            follow_smoothing: 0.0,
+            dead_zone: [0.0, 0.0],
         }
     }
 }
@@ -1336,6 +1390,7 @@ fn compile_project_sources(
         version: manifest.project.version.clone(),
         start_scene: manifest.project.start_scene.clone(),
         window: manifest.window.clone(),
+        debug: manifest.debug.clone(),
         scenes,
         parsed_scenes,
         scripts,
@@ -1469,6 +1524,7 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
     let mut current_stack: Option<StackNode> = None;
     let mut current_rect: Option<RectNode> = None;
     let mut current_sprite: Option<SpriteNode> = None;
+    let mut current_sprite_animation: Option<(String, SpriteAnimation)> = None;
     let mut current_text: Option<TextNode> = None;
     let mut current_high_score: Option<HighScoreNode> = None;
     let mut inline_script_capture: Option<(usize, Vec<String>)> = None;
@@ -1505,6 +1561,29 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                     append_inline_script(&mut text.visual, &source);
                 }
                 inline_script_capture = None;
+            }
+            continue;
+        }
+
+        if current_sprite_animation.is_some() {
+            if line == "}" {
+                if let Some((name, animation)) = current_sprite_animation.take()
+                    && let Some(sprite) = current_sprite.as_mut()
+                {
+                    sprite.animations.insert(name, animation);
+                }
+                continue;
+            }
+            if let Some(property) = parse_property(line)
+                && let Some((_, animation)) = current_sprite_animation.as_mut()
+            {
+                apply_sprite_animation_block_property(
+                    animation,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
             }
             continue;
         }
@@ -1659,9 +1738,24 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 repeat_y: false,
                 flip_x: false,
                 flip_y: false,
+                collider_offset: [0.0, 0.0],
+                collider_size: None,
                 physics: PhysicsMode::None,
                 physics_settings: PlatformerPhysicsSettings::default(),
             });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "animation") {
+            if current_sprite.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("animation block outside sprite at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_sprite_animation = Some((name, default_sprite_animation()));
             continue;
         }
 
@@ -1720,6 +1814,12 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 pos: [0.0, 0.0],
                 zoom: 1.0,
                 background: [0.04, 0.05, 0.08, 1.0],
+                follow: None,
+                follow_offset: [0.0, 0.0],
+                bounds_min: None,
+                bounds_max: None,
+                follow_smoothing: 0.0,
+                dead_zone: [0.0, 0.0],
             });
             continue;
         }
@@ -1737,6 +1837,12 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
         }
 
         if line == "}" {
+            if let Some((name, animation)) = current_sprite_animation.take() {
+                if let Some(sprite) = current_sprite.as_mut() {
+                    sprite.animations.insert(name, animation);
+                }
+                continue;
+            }
             if in_legend {
                 in_legend = false;
                 continue;
@@ -1938,6 +2044,11 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             append_inline_script(&mut text.visual, &source);
         }
     }
+    if let Some((name, animation)) = current_sprite_animation.take()
+        && let Some(sprite) = current_sprite.as_mut()
+    {
+        sprite.animations.insert(name, animation);
+    }
     if let Some(camera) = current_camera.take() {
         if let Some(scene_node) = current_scene.as_mut() {
             scene_node.camera = Some(camera);
@@ -2057,6 +2168,7 @@ fn extract_texture_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
             });
             let map_textures = scene.maps.iter().flat_map(|map| {
                 map.legend.iter().filter_map(|entry| match &entry.meaning {
+                    MapLegendMeaning::Tile(tile) => Some(tile.texture.clone()),
                     MapLegendMeaning::Texture(texture) => Some(texture.clone()),
                     _ => None,
                 })
@@ -2430,7 +2542,7 @@ fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
                     visible: true,
                 }));
             }
-            if let Some(MapLegendMeaning::Texture(texture)) = legend.get(&ch) {
+            if let Some(texture) = legend_tile_texture(legend.get(&ch)) {
                 commands.push(DrawCommand::Sprite(SceneSprite {
                     anchor: Anchor::World,
                     layer: -10,
@@ -2441,7 +2553,7 @@ fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
                     height: map.cell[1],
                     rotation: 0.0,
                     color: [1.0, 1.0, 1.0, 1.0],
-                    textures: vec![texture.clone()],
+                    textures: vec![texture],
                     animations: std::collections::HashMap::new(),
                     animation_fps: 0.0,
                     animation_mode: AnimationMode::Loop,
@@ -2473,6 +2585,14 @@ fn compile_map_rects(map: &AsciiMapNode) -> Vec<DrawCommand> {
         }
     }
     commands
+}
+
+fn legend_tile_texture(meaning: Option<&&MapLegendMeaning>) -> Option<String> {
+    match meaning {
+        Some(MapLegendMeaning::Tile(tile)) => Some(tile.texture.clone()),
+        Some(MapLegendMeaning::Texture(texture)) => Some((*texture).clone()),
+        _ => None,
+    }
 }
 
 fn compile_map_markers(maps: &[AsciiMapNode]) -> std::collections::HashMap<String, [f32; 2]> {
@@ -2647,6 +2767,14 @@ const SPRITE_SCHEMA: &[SchemaEntry] = &[
         kind: PropertyKind::Bool,
     },
     SchemaEntry {
+        key: "collider_offset",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "collider_size",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
         key: "physics",
         kind: PropertyKind::BareString,
     },
@@ -2672,6 +2800,14 @@ const SPRITE_SCHEMA: &[SchemaEntry] = &[
     },
     SchemaEntry {
         key: "max_fall_speed",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "coyote_time",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "jump_buffer",
         kind: PropertyKind::F32,
     },
     SchemaEntry {
@@ -2729,6 +2865,25 @@ const SPRITE_SCHEMA: &[SchemaEntry] = &[
     SchemaEntry {
         key: "script",
         kind: PropertyKind::String,
+    },
+];
+
+const SPRITE_ANIMATION_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "frames",
+        kind: PropertyKind::StringList,
+    },
+    SchemaEntry {
+        key: "fps",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "mode",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "loop",
+        kind: PropertyKind::Bool,
     },
 ];
 
@@ -2901,6 +3056,30 @@ const CAMERA_SCHEMA: &[SchemaEntry] = &[
     SchemaEntry {
         key: "background",
         kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "follow",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "follow_offset",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "bounds_min",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "bounds_max",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "follow_smoothing",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "dead_zone",
+        kind: PropertyKind::Vec2,
     },
 ];
 
@@ -3322,6 +3501,16 @@ fn apply_camera_property(
             ("pos", PropertyValue::Vec2(pos)) => camera.pos = pos,
             ("zoom", PropertyValue::F32(zoom)) => camera.zoom = zoom.max(0.01),
             ("background", PropertyValue::Color(color)) => camera.background = color,
+            ("follow", PropertyValue::String(name)) => camera.follow = Some(name),
+            ("follow_offset", PropertyValue::Vec2(offset)) => camera.follow_offset = offset,
+            ("bounds_min", PropertyValue::Vec2(bounds)) => camera.bounds_min = Some(bounds),
+            ("bounds_max", PropertyValue::Vec2(bounds)) => camera.bounds_max = Some(bounds),
+            ("follow_smoothing", PropertyValue::F32(smoothing)) => {
+                camera.follow_smoothing = smoothing.max(0.0)
+            }
+            ("dead_zone", PropertyValue::Vec2(dead_zone)) => {
+                camera.dead_zone = [dead_zone[0].max(0.0), dead_zone[1].max(0.0)]
+            }
             _ => {}
         }
     }
@@ -3357,6 +3546,10 @@ fn apply_sprite_property(
             ("repeat_y", PropertyValue::Bool(repeat_y)) => sprite.repeat_y = repeat_y,
             ("flip_x", PropertyValue::Bool(flip_x)) => sprite.flip_x = flip_x,
             ("flip_y", PropertyValue::Bool(flip_y)) => sprite.flip_y = flip_y,
+            ("collider_offset", PropertyValue::Vec2(offset)) => sprite.collider_offset = offset,
+            ("collider_size", PropertyValue::Vec2(size)) => {
+                sprite.collider_size = Some([size[0].max(1.0), size[1].max(1.0)])
+            }
             ("physics", PropertyValue::String(mode)) => {
                 sprite.physics = match mode.as_str() {
                     "platformer" => PhysicsMode::Platformer,
@@ -3380,6 +3573,12 @@ fn apply_sprite_property(
             }
             ("max_fall_speed", PropertyValue::F32(value)) => {
                 sprite.physics_settings.max_fall_speed = value.max(0.0)
+            }
+            ("coyote_time", PropertyValue::F32(value)) => {
+                sprite.physics_settings.coyote_time = value.max(0.0)
+            }
+            ("jump_buffer", PropertyValue::F32(value)) => {
+                sprite.physics_settings.jump_buffer = value.max(0.0)
             }
             _ => apply_visual_property(
                 &mut sprite.visual,
@@ -3456,6 +3655,39 @@ fn apply_sprite_animation_property(
         )),
     }
     true
+}
+
+fn apply_sprite_animation_block_property(
+    animation: &mut SpriteAnimation,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) = parse_schema_value(
+        SPRITE_ANIMATION_SCHEMA,
+        property,
+        line,
+        "sprite animation",
+        path,
+        diagnostics,
+    ) {
+        match (key, value) {
+            ("frames", PropertyValue::StringList(textures)) => animation.textures = textures,
+            ("fps", PropertyValue::F32(fps)) => animation.fps = fps.max(0.0),
+            ("mode", PropertyValue::String(mode)) => {
+                animation.mode = parse_animation_mode(&mode);
+            }
+            ("loop", PropertyValue::Bool(looping)) => {
+                animation.mode = if looping {
+                    AnimationMode::Loop
+                } else {
+                    AnimationMode::Once
+                };
+            }
+            _ => {}
+        }
+    }
 }
 
 fn default_sprite_animation() -> SpriteAnimation {
@@ -3643,6 +3875,9 @@ fn parse_map_legend_meaning(value: &str) -> Option<MapLegendMeaning> {
     if let Some(name) = parse_named_legend_call(value, "spawn") {
         return Some(MapLegendMeaning::Spawn(name));
     }
+    if let Some(tile) = parse_tile_legend_call(value) {
+        return Some(MapLegendMeaning::Tile(tile));
+    }
 
     if matches!(value, "marker" | "spawn" | "entity") {
         return Some(MapLegendMeaning::Marker);
@@ -3657,6 +3892,28 @@ fn parse_map_legend_meaning(value: &str) -> Option<MapLegendMeaning> {
     }
 
     parse_terrain_legend_entry(value).map(MapLegendMeaning::Terrain)
+}
+
+fn parse_tile_legend_call(value: &str) -> Option<MapTileEntry> {
+    let inner = value.strip_prefix("tile")?.trim();
+    let inner = inner.strip_prefix('(')?.strip_suffix(')')?.trim();
+    let parts = split_top_level_args(inner)?;
+    if parts.len() != 2 {
+        return None;
+    }
+    Some(MapTileEntry {
+        texture: parse_string(&parts[0])?,
+        collision: parse_tile_collision(&parts[1])?,
+    })
+}
+
+fn parse_tile_collision(value: &str) -> Option<MapTileCollision> {
+    match value.trim() {
+        "solid" => Some(MapTileCollision::Solid),
+        "one_way" => Some(MapTileCollision::OneWay),
+        "none" => Some(MapTileCollision::None),
+        _ => None,
+    }
 }
 
 fn parse_named_legend_call(value: &str, name: &str) -> Option<String> {

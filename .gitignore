@@ -7,3 +7,5 @@ docs/static/play/
 docs/static/games/
 examples/*/build/
 sunny-land-files/
+editors/zed-rpu/grammars/
+editors/zed-rpu/local-tree-sitter-rpu/

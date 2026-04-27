@@ -124,6 +124,55 @@ scene Main {
 }
 
 #[test]
+fn map_legend_supports_explicit_tile_collision_policy() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    map Terrain {
+        legend {
+            # = tile("tile-grass-top.png", solid)
+            - = tile("platform.png", one_way)
+            b = tile("bush.png", none)
+        }
+
+        ascii {
+            #-b
+        }
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let entries = &parsed.scenes[0].maps[0].legend;
+    match &entries[0].meaning {
+        MapLegendMeaning::Tile(tile) => {
+            assert_eq!(tile.texture, "tile-grass-top.png");
+            assert_eq!(tile.collision, MapTileCollision::Solid);
+        }
+        other => panic!("expected solid tile legend entry, got {other:?}"),
+    }
+    match &entries[1].meaning {
+        MapLegendMeaning::Tile(tile) => {
+            assert_eq!(tile.texture, "platform.png");
+            assert_eq!(tile.collision, MapTileCollision::OneWay);
+        }
+        other => panic!("expected one-way tile legend entry, got {other:?}"),
+    }
+    match &entries[2].meaning {
+        MapLegendMeaning::Tile(tile) => {
+            assert_eq!(tile.texture, "bush.png");
+            assert_eq!(tile.collision, MapTileCollision::None);
+        }
+        other => panic!("expected non-colliding tile legend entry, got {other:?}"),
+    }
+}
+
+#[test]
 fn scene_parser_supports_terrain_material_entries_and_shape_classification() {
     let scene = source_file(
         "scenes/main.rpu",
@@ -546,6 +595,46 @@ scene Main {
     assert_eq!(sprite.animation_fps, 18.0);
     assert_eq!(sprite.animation_mode, AnimationMode::Once);
     assert!(sprite.destroy_on_animation_end);
+}
+
+#[test]
+fn scene_parser_supports_sprite_animation_blocks() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    sprite Player {
+        texture = "idle1.png"
+
+        animation idle {
+            frames = ["idle1.png", "idle2.png"]
+            fps = 2.0
+            loop = true
+        }
+
+        animation hurt {
+            frames = "hurt.png"
+            fps = 1.0
+            mode = once
+        }
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let sprite = &parsed.scenes[0].sprites[0];
+    let idle = sprite.animations.get("idle").expect("idle animation");
+    assert_eq!(idle.textures, vec!["idle1.png", "idle2.png"]);
+    assert_eq!(idle.fps, 2.0);
+    assert_eq!(idle.mode, AnimationMode::Loop);
+    let hurt = sprite.animations.get("hurt").expect("hurt animation");
+    assert_eq!(hurt.textures, vec!["hurt.png"]);
+    assert_eq!(hurt.fps, 1.0);
+    assert_eq!(hurt.mode, AnimationMode::Once);
 }
 
 #[test]

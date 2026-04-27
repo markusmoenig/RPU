@@ -1,0 +1,22 @@
+state dir = -1
+state base_x = 0
+
+on ready() {
+    base_x = self.x
+    self.animation = "walk"
+}
+
+on update(dt) {
+    self.x = self.x + dir * 28.0 * dt
+    if self.x < base_x - 36.0 {
+        dir = 1
+    }
+    if self.x > base_x + 36.0 {
+        dir = -1
+    }
+    if dir < 0 {
+        self.flip_x = 0
+    } else {
+        self.flip_x = 1
+    }
+}

@@ -160,6 +160,31 @@ on update(dt) {
 
 The runtime updates `self.vx`, `self.vy`, and `self.grounded`.
 
+## Collision Events
+
+The runtime emits entity collision events after movement and platformer physics.
+
+`collision_enter(other, group)` fires once when two visible entities begin overlapping.
+
+`collision(other, group)` fires every frame while two visible entities overlap.
+
+Both events are sent to both entities. `other` is the other entity name and `group` is the other entity group, or an empty string if it has none.
+
+```rpu
+on collision_enter(other, group) {
+    if group == "pickup" {
+        destroy(other)
+    } else if group == "hazard" && is_stomping(other) {
+        destroy(other)
+        self.vy = -185.0
+    } else if group == "hazard" {
+        self.vy = -150.0
+    }
+}
+```
+
+`is_stomping(other)` is a platformer helper for collision handlers. It returns true when the current entity is falling into the top band of `other`, which is useful for enemy stomp behavior.
+
 ## Locals
 
 Handler-local values can be introduced with `let`:
@@ -283,8 +308,10 @@ Current built-in runtime queries:
 - `key("Space")`
 - `exists("Name")`
 - `first_overlap("group")`
+- `is_stomping("Name")`
 - `high_score_name(index)`
 - `high_score_value(index)`
+- `format_int(value, digits)`
 - `lerp(a, b, t)`
 - `pulse(period)`
 - `smoothstep(edge0, edge1, x)`
@@ -336,6 +363,12 @@ if exists(hit) {
 ```
 
 `high_score_name(index)` and `high_score_value(index)` read from the runtime high-score table using 1-based indices.
+
+`format_int(value, digits)` formats a scalar as a zero-padded string. This is useful for HUD text:
+
+```rpu
+ScoreLabel.text = format_int(score, 3)
+```
 
 `lerp(a, b, t)` linearly interpolates between two scalar values.
 

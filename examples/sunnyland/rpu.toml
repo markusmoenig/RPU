@@ -1,5 +1,5 @@
 [project]
-name = "Jumpnrun Prototype"
+name = "Sunnyland"
 version = "0.1.0"
 start_scene = "Main"
 
@@ -9,6 +9,9 @@ height = 180
 default_scale = 4.0
 resize = "letterbox"
 
+[debug]
+physics = false
+
 [meta]
-bundle_id = "org.rpu.jumpnrun_prototype"
-display_name = "Jumpnrun Prototype"
+bundle_id = "org.rpu.sunnyland"
+display_name = "Sunnyland"

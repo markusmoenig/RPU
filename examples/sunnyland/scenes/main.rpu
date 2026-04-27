@@ -1,12 +1,18 @@
 scene Main {
     meta {
-        title = "Jumpnrun Prototype"
+        title = "Sunnyland"
     }
 
     camera MainCamera {
         pos = (160, 90)
-        zoom = 1.0
+        zoom = 0.85
         background = #79d4ff
+        follow = Player
+        follow_offset = (0, -18)
+        follow_smoothing = 7.0
+        dead_zone = (48, 28)
+        bounds_min = (160, 90)
+        bounds_max = (1110, 90)
     }
 
     sprite BackgroundBack {
@@ -34,18 +40,24 @@ scene Main {
         cell = (24, 24)
 
         legend {
-            # = "tile-grass-top.png"
-            d = "tile-dirt.png"
-            < = "tile-slope-left.png"
-            > = "tile-slope-right.png"
+            # = tile("tile-grass-top.png", solid)
+            d = tile("tile-dirt.png", solid)
+            - = tile("platform-long.png", one_way)
+            b = tile("bush.png", none)
+            < = tile("tile-slope-left.png", solid)
+            > = tile("tile-slope-right.png", solid)
             p = spawn(Player)
+            c = spawn(Coin)
+            o = spawn(Opossum)
         }
 
         ascii {
-           ####      
-         p           
-        #############
-        ddddddddddddd
+
+           ----                  ----                        ----
+         p c   o c        c       c      o        c       o  c
+        ################  #########################  ############
+        dddddddddddddddd  ddddddddddddddddddddddddd  dddddddddddd
+        b      b                   b          b             b
         }
     }
 
@@ -55,21 +67,64 @@ scene Main {
         size = (24, 24)
         color = #ffffff
         physics = platformer
+        collider_offset = (4, 2)
+        collider_size = (16, 22)
         acceleration = 520.0
         friction = 840.0
         max_speed = 96.0
         gravity = 560.0
         jump_speed = 255.0
         max_fall_speed = 280.0
+        coyote_time = 0.10
+        jump_buffer = 0.12
         texture = "foxy_idle1.png"
-        animation_idle = ["foxy_idle1.png", "foxy_idle2.png"]
-        animation_idle_fps = 1.25
-        animation_run = ["foxy_run1.png", "foxy_run2.png", "foxy_run3.png"]
-        animation_run_fps = 9.0
-        animation_jump = ["foxy_jump.png"]
-        animation_fall = ["foxy_fall.png"]
-        animation_hurt = ["foxy_hurt.png"]
         script = "player.rpu"
+
+        animation idle {
+            frames = ["foxy_idle1.png", "foxy_idle2.png"]
+            fps = 1.25
+        }
+
+        animation run {
+            frames = ["foxy_run1.png", "foxy_run2.png", "foxy_run3.png"]
+            fps = 9.0
+        }
+
+        animation jump {
+            frames = "foxy_jump.png"
+        }
+
+        animation fall {
+            frames = "foxy_fall.png"
+        }
+
+        animation hurt {
+            frames = "foxy_hurt.png"
+        }
+    }
+
+    text ScoreTitle {
+        anchor = top_left
+        align = left
+        layer = 50
+        z = 80
+        pos = (8, 7)
+        value = "SCORE"
+        font = "BetterPixels.ttf"
+        font_size = 8.0
+        color = #17365d
+    }
+
+    text ScoreLabel {
+        anchor = top_left
+        align = left
+        layer = 50
+        z = 80
+        pos = (52, 7)
+        value = "000"
+        font = "BetterPixels.ttf"
+        font_size = 8.0
+        color = #17365d
     }
 
     sprite Coin {
@@ -104,11 +159,17 @@ scene Main {
         layer = 15
         z = 25
         pos = (192, 108)
-        size = (28, 22)
+        size = (28, 24)
+        collider_offset = (3, 5)
+        collider_size = (22, 19)
         color = #ffffff
-        texture = ["opossum1.png", "opossum2.png", "opossum3.png", "opossum4.png", "opossum5.png", "opossum6.png"]
-        animation_fps = 9.0
+        texture = "opossum1.png"
         script = "patrol.rpu"
+
+        animation walk {
+            frames = ["opossum1.png", "opossum2.png", "opossum3.png", "opossum4.png", "opossum5.png", "opossum6.png"]
+            fps = 9.0
+        }
     }
 
     sprite Palm {
@@ -162,15 +223,14 @@ scene Main {
     }
 
     text Hint {
-        visible = false
         anchor = top_left
         align = left
         layer = 50
         z = 80
-        pos = (8, 7)
-        value = "ARROWS MOVE  SPACE JUMPS"
+        pos = (8, 18)
+        value = "ARROWS MOVE  SPACE JUMPS  F3 DEBUG"
         font = "BetterPixels.ttf"
         font_size = 7.0
-        color = #e8f3ff
+        color = #285078
     }
 }

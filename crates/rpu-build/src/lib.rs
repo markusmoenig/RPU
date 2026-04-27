@@ -2452,6 +2452,13 @@ fn write_map_layout_png(
             let iw = (map.cell[0] * scale).round().max(1.0) as u32;
             let ih = (map.cell[1] * scale).round().max(1.0) as u32;
             match legend.get(&ch) {
+                Some(rpu_core::MapLegendMeaning::Tile(tile)) => {
+                    if let Some(tile) = load_layout_texture(project_root, &tile.texture, iw, ih) {
+                        blit_rgba(&mut image, &tile, ix, iy);
+                    } else {
+                        fill_rect_i32(&mut image, ix, iy, iw, ih, rgba([80, 84, 94, 255]));
+                    }
+                }
                 Some(rpu_core::MapLegendMeaning::Texture(texture)) => {
                     if let Some(tile) = load_layout_texture(project_root, texture, iw, ih) {
                         blit_rgba(&mut image, &tile, ix, iy);
@@ -2482,6 +2489,7 @@ fn write_map_layout_png(
     }
 
     draw_map_top_collision_edges(&mut image, map, &legend, view_x, view_y, scale);
+    draw_map_spawn_instance_colliders(&mut image, scene, map, &legend, view_x, view_y, scale);
 
     for rect in &scene.rects {
         if !rect.visual.visible || rect.visual.template {
@@ -2522,6 +2530,19 @@ fn write_map_layout_png(
             scale,
             rgba([255, 0, 255, 240]),
         );
+        if let Some(collider_size) = sprite.collider_size {
+            draw_world_outline(
+                &mut image,
+                pos[0] + sprite.collider_offset[0],
+                pos[1] + sprite.collider_offset[1],
+                collider_size[0],
+                collider_size[1],
+                view_x,
+                view_y,
+                scale,
+                rgba([0, 255, 120, 245]),
+            );
+        }
         let cx = ((pos[0] + sprite.visual.size[0] * 0.5 - view_x) * scale).round() as i32;
         let cy = ((pos[1] + sprite.visual.size[1] * 0.5 - view_y) * scale).round() as i32;
         draw_line(&mut image, cx - 4, cy, cx + 4, cy, rgba([255, 0, 255, 240]));
@@ -2544,15 +2565,15 @@ fn draw_map_top_collision_edges(
 ) {
     for (row, line) in map.rows.iter().enumerate() {
         for (col, ch) in line.chars().enumerate() {
-            if !map_cell_is_solid(ch, legend) {
+            let Some(collision) = map_cell_collision(ch, legend) else {
                 continue;
-            }
+            };
             let has_solid_above = row > 0
                 && map
                     .rows
                     .get(row - 1)
                     .and_then(|above| above.chars().nth(col))
-                    .is_some_and(|above| map_cell_is_solid(above, legend));
+                    .is_some_and(|above| map_cell_collision(above, legend).is_some());
             if has_solid_above {
                 continue;
             }
@@ -2560,9 +2581,62 @@ fn draw_map_top_collision_edges(
             let y = ((map.origin[1] + row as f32 * map.cell[1] - view_y) * scale).round() as i32;
             let x1 = ((map.origin[0] + (col as f32 + 1.0) * map.cell[0] - view_x) * scale).round()
                 as i32;
+            let color = match collision {
+                rpu_core::MapTileCollision::Solid => rgba([255, 232, 64, 245]),
+                rpu_core::MapTileCollision::OneWay => rgba([255, 128, 24, 245]),
+                rpu_core::MapTileCollision::None => continue,
+            };
             for dy in 0..3 {
-                draw_line(image, x0, y + dy, x1, y + dy, rgba([255, 232, 64, 245]));
+                draw_line(image, x0, y + dy, x1, y + dy, color);
             }
+        }
+    }
+}
+
+fn draw_map_spawn_instance_colliders(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    scene: &rpu_core::SceneNode,
+    map: &rpu_core::AsciiMapNode,
+    legend: &std::collections::HashMap<char, &rpu_core::MapLegendMeaning>,
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+) {
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            let Some(rpu_core::MapLegendMeaning::Spawn(name)) = legend.get(&ch) else {
+                continue;
+            };
+            let Some(sprite) = scene.sprites.iter().find(|sprite| sprite.name == *name) else {
+                continue;
+            };
+            let pos = [
+                map.origin[0] + col as f32 * map.cell[0],
+                map.origin[1] + row as f32 * map.cell[1],
+            ];
+            draw_world_outline(
+                image,
+                pos[0],
+                pos[1],
+                sprite.visual.size[0],
+                sprite.visual.size[1],
+                view_x,
+                view_y,
+                scale,
+                rgba([255, 0, 255, 240]),
+            );
+            let collider_size = sprite.collider_size.unwrap_or(sprite.visual.size);
+            draw_world_outline(
+                image,
+                pos[0] + sprite.collider_offset[0],
+                pos[1] + sprite.collider_offset[1],
+                collider_size[0],
+                collider_size[1],
+                view_x,
+                view_y,
+                scale,
+                rgba([0, 255, 120, 245]),
+            );
         }
     }
 }
@@ -2728,16 +2802,24 @@ fn map_cell_is_empty(ch: char) -> bool {
     matches!(ch, ' ' | '.')
 }
 
-fn map_cell_is_solid(
+fn map_cell_collision(
     ch: char,
     legend: &std::collections::HashMap<char, &rpu_core::MapLegendMeaning>,
-) -> bool {
-    matches!(
-        legend.get(&ch),
+) -> Option<rpu_core::MapTileCollision> {
+    match legend.get(&ch) {
+        Some(rpu_core::MapLegendMeaning::Tile(tile)) => match tile.collision {
+            rpu_core::MapTileCollision::Solid | rpu_core::MapTileCollision::OneWay => {
+                Some(tile.collision)
+            }
+            rpu_core::MapTileCollision::None => None,
+        },
         Some(rpu_core::MapLegendMeaning::Texture(_))
-            | Some(rpu_core::MapLegendMeaning::Color(_))
-            | Some(rpu_core::MapLegendMeaning::Terrain(_))
-    )
+        | Some(rpu_core::MapLegendMeaning::Color(_))
+        | Some(rpu_core::MapLegendMeaning::Terrain(_)) => Some(rpu_core::MapTileCollision::Solid),
+        Some(rpu_core::MapLegendMeaning::Marker)
+        | Some(rpu_core::MapLegendMeaning::Spawn(_))
+        | None => None,
+    }
 }
 
 fn write_terrain_debug_png(classified: &rpu_core::ClassifiedAsciiMap, path: &Path) -> Result<()> {
@@ -6087,8 +6169,10 @@ In *__layout.png:
 - background = scene camera background color
 - direct texture map cells are drawn with their tile textures
 - direct color map cells are drawn with their legend colors
-- yellow horizontal lines = inferred top collision surfaces
+- yellow horizontal lines = solid top collision surfaces
+- orange horizontal lines = one-way top collision surfaces
 - magenta outlines = visible sprite spawn/collision boxes
+- green outlines = custom sprite collider boxes
 - red outlines = visible rect boxes
 
 In *_terrain.png:

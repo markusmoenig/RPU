@@ -88,9 +88,30 @@ sprite Player {
 
 `spawn(Player)` places the scene sprite named `Player` at that map cell. This is often more readable than assigning a separate `pos` to the sprite.
 
-## Direct Tile Textures
+Repeated spawn cells can instantiate hidden sprite definitions:
 
-For tile-based games that do not want terrain synthesis, legend entries can map symbols directly to texture filenames:
+```rpu
+legend {
+    c = spawn(Coin)
+    o = spawn(Opossum)
+}
+
+ascii {
+    c   o   c
+}
+
+sprite Coin {
+    visible = false
+    group = "pickup"
+    texture = ["gem-1.png", "gem-2.png"]
+}
+```
+
+The runtime creates visible instances named from the template, such as `Coin_1`, `Coin_2`, and `Opossum_1`. This keeps collectible, enemy, and prop placement in the map instead of scattering positions through sprite definitions.
+
+## Direct Tiles
+
+For tile-based games that do not want terrain synthesis, legend entries can map symbols directly to texture filenames and collision policies:
 
 ```rpu
 map Terrain {
@@ -98,23 +119,30 @@ map Terrain {
     cell = (24, 24)
 
     legend {
-        # = "tile-grass-top.png"
-        d = "tile-dirt.png"
-        < = "tile-slope-left.png"
-        > = "tile-slope-right.png"
+        # = tile("tile-grass-top.png", solid)
+        d = tile("tile-dirt.png", solid)
+        - = tile("platform.png", one_way)
+        b = tile("bush.png", none)
     }
 
     ascii {
-         ####
+         ----
     ############
     dddddddddddd
+    b          b
     }
 }
 ```
 
-Quoted texture entries are drawn one sprite per map cell using the map `cell` size. This path is deterministic and does not use terrain classification, material stacks, WFC, or synthesized caps.
+`tile("name.png", policy)` draws one sprite per map cell using the map `cell` size. This path is deterministic and does not use terrain classification, material stacks, WFC, or synthesized caps.
 
-Direct texture cells currently also generate solid platformer collision. Spawn and marker cells do not collide.
+Collision policies:
+
+- `solid` generates full AABB collision.
+- `one_way` only collides when a platformer body lands from above.
+- `none` draws the tile without collision.
+
+Quoted texture entries such as `# = "tile-grass-top.png"` still work as a compatibility shorthand for a solid tile. Spawn and marker cells do not collide.
 
 ## Current limits
 
@@ -122,7 +150,6 @@ The map system does not yet provide:
 
 - tile rules
 - procedural terrain generation
-- per-tile collision policies such as `one_way` or `none`
 - slope semantics beyond authored symbols
 - texture synthesis
 

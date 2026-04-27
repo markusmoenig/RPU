@@ -19,6 +19,8 @@ scene Main {
     camera MainCamera {
         pos = (360, 240)
         zoom = 1.0
+        follow = Player
+        follow_offset = (0, -18)
         background = (0.07, 0.09, 0.14, 1.0)
     }
 }
@@ -35,6 +37,49 @@ Current scene nodes:
 - `stack`
 - `highscore`
 - `map`
+
+## Cameras
+
+Camera properties:
+
+- `pos`
+- `zoom`
+- `background`
+- `follow`
+- `follow_offset`
+- `follow_smoothing`
+- `dead_zone`
+- `bounds_min`
+- `bounds_max`
+
+`pos` is the authored world-space camera center. If `follow` is set, the runtime resolves the named entity each frame and centers the camera on that entity instead.
+
+```rpu
+camera MainCamera {
+    pos = (160, 90)
+    follow = Player
+    follow_offset = (0, -18)
+    zoom = 1.0
+}
+```
+
+`follow_offset` shifts the followed camera center in world units. For platformers this is useful to show more space ahead or above the player while still keeping the camera tied to movement.
+
+`follow_smoothing` eases camera movement toward the target. `0` disables smoothing. Larger values catch up faster.
+
+`dead_zone = (width, height)` keeps the camera still while the followed target remains inside that centered world-space box.
+
+`bounds_min` and `bounds_max` clamp the camera center after follow is applied:
+
+```rpu
+camera MainCamera {
+    follow = Player
+    follow_smoothing = 7.0
+    dead_zone = (48, 28)
+    bounds_min = (160, 90)
+    bounds_max = (880, 90)
+}
+```
 
 ## Visual node properties
 
@@ -147,6 +192,7 @@ For `sprite` nodes, `size` is optional. If a sprite has a `texture` and no expli
 Sprites also support:
 
 - `texture`
+- `animation <name> { ... }`
 - `animation_<name>`
 - `animation_<name>_fps`
 - `animation_<name>_mode`
@@ -167,6 +213,8 @@ Sprites also support:
 - `repeat_y`
 - `flip_x`
 - `flip_y`
+- `collider_offset`
+- `collider_size`
 
 `scroll = (x, y)` applies a continuous authored-space offset over time.
 
@@ -204,15 +252,24 @@ Named animations keep reusable frame lists in scene data instead of script logic
 sprite Player {
     texture = "foxy_idle1.png"
 
-    animation_idle = ["foxy_idle1.png", "foxy_idle2.png"]
-    animation_idle_fps = 1.25
+    animation idle {
+        frames = ["foxy_idle1.png", "foxy_idle2.png"]
+        fps = 1.25
+    }
 
-    animation_run = ["foxy_run1.png", "foxy_run2.png", "foxy_run3.png"]
-    animation_run_fps = 9.0
+    animation run {
+        frames = ["foxy_run1.png", "foxy_run2.png", "foxy_run3.png"]
+        fps = 9.0
+    }
 
-    animation_jump = ["foxy_jump.png"]
+    animation hurt {
+        frames = "foxy_hurt.png"
+        mode = once
+    }
 }
 ```
+
+Animation blocks support `frames`, `fps`, `mode = loop|once`, and `loop = true|false`. The older `animation_<name>` property form remains supported for compact declarations.
 
 Scripts switch named animations through `self.animation = "idle"` or `self.animation = "run"`.
 
@@ -229,12 +286,20 @@ sprite Player {
     gravity = 560.0
     jump_speed = 255.0
     max_fall_speed = 280.0
+    coyote_time = 0.10
+    jump_buffer = 0.12
+    collider_offset = (4, 2)
+    collider_size = (16, 22)
 }
 ```
 
-The runtime applies acceleration, friction, gravity, jump impulse, and axis-separated AABB collision against solid map cells.
+The runtime applies acceleration, friction, gravity, jump impulse, and axis-separated AABB collision against map cells with collision.
 
-Current collision generation treats color, texture, and terrain map cells as solid. `marker` and `spawn(...)` cells are ignored.
+Direct `tile(...)` map cells control collision explicitly with `solid`, `one_way`, or `none`. Legacy color, quoted texture, and terrain map cells are treated as solid. `marker` and `spawn(...)` cells are ignored.
+
+`coyote_time` keeps jump eligibility alive briefly after leaving a platform. `jump_buffer` remembers a jump press briefly before landing. Both values are in seconds and make platforming less brittle without script-side timing code.
+
+`collider_offset` and `collider_size` define the runtime collision rectangle relative to the sprite's visual top-left. If omitted, the sprite's full visual `size` is used. Rendering still uses the visual size, so sprites with transparent padding can use tighter collision bounds.
 
 Scripts drive platformer physics through intent properties:
 

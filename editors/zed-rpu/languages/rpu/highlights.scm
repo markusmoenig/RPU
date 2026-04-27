@@ -5,7 +5,6 @@
   "camera"
   "rect"
   "sprite"
-  "animation"
   "text"
   "map"
   "legend"
@@ -30,7 +29,6 @@
 (camera_definition name: (identifier) @type)
 (rect_definition name: (identifier) @type)
 (sprite_definition name: (identifier) @type)
-(animation_definition name: (identifier) @function)
 (text_definition name: (identifier) @type)
 (stack_definition name: (identifier) @type)
 (highscore_definition name: (identifier) @type)

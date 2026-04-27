@@ -1,4 +1,11 @@
 state hurt_until = 0
+state score = 0
+state spawn_x = 0
+state spawn_y = 0
+
+fn score_text(value) {
+    return format_int(value, 3)
+}
 
 fn emit_motion_state() {
     if time() < hurt_until {
@@ -32,10 +39,34 @@ on event(event, value) {
     }
 }
 
+on collision_enter(other, group) {
+    if group == "pickup" {
+        destroy(other)
+        score = score + 10
+        ScoreLabel.text = score_text(score)
+    } else if group == "hazard" && is_stomping(other) {
+        destroy(other)
+        score = score + 25
+        ScoreLabel.text = score_text(score)
+        self.vy = -185.0
+    } else if group == "hazard" && time() >= hurt_until {
+        hurt_until = time() + 1.0
+        self.vy = -150.0
+        if self.flip_x == 0 {
+            self.vx = -170.0
+        } else {
+            self.vx = 170.0
+        }
+    }
+}
+
 on ready() {
     self.animation = "idle"
     self.vx = 0
     self.vy = 0
+    spawn_x = self.x
+    spawn_y = self.y
+    ScoreLabel.text = score_text(score)
 }
 
 on update(dt) {
@@ -51,6 +82,14 @@ on update(dt) {
 
     if input_action() && self.grounded {
         self.jump = 1
+    }
+
+    if self.y > 210.0 {
+        self.x = spawn_x
+        self.y = spawn_y
+        self.vx = 0
+        self.vy = 0
+        hurt_until = time() + 1.0
     }
 
     emit_motion_state()

@@ -2,9 +2,9 @@ use anyhow::Result;
 use image::{ImageBuffer, Rgba};
 use rpu_core::{
     Anchor, AnimationMode, AsciiMapNode, BinaryOp, BundledProject, BytecodeOp, CompiledProject,
-    Condition, DestroyTarget, DrawCommand, Expr, MapLegendMeaning, OpCode, RectNode, ResizeMode,
-    RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget, SpriteNode, TextAlign,
-    TextNode, WindowConfig, apply_scene_layout,
+    Condition, DestroyTarget, DrawCommand, Expr, MapLegendMeaning, MapTileCollision, OpCode,
+    RectNode, ResizeMode, RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget,
+    SpriteNode, TextAlign, TextNode, WindowConfig, apply_scene_layout,
 };
 #[cfg(any(
     target_arch = "wasm32",
@@ -16,7 +16,7 @@ use rpu_core::{
 ))]
 use rpu_scenevm::run_app;
 use rpu_scenevm::{RpuSceneApp, RuntimeContext, SceneFrame, register_generated_rgba_texture};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -101,10 +101,7 @@ impl RpuSceneApp for RuntimeApp {
 
     fn render(&mut self, _ctx: &mut RuntimeContext, frame: &mut SceneFrame) {
         frame.clear_color(self.current_clear_color());
-        let camera = self
-            .session
-            .compiled
-            .active_camera_for(&self.session.current_scene);
+        let camera = self.session.current_camera();
         let viewport = frame.size();
         let view = RenderView::new(&self.session.compiled.window, viewport);
 
@@ -216,6 +213,10 @@ impl RpuSceneApp for RuntimeApp {
                 }
             }
         }
+
+        if self.session.debug_physics {
+            submit_physics_debug_overlay(frame, &camera, &view, &self.session.world);
+        }
     }
 }
 
@@ -240,6 +241,10 @@ struct RuntimeSession {
     persisted_entity_state: HashMap<String, HashMap<String, Value>>,
     high_scores: HighScoreTable,
     pending_audio: Vec<AudioCommand>,
+    camera_pos: Option<[f32; 2]>,
+    active_collisions: HashSet<CollisionPair>,
+    debug_physics: bool,
+    debug_toggle_down: bool,
 }
 
 struct RuntimeWorld {
@@ -255,6 +260,42 @@ struct RuntimeCollider {
     y: f32,
     width: f32,
     height: f32,
+    collision: MapTileCollision,
+}
+
+struct RuntimeMapSpawn {
+    template: String,
+    pos: [f32; 2],
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct CollisionPair {
+    a: String,
+    b: String,
+}
+
+impl CollisionPair {
+    fn new(left: &str, right: &str) -> Self {
+        if left <= right {
+            Self {
+                a: left.to_string(),
+                b: right.to_string(),
+            }
+        } else {
+            Self {
+                a: right.to_string(),
+                b: left.to_string(),
+            }
+        }
+    }
+}
+
+struct EntityCollision {
+    pair: CollisionPair,
+    left_name: String,
+    left_group: String,
+    right_name: String,
+    right_group: String,
 }
 
 #[derive(Clone)]
@@ -270,6 +311,8 @@ struct RuntimeEntity {
     z: i32,
     pos: [f32; 2],
     size: [f32; 2],
+    collider_offset: [f32; 2],
+    collider_size: Option<[f32; 2]>,
     rotation: f32,
     color: [f32; 4],
     scroll: [f32; 2],
@@ -291,6 +334,8 @@ struct RuntimePhysics {
     move_x: f32,
     jump_requested: bool,
     grounded: bool,
+    coyote_timer: f32,
+    jump_buffer_timer: f32,
 }
 
 #[derive(Clone)]
@@ -374,6 +419,7 @@ impl RuntimeSession {
             &current_scene,
             &project.root().join("assets").display().to_string(),
         );
+        let debug_physics = compiled.debug.physics;
         let mut session = Self {
             asset_base: project.root().join("assets").display().to_string(),
             project: Some(project),
@@ -395,6 +441,10 @@ impl RuntimeSession {
             persisted_entity_state: HashMap::new(),
             high_scores: HighScoreTable::default(),
             pending_audio: Vec::new(),
+            camera_pos: None,
+            active_collisions: HashSet::new(),
+            debug_physics,
+            debug_toggle_down: false,
         };
         session.initialize_script_state_all();
         Ok(session)
@@ -405,6 +455,7 @@ impl RuntimeSession {
         log_compilation("initial compile", &compiled);
         let current_scene = resolve_scene_name(&compiled, compiled.start_scene.as_str());
         let world = RuntimeWorld::from_compiled_scene(&compiled, &current_scene, asset_base);
+        let debug_physics = compiled.debug.physics;
         let mut session = Self {
             project: None,
             compiled,
@@ -426,6 +477,10 @@ impl RuntimeSession {
             persisted_entity_state: HashMap::new(),
             high_scores: HighScoreTable::default(),
             pending_audio: Vec::new(),
+            camera_pos: None,
+            active_collisions: HashSet::new(),
+            debug_physics,
+            debug_toggle_down: false,
         };
         session.initialize_script_state_all();
         Ok(session)
@@ -440,6 +495,7 @@ impl RuntimeSession {
 
     fn tick(&mut self, ctx: &RuntimeContext) {
         self.refresh_query_state(ctx);
+        self.update_debug_toggles();
         let now = Instant::now();
         let dt = (now - self.last_tick_instant).as_secs_f32().min(0.1);
         self.last_tick_instant = now;
@@ -448,6 +504,8 @@ impl RuntimeSession {
             self.ticks = self.ticks.saturating_add(1);
             self.execute_event("update", dt);
             self.world.apply_platformer_physics(dt);
+            self.dispatch_collision_events(dt);
+            self.update_camera(dt);
             self.world
                 .remove_finished_animations(self.query_state.elapsed_time);
             self.capture_persistent_entity_state();
@@ -457,6 +515,56 @@ impl RuntimeSession {
 
     fn drain_audio_commands(&mut self) -> Vec<AudioCommand> {
         std::mem::take(&mut self.pending_audio)
+    }
+
+    fn current_camera(&self) -> SceneCamera {
+        let mut camera = self.compiled.active_camera_for(&self.current_scene);
+        if let Some(pos) = self.camera_pos {
+            camera.x = pos[0];
+            camera.y = pos[1];
+        } else if camera.follow.is_some() {
+            let target = self.camera_target(&camera);
+            camera.x = target[0];
+            camera.y = target[1];
+        }
+        camera
+    }
+
+    fn update_camera(&mut self, dt: f32) {
+        let camera = self.compiled.active_camera_for(&self.current_scene);
+        if camera.follow.is_none() {
+            self.camera_pos = Some([camera.x, camera.y]);
+            return;
+        }
+        let target = self.camera_target(&camera);
+        let current = self.camera_pos.unwrap_or(target);
+        let adjusted = apply_camera_dead_zone(current, target, camera.dead_zone);
+        let smoothed = if camera.follow_smoothing <= 0.0 {
+            adjusted
+        } else {
+            let t = 1.0 - (-camera.follow_smoothing * dt).exp();
+            [
+                current[0] + (adjusted[0] - current[0]) * t,
+                current[1] + (adjusted[1] - current[1]) * t,
+            ]
+        };
+        self.camera_pos = Some(clamp_camera_pos(smoothed, &camera));
+    }
+
+    fn camera_target(&self, camera: &SceneCamera) -> [f32; 2] {
+        let Some(follow) = camera.follow.as_deref() else {
+            return clamp_camera_pos([camera.x, camera.y], camera);
+        };
+        let Some(entity) = self.world.find_entity(follow) else {
+            return clamp_camera_pos([camera.x, camera.y], camera);
+        };
+        clamp_camera_pos(
+            [
+                entity.pos[0] + entity.size[0] * 0.5 + camera.follow_offset[0],
+                entity.pos[1] + entity.size[1] * 0.5 + camera.follow_offset[1],
+            ],
+            camera,
+        )
     }
 
     fn refresh_query_state(&mut self, ctx: &RuntimeContext) {
@@ -475,6 +583,19 @@ impl RuntimeSession {
             .map(|key| (key, true))
             .collect();
         self.query_state.elapsed_time = self.start_instant.elapsed().as_secs_f32();
+    }
+
+    fn update_debug_toggles(&mut self) {
+        let toggle_down = self
+            .query_state
+            .pressed_keys
+            .get("F3")
+            .copied()
+            .unwrap_or(false);
+        if toggle_down && !self.debug_toggle_down {
+            self.debug_physics = !self.debug_physics;
+        }
+        self.debug_toggle_down = toggle_down;
     }
 
     fn next_spawn_name(&mut self, template: &str) -> String {
@@ -607,9 +728,12 @@ impl RuntimeSession {
                     log_compilation("hot reload", &compiled);
                     self.capture_persistent_entity_state();
                     self.compiled = compiled;
+                    self.debug_physics = self.compiled.debug.physics;
+                    self.debug_toggle_down = false;
                     self.current_scene =
                         resolve_scene_name(&self.compiled, self.current_scene.as_str());
                     self.rebuild_world_for_scene(false);
+                    self.camera_pos = None;
                     if self.initialized {
                         self.execute_event("ready", 0.0);
                     }
@@ -736,6 +860,95 @@ impl RuntimeSession {
         let _ = self.apply_pending_scene_change();
     }
 
+    fn dispatch_collision_events(&mut self, dt: f32) {
+        let collisions = self.collect_entity_collisions();
+        let current_pairs = collisions
+            .iter()
+            .map(|collision| collision.pair.clone())
+            .collect::<HashSet<_>>();
+
+        for collision in &collisions {
+            if !self.active_collisions.contains(&collision.pair) {
+                self.dispatch_collision_event_to_pair("collision_enter", collision, dt);
+            }
+            self.dispatch_collision_event_to_pair("collision", collision, dt);
+            if self.apply_pending_scene_change() {
+                self.active_collisions.clear();
+                return;
+            }
+        }
+
+        self.active_collisions = current_pairs;
+    }
+
+    fn collect_entity_collisions(&self) -> Vec<EntityCollision> {
+        let mut collisions = Vec::new();
+        for left_index in 0..self.world.entities.len() {
+            let left = &self.world.entities[left_index];
+            if !left.visible {
+                continue;
+            }
+            for right_index in (left_index + 1)..self.world.entities.len() {
+                let right = &self.world.entities[right_index];
+                if !right.visible || !intersects(left, right) {
+                    continue;
+                }
+                collisions.push(EntityCollision {
+                    pair: CollisionPair::new(&left.name, &right.name),
+                    left_name: left.name.clone(),
+                    left_group: left.group.clone().unwrap_or_default(),
+                    right_name: right.name.clone(),
+                    right_group: right.group.clone().unwrap_or_default(),
+                });
+            }
+        }
+        collisions
+    }
+
+    fn dispatch_collision_event_to_pair(
+        &mut self,
+        event: &str,
+        collision: &EntityCollision,
+        dt: f32,
+    ) {
+        self.dispatch_collision_event_to_entity(
+            &collision.left_name,
+            event,
+            &collision.right_name,
+            &collision.right_group,
+            dt,
+        );
+        self.dispatch_collision_event_to_entity(
+            &collision.right_name,
+            event,
+            &collision.left_name,
+            &collision.left_group,
+            dt,
+        );
+    }
+
+    fn dispatch_collision_event_to_entity(
+        &mut self,
+        entity_name: &str,
+        event: &str,
+        other_name: &str,
+        other_group: &str,
+        dt: f32,
+    ) {
+        let Some(entity_index) = self.world.find_entity_index(entity_name) else {
+            return;
+        };
+        self.execute_entity_event_with_args(
+            entity_index,
+            event,
+            dt,
+            &[
+                Value::String(other_name.to_string()),
+                Value::String(other_group.to_string()),
+            ],
+        );
+    }
+
     fn queue_scene_switch(&mut self, scene_name: String) {
         self.pending_scene = Some(scene_name);
     }
@@ -747,6 +960,7 @@ impl RuntimeSession {
         self.capture_persistent_entity_state();
         self.current_scene = resolve_scene_name(&self.compiled, &scene_name);
         self.rebuild_world_for_scene(true);
+        self.camera_pos = None;
         true
     }
 
@@ -756,6 +970,7 @@ impl RuntimeSession {
             &self.current_scene,
             &self.asset_base,
         );
+        self.active_collisions.clear();
         self.restore_persistent_entity_state();
         self.initialize_script_state_all();
         if run_ready && self.initialized {
@@ -1833,6 +2048,31 @@ impl RuntimeSession {
                     .unwrap_or_default();
                 Some(Value::String(hit))
             }
+            "is_stomping" if args.len() == 1 => {
+                let other = self.eval_expr(
+                    entity_index,
+                    entity_name,
+                    script_path,
+                    event,
+                    line,
+                    &args[0],
+                    dt,
+                    locals,
+                    call_depth,
+                )?;
+                let other = other.as_string()?;
+                let stomping = self
+                    .world
+                    .entities
+                    .get(entity_index)
+                    .and_then(|source| {
+                        self.world
+                            .find_entity(other)
+                            .map(|target| is_stomping(source, target))
+                    })
+                    .unwrap_or(false);
+                Some(Value::Scalar(stomping as i32 as f32))
+            }
             "time" if args.is_empty() => Some(Value::Scalar(self.query_state.elapsed_time)),
             "age" if args.is_empty() => {
                 let entity = self.world.entities.get(entity_index)?;
@@ -2379,6 +2619,27 @@ impl RuntimeWorld {
                         entities.push(entity);
                     }
                 }
+                let map_spawns = compile_map_spawns(&scene.maps);
+                let mut spawn_counts: HashMap<String, usize> = HashMap::new();
+                for spawn in map_spawns {
+                    let Some(sprite) = scene
+                        .sprites
+                        .iter()
+                        .find(|sprite| sprite.name == spawn.template)
+                    else {
+                        continue;
+                    };
+                    if sprite.visual.visible && !sprite.visual.template {
+                        continue;
+                    }
+                    let count = spawn_counts.entry(spawn.template.clone()).or_insert(0);
+                    *count += 1;
+                    entities.push(runtime_sprite_spawn_entity(
+                        sprite,
+                        spawn.pos,
+                        &format!("{}_{}", spawn.template, count),
+                    ));
+                }
                 for text in &scene.texts {
                     let entity = runtime_text_entity(text);
                     if entity.template {
@@ -2447,6 +2708,13 @@ impl RuntimeWorld {
                 continue;
             }
             let settings = entity.physics.settings;
+            if entity.physics.grounded {
+                entity.physics.coyote_timer = settings.coyote_time;
+            }
+            if entity.physics.jump_requested {
+                entity.physics.jump_buffer_timer = settings.jump_buffer.max(dt);
+            }
+            entity.physics.jump_requested = false;
 
             if entity.physics.move_x != 0.0 {
                 entity.physics.velocity[0] += entity.physics.move_x * settings.acceleration * dt;
@@ -2460,30 +2728,25 @@ impl RuntimeWorld {
                     (entity.physics.velocity[0] + settings.friction * dt).min(0.0);
             }
 
-            if entity.physics.jump_requested && entity.physics.grounded {
+            if entity.physics.jump_buffer_timer > 0.0
+                && (entity.physics.grounded || entity.physics.coyote_timer > 0.0)
+            {
                 entity.physics.velocity[1] = -settings.jump_speed;
                 entity.physics.grounded = false;
+                entity.physics.coyote_timer = 0.0;
+                entity.physics.jump_buffer_timer = 0.0;
             }
-            entity.physics.jump_requested = false;
+            entity.physics.jump_buffer_timer = (entity.physics.jump_buffer_timer - dt).max(0.0);
+            entity.physics.coyote_timer = (entity.physics.coyote_timer - dt).max(0.0);
 
             let vx = entity.physics.velocity[0];
+            let previous_x = entity.pos[0];
             entity.pos[0] += vx * dt;
             if vx != 0.0 {
-                for collider in colliders {
-                    if !runtime_aabb_intersects(
-                        entity.pos[0],
-                        entity.pos[1],
-                        entity.size[0],
-                        entity.size[1],
-                        collider,
-                    ) {
-                        continue;
-                    }
-                    if vx > 0.0 {
-                        entity.pos[0] = collider.x - entity.size[0];
-                    } else {
-                        entity.pos[0] = collider.x + collider.width;
-                    }
+                if let Some(resolved_x) =
+                    resolve_horizontal_platformer_collision(entity, colliders, previous_x, vx)
+                {
+                    entity.pos[0] = resolved_x;
                     entity.physics.velocity[0] = 0.0;
                 }
             }
@@ -2491,24 +2754,23 @@ impl RuntimeWorld {
             entity.physics.velocity[1] = (entity.physics.velocity[1] + settings.gravity * dt)
                 .clamp(-settings.jump_speed, settings.max_fall_speed);
             let vy = entity.physics.velocity[1];
+            let previous_y = entity.pos[1];
+            let previous_bottom =
+                entity.pos[1] + entity.collider_offset[1] + entity_collider_height(entity);
             entity.pos[1] += vy * dt;
             entity.physics.grounded = false;
             if vy != 0.0 {
-                for collider in colliders {
-                    if !runtime_aabb_intersects(
-                        entity.pos[0],
-                        entity.pos[1],
-                        entity.size[0],
-                        entity.size[1],
-                        collider,
-                    ) {
-                        continue;
-                    }
-                    if vy > 0.0 {
-                        entity.pos[1] = collider.y - entity.size[1];
+                if let Some(resolved) = resolve_vertical_platformer_collision(
+                    entity,
+                    colliders,
+                    previous_y,
+                    previous_bottom,
+                    vy,
+                ) {
+                    entity.pos[1] = resolved.pos_y;
+                    if resolved.grounded {
                         entity.physics.grounded = true;
-                    } else {
-                        entity.pos[1] = collider.y + collider.height;
+                        entity.physics.coyote_timer = settings.coyote_time;
                     }
                     entity.physics.velocity[1] = 0.0;
                 }
@@ -2708,10 +2970,7 @@ fn target_property(target: &ScriptTarget) -> &ScriptProperty {
 
 impl RuntimeApp {
     fn current_clear_color(&self) -> [f32; 4] {
-        let camera = self
-            .session
-            .compiled
-            .active_camera_for(&self.session.current_scene);
+        let camera = self.session.current_camera();
         let mut base = camera.background;
         if camera.background == SceneCamera::default().background {
             let named = color_from_name(&self.session.compiled.name);
@@ -2745,6 +3004,38 @@ fn resolve_scene_name(compiled: &CompiledProject, requested: &str) -> String {
     }
 }
 
+fn clamp_camera_pos(mut pos: [f32; 2], camera: &SceneCamera) -> [f32; 2] {
+    if let Some(bounds_min) = camera.bounds_min {
+        pos[0] = pos[0].max(bounds_min[0]);
+        pos[1] = pos[1].max(bounds_min[1]);
+    }
+    if let Some(bounds_max) = camera.bounds_max {
+        pos[0] = pos[0].min(bounds_max[0]);
+        pos[1] = pos[1].min(bounds_max[1]);
+    }
+    pos
+}
+
+fn apply_camera_dead_zone(current: [f32; 2], target: [f32; 2], dead_zone: [f32; 2]) -> [f32; 2] {
+    let half = [dead_zone[0].max(0.0) * 0.5, dead_zone[1].max(0.0) * 0.5];
+    [
+        if target[0] < current[0] - half[0] {
+            target[0] + half[0]
+        } else if target[0] > current[0] + half[0] {
+            target[0] - half[0]
+        } else {
+            current[0]
+        },
+        if target[1] < current[1] - half[1] {
+            target[1] + half[1]
+        } else if target[1] > current[1] + half[1] {
+            target[1] - half[1]
+        } else {
+            current[1]
+        },
+    ]
+}
+
 fn runtime_rect_entity(rect: &RectNode) -> RuntimeEntity {
     RuntimeEntity {
         name: rect.name.clone(),
@@ -2757,6 +3048,8 @@ fn runtime_rect_entity(rect: &RectNode) -> RuntimeEntity {
         z: rect.visual.z,
         pos: rect.visual.pos,
         size: rect.visual.size,
+        collider_offset: [0.0, 0.0],
+        collider_size: None,
         rotation: 0.0,
         color: rect.visual.color,
         group: rect.visual.group.clone(),
@@ -2772,6 +3065,8 @@ fn runtime_rect_entity(rect: &RectNode) -> RuntimeEntity {
             move_x: 0.0,
             jump_requested: false,
             grounded: false,
+            coyote_timer: 0.0,
+            jump_buffer_timer: 0.0,
         },
         script: rect.visual.script_binding.clone(),
         script_state: HashMap::new(),
@@ -2802,6 +3097,8 @@ fn runtime_sprite_entity(
         z: sprite.visual.z,
         pos,
         size: sprite.visual.size,
+        collider_offset: sprite.collider_offset,
+        collider_size: sprite.collider_size,
         rotation: sprite.rotation,
         color: sprite.visual.color,
         group: sprite.visual.group.clone(),
@@ -2817,6 +3114,8 @@ fn runtime_sprite_entity(
             move_x: 0.0,
             jump_requested: false,
             grounded: false,
+            coyote_timer: 0.0,
+            jump_buffer_timer: 0.0,
         },
         script: sprite.visual.script_binding.clone(),
         script_state: HashMap::new(),
@@ -2832,6 +3131,173 @@ fn runtime_sprite_entity(
     }
 }
 
+fn runtime_sprite_spawn_entity(sprite: &SpriteNode, pos: [f32; 2], name: &str) -> RuntimeEntity {
+    let mut entity = runtime_sprite_entity(sprite, &HashMap::new());
+    entity.name = name.to_string();
+    entity.template = false;
+    entity.visible = true;
+    entity.pos = pos;
+    entity
+}
+
+fn entity_collider_width(entity: &RuntimeEntity) -> f32 {
+    entity
+        .collider_size
+        .map(|size| size[0])
+        .unwrap_or(entity.size[0])
+}
+
+fn entity_collider_height(entity: &RuntimeEntity) -> f32 {
+    entity
+        .collider_size
+        .map(|size| size[1])
+        .unwrap_or(entity.size[1])
+}
+
+fn entity_collider_rect(entity: &RuntimeEntity) -> (f32, f32, f32, f32) {
+    (
+        entity.pos[0] + entity.collider_offset[0],
+        entity.pos[1] + entity.collider_offset[1],
+        entity_collider_width(entity),
+        entity_collider_height(entity),
+    )
+}
+
+struct VerticalPlatformerCollision {
+    pos_y: f32,
+    grounded: bool,
+}
+
+fn resolve_horizontal_platformer_collision(
+    entity: &RuntimeEntity,
+    colliders: &[RuntimeCollider],
+    previous_x: f32,
+    velocity_x: f32,
+) -> Option<f32> {
+    let offset_x = entity.collider_offset[0];
+    let width = entity_collider_width(entity);
+    let (current_x, current_y, current_w, current_h) = entity_collider_rect(entity);
+    let previous_collider_x = previous_x + offset_x;
+    let previous_left = previous_collider_x;
+    let previous_right = previous_collider_x + width;
+    let current_left = current_x;
+    let current_right = current_x + current_w;
+    let current_top = current_y;
+    let current_bottom = current_y + current_h;
+
+    let mut resolved_x = None;
+    for collider in colliders {
+        if collider.collision != MapTileCollision::Solid
+            || !ranges_overlap(
+                current_top,
+                current_bottom,
+                collider.y,
+                collider.y + collider.height,
+            )
+        {
+            continue;
+        }
+
+        if velocity_x > 0.0 {
+            let crossed = previous_right <= collider.x && current_right >= collider.x;
+            let overlapped =
+                runtime_aabb_intersects(current_x, current_y, current_w, current_h, collider);
+            if crossed || overlapped {
+                let candidate = collider.x - width - offset_x;
+                resolved_x = Some(match resolved_x {
+                    Some(existing) if existing < candidate => existing,
+                    _ => candidate,
+                });
+            }
+        } else {
+            let collider_right = collider.x + collider.width;
+            let crossed = previous_left >= collider_right && current_left <= collider_right;
+            let overlapped =
+                runtime_aabb_intersects(current_x, current_y, current_w, current_h, collider);
+            if crossed || overlapped {
+                let candidate = collider_right - offset_x;
+                resolved_x = Some(match resolved_x {
+                    Some(existing) if existing > candidate => existing,
+                    _ => candidate,
+                });
+            }
+        }
+    }
+    resolved_x
+}
+
+fn resolve_vertical_platformer_collision(
+    entity: &RuntimeEntity,
+    colliders: &[RuntimeCollider],
+    previous_y: f32,
+    previous_bottom: f32,
+    velocity_y: f32,
+) -> Option<VerticalPlatformerCollision> {
+    let offset_y = entity.collider_offset[1];
+    let height = entity_collider_height(entity);
+    let (current_x, current_y, current_w, current_h) = entity_collider_rect(entity);
+    let previous_collider_y = previous_y + offset_y;
+    let previous_top = previous_collider_y;
+    let current_top = current_y;
+    let current_bottom = current_y + current_h;
+    let current_left = current_x;
+    let current_right = current_x + current_w;
+
+    let mut resolved: Option<VerticalPlatformerCollision> = None;
+    for collider in colliders {
+        if !ranges_overlap(
+            current_left,
+            current_right,
+            collider.x,
+            collider.x + collider.width,
+        ) {
+            continue;
+        }
+
+        if velocity_y > 0.0 {
+            if collider.collision == MapTileCollision::OneWay && previous_bottom > collider.y {
+                continue;
+            }
+            let crossed = previous_bottom <= collider.y && current_bottom >= collider.y;
+            let overlapped =
+                runtime_aabb_intersects(current_x, current_y, current_w, current_h, collider);
+            if crossed || overlapped {
+                let candidate = collider.y - height - offset_y;
+                resolved = Some(match resolved {
+                    Some(existing) if existing.pos_y < candidate => existing,
+                    _ => VerticalPlatformerCollision {
+                        pos_y: candidate,
+                        grounded: true,
+                    },
+                });
+            }
+        } else {
+            if collider.collision == MapTileCollision::OneWay {
+                continue;
+            }
+            let collider_bottom = collider.y + collider.height;
+            let crossed = previous_top >= collider_bottom && current_top <= collider_bottom;
+            let overlapped =
+                runtime_aabb_intersects(current_x, current_y, current_w, current_h, collider);
+            if crossed || overlapped {
+                let candidate = collider_bottom - offset_y;
+                resolved = Some(match resolved {
+                    Some(existing) if existing.pos_y > candidate => existing,
+                    _ => VerticalPlatformerCollision {
+                        pos_y: candidate,
+                        grounded: false,
+                    },
+                });
+            }
+        }
+    }
+    resolved
+}
+
+fn ranges_overlap(a_min: f32, a_max: f32, b_min: f32, b_max: f32) -> bool {
+    a_min < b_max && a_max > b_min
+}
+
 fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
     RuntimeEntity {
         name: text.name.clone(),
@@ -2844,6 +3310,8 @@ fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
         z: text.visual.z,
         pos: text.visual.pos,
         size: [0.0, 0.0],
+        collider_offset: [0.0, 0.0],
+        collider_size: None,
         rotation: 0.0,
         color: text.visual.color,
         group: text.visual.group.clone(),
@@ -2859,6 +3327,8 @@ fn runtime_text_entity(text: &TextNode) -> RuntimeEntity {
             move_x: 0.0,
             jump_requested: false,
             grounded: false,
+            coyote_timer: 0.0,
+            jump_buffer_timer: 0.0,
         },
         script: text.visual.script_binding.clone(),
         script_state: HashMap::new(),
@@ -2910,7 +3380,7 @@ fn compile_static_map_commands(maps: &[AsciiMapNode], asset_base: &str) -> Vec<D
                             visible: true,
                         }));
                     }
-                    if let Some(MapLegendMeaning::Texture(texture)) = legend.get(&ch) {
+                    if let Some(texture) = runtime_legend_tile_texture(legend.get(&ch)) {
                         commands.push(DrawCommand::Sprite(rpu_core::SceneSprite {
                             anchor: Anchor::World,
                             layer: -10,
@@ -2921,7 +3391,7 @@ fn compile_static_map_commands(maps: &[AsciiMapNode], asset_base: &str) -> Vec<D
                             height: map.cell[1],
                             rotation: 0.0,
                             color: [1.0, 1.0, 1.0, 1.0],
-                            textures: vec![texture.clone()],
+                            textures: vec![texture],
                             animations: HashMap::new(),
                             animation_fps: 0.0,
                             animation_mode: rpu_core::AnimationMode::Loop,
@@ -2966,6 +3436,14 @@ fn compile_static_map_commands(maps: &[AsciiMapNode], asset_base: &str) -> Vec<D
             commands
         })
         .collect()
+}
+
+fn runtime_legend_tile_texture(meaning: Option<&&MapLegendMeaning>) -> Option<String> {
+    match meaning {
+        Some(MapLegendMeaning::Tile(tile)) => Some(tile.texture.clone()),
+        Some(MapLegendMeaning::Texture(texture)) => Some((*texture).clone()),
+        _ => None,
+    }
 }
 
 pub fn render_terrain_map_image(
@@ -5571,6 +6049,32 @@ fn compile_map_markers(maps: &[AsciiMapNode]) -> HashMap<String, [f32; 2]> {
     markers
 }
 
+fn compile_map_spawns(maps: &[AsciiMapNode]) -> Vec<RuntimeMapSpawn> {
+    let mut spawns = Vec::new();
+    for map in maps {
+        let legend: HashMap<char, &MapLegendMeaning> = map
+            .legend
+            .iter()
+            .map(|entry| (entry.symbol, &entry.meaning))
+            .collect();
+        for (row, line) in map.rows.iter().enumerate() {
+            for (col, ch) in line.chars().enumerate() {
+                let Some(MapLegendMeaning::Spawn(template)) = legend.get(&ch) else {
+                    continue;
+                };
+                spawns.push(RuntimeMapSpawn {
+                    template: (*template).clone(),
+                    pos: [
+                        map.origin[0] + col as f32 * map.cell[0],
+                        map.origin[1] + row as f32 * map.cell[1],
+                    ],
+                });
+            }
+        }
+    }
+    spawns
+}
+
 fn compile_map_colliders(maps: &[AsciiMapNode]) -> Vec<RuntimeCollider> {
     let mut colliders = Vec::new();
     for map in maps {
@@ -5581,14 +6085,15 @@ fn compile_map_colliders(maps: &[AsciiMapNode]) -> Vec<RuntimeCollider> {
             .collect();
         for (row, line) in map.rows.iter().enumerate() {
             for (col, ch) in line.chars().enumerate() {
-                if !map_symbol_is_solid(ch, &legend) {
+                let Some(collision) = map_symbol_collision(ch, &legend) else {
                     continue;
-                }
+                };
                 colliders.push(RuntimeCollider {
                     x: map.origin[0] + col as f32 * map.cell[0],
                     y: map.origin[1] + row as f32 * map.cell[1],
                     width: map.cell[0],
                     height: map.cell[1],
+                    collision,
                 });
             }
         }
@@ -5596,13 +6101,20 @@ fn compile_map_colliders(maps: &[AsciiMapNode]) -> Vec<RuntimeCollider> {
     colliders
 }
 
-fn map_symbol_is_solid(ch: char, legend: &HashMap<char, &MapLegendMeaning>) -> bool {
-    matches!(
-        legend.get(&ch),
+fn map_symbol_collision(
+    ch: char,
+    legend: &HashMap<char, &MapLegendMeaning>,
+) -> Option<MapTileCollision> {
+    match legend.get(&ch) {
+        Some(MapLegendMeaning::Tile(tile)) => match tile.collision {
+            MapTileCollision::Solid | MapTileCollision::OneWay => Some(tile.collision),
+            MapTileCollision::None => None,
+        },
         Some(MapLegendMeaning::Texture(_))
-            | Some(MapLegendMeaning::Color(_))
-            | Some(MapLegendMeaning::Terrain(_))
-    )
+        | Some(MapLegendMeaning::Color(_))
+        | Some(MapLegendMeaning::Terrain(_)) => Some(MapTileCollision::Solid),
+        Some(MapLegendMeaning::Marker) | Some(MapLegendMeaning::Spawn(_)) | None => None,
+    }
 }
 
 fn submit_draw_command(
@@ -5886,16 +6398,25 @@ fn world_to_virtual(
 }
 
 fn intersects(a: &RuntimeEntity, b: &RuntimeEntity) -> bool {
-    let ax0 = a.pos[0];
-    let ay0 = a.pos[1];
-    let ax1 = ax0 + a.size[0];
-    let ay1 = ay0 + a.size[1];
-    let bx0 = b.pos[0];
-    let by0 = b.pos[1];
-    let bx1 = bx0 + b.size[0];
-    let by1 = by0 + b.size[1];
+    let (ax0, ay0, aw, ah) = entity_collider_rect(a);
+    let ax1 = ax0 + aw;
+    let ay1 = ay0 + ah;
+    let (bx0, by0, bw, bh) = entity_collider_rect(b);
+    let bx1 = bx0 + bw;
+    let by1 = by0 + bh;
 
     ax0 < bx1 && ax1 > bx0 && ay0 < by1 && ay1 > by0
+}
+
+fn is_stomping(source: &RuntimeEntity, target: &RuntimeEntity) -> bool {
+    if source.physics.velocity[1] <= 12.0 {
+        return false;
+    }
+    let (_, source_y, _, source_h) = entity_collider_rect(source);
+    let (_, target_y, _, target_h) = entity_collider_rect(target);
+    let source_bottom = source_y + source_h;
+    let stomp_band = (target_h * 0.45).clamp(6.0, 14.0);
+    source_bottom <= target_y + stomp_band
 }
 
 fn current_texture_frame(
@@ -5922,6 +6443,151 @@ fn current_texture_frame(
         AnimationMode::Once => raw_index.min(frames.len().saturating_sub(1)),
     };
     frames.get(index).cloned()
+}
+
+fn submit_physics_debug_overlay(
+    frame: &mut SceneFrame,
+    camera: &SceneCamera,
+    view: &RenderView,
+    world: &RuntimeWorld,
+) {
+    const DEBUG_LAYER: i32 = 10_000;
+    const SOLID_OUTLINE: [f32; 4] = [1.0, 0.08, 0.05, 0.88];
+    const SOLID_TOP: [f32; 4] = [1.0, 0.91, 0.25, 0.95];
+    const ONE_WAY_TOP: [f32; 4] = [1.0, 0.50, 0.09, 0.95];
+    const VISUAL: [f32; 4] = [1.0, 0.0, 1.0, 0.78];
+    const COLLIDER: [f32; 4] = [0.0, 1.0, 0.35, 0.92];
+
+    let mut order = 0;
+    for collider in &world.colliders {
+        match collider.collision {
+            MapTileCollision::Solid => {
+                push_world_outline(
+                    frame,
+                    camera,
+                    view,
+                    DEBUG_LAYER,
+                    order,
+                    collider.x,
+                    collider.y,
+                    collider.width,
+                    collider.height,
+                    SOLID_OUTLINE,
+                );
+                order += 1;
+                push_world_line(
+                    frame,
+                    camera,
+                    view,
+                    DEBUG_LAYER,
+                    order,
+                    collider.x,
+                    collider.y,
+                    collider.width,
+                    2.0,
+                    SOLID_TOP,
+                );
+            }
+            MapTileCollision::OneWay => {
+                push_world_line(
+                    frame,
+                    camera,
+                    view,
+                    DEBUG_LAYER,
+                    order,
+                    collider.x,
+                    collider.y,
+                    collider.width,
+                    3.0,
+                    ONE_WAY_TOP,
+                );
+            }
+            MapTileCollision::None => {}
+        }
+        order += 1;
+    }
+
+    for entity in &world.entities {
+        if !entity.visible {
+            continue;
+        }
+        push_world_outline(
+            frame,
+            camera,
+            view,
+            DEBUG_LAYER,
+            order,
+            entity.pos[0],
+            entity.pos[1],
+            entity.size[0],
+            entity.size[1],
+            VISUAL,
+        );
+        order += 1;
+        let (x, y, width, height) = entity_collider_rect(entity);
+        push_world_outline(
+            frame,
+            camera,
+            view,
+            DEBUG_LAYER,
+            order,
+            x,
+            y,
+            width,
+            height,
+            COLLIDER,
+        );
+        order += 1;
+    }
+}
+
+fn push_world_line(
+    frame: &mut SceneFrame,
+    camera: &SceneCamera,
+    view: &RenderView,
+    layer: i32,
+    order: i32,
+    x: f32,
+    y: f32,
+    width: f32,
+    screen_thickness: f32,
+    color: [f32; 4],
+) {
+    let (sx, sy, sw, _) = screen_rect_for_anchor(Anchor::World, camera, view, x, y, width, 1.0);
+    frame.push_rect(layer, order, sx, sy, sw, screen_thickness.max(1.0), color);
+}
+
+fn push_world_outline(
+    frame: &mut SceneFrame,
+    camera: &SceneCamera,
+    view: &RenderView,
+    layer: i32,
+    order: i32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: [f32; 4],
+) {
+    let (sx, sy, sw, sh) = screen_rect_for_anchor(Anchor::World, camera, view, x, y, width, height);
+    push_screen_outline(frame, layer, order, sx, sy, sw, sh, color);
+}
+
+fn push_screen_outline(
+    frame: &mut SceneFrame,
+    layer: i32,
+    order: i32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: [f32; 4],
+) {
+    let t = 2.0;
+    frame.push_rect(layer, order, x, y, width, t, color);
+    frame.push_rect(layer, order + 1, x, y + height - t, width, t, color);
+    frame.push_rect(layer, order + 2, x, y, t, height, color);
+    frame.push_rect(layer, order + 3, x + width - t, y, t, height, color);
 }
 
 fn submit_sprite(

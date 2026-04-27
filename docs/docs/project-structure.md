@@ -31,6 +31,9 @@ height = 160
 default_scale = 4.0
 resize = "letterbox"
 
+[debug]
+physics = false
+
 [meta]
 bundle_id = "org.rpu.my_app"
 display_name = "My App"
@@ -59,6 +62,31 @@ Current resize modes:
 `stretch` fills the window exactly, even if that distorts the image.
 
 For pixel-art or fixed-layout games, `letterbox` is usually the right default.
+
+## `debug`
+
+`debug` holds optional runtime debug overlays.
+
+Current fields:
+
+- `physics`
+
+Example:
+
+```toml
+[debug]
+physics = true
+```
+
+The physics overlay is rendered on top of the scene at runtime:
+
+- green outlines = entity collider boxes
+- magenta outlines = entity visual boxes
+- red outlines = solid tile collider bounds
+- yellow horizontal lines = solid tile top surfaces
+- orange horizontal lines = one-way platform top surfaces
+
+Press `F3` at runtime to toggle the physics overlay without editing the manifest.
 
 ## `meta`
 
