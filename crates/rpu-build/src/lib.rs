@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use image::{ImageBuffer, Rgba, imageops::FilterType};
 use rpu_core::{Diagnostic, RpuProject};
 use std::env;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Read;
 use std::net::TcpListener;
@@ -2341,6 +2342,22 @@ fn export_terrain_debug_images(
             .unwrap_or("scene");
 
         for scene in &document.scenes {
+            for shape_map in &scene.shape_maps {
+                fs::create_dir_all(&output_dir)
+                    .with_context(|| format!("failed to create {}", output_dir.display()))?;
+                let debug_prefix = format!(
+                    "{}__{}__{}",
+                    sanitize_debug_name(document_stem),
+                    sanitize_debug_name(&scene.name),
+                    sanitize_debug_name(&shape_map.name)
+                );
+                let layout_path = output_dir.join(format!("{debug_prefix}__shape_layout.png"));
+                write_shape_map_layout_png(scene, shape_map, &compiled.window, &layout_path)?;
+                let runtime_path = output_dir.join(format!("{debug_prefix}__shape_runtime.txt"));
+                write_shape_map_runtime_debug_txt(scene, shape_map, &runtime_path)?;
+                wrote_any = true;
+            }
+
             for map in &scene.maps {
                 fs::create_dir_all(&output_dir)
                     .with_context(|| format!("failed to create {}", output_dir.display()))?;
@@ -2553,6 +2570,866 @@ fn write_map_layout_png(
         .save(path)
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
+}
+
+fn write_shape_map_layout_png(
+    scene: &rpu_core::SceneNode,
+    map: &rpu_core::ShapeMapNode,
+    window: &rpu_core::WindowConfig,
+    path: &Path,
+) -> Result<()> {
+    let scale = 2.0f32;
+    let width = (window.width.max(1) as f32 * scale).round() as u32;
+    let height = (window.height.max(1) as f32 * scale).round() as u32;
+    let (view_x, view_y) = scene
+        .camera
+        .as_ref()
+        .map(|camera| {
+            (
+                camera.pos[0] - window.width as f32 * 0.5,
+                camera.pos[1] - window.height as f32 * 0.5,
+            )
+        })
+        .unwrap_or((0.0, 0.0));
+    let background = scene
+        .camera
+        .as_ref()
+        .map(|camera| scene_color_rgba(camera.background))
+        .unwrap_or_else(|| rgba([14, 18, 24, 255]));
+    let mut image = ImageBuffer::from_pixel(width, height, background);
+
+    for rect in &scene.rects {
+        if !rect.visual.visible || rect.visual.template {
+            continue;
+        }
+        let color = scene_color_rgba(rect.visual.color);
+        if color[3] == 0 {
+            draw_world_outline(
+                &mut image,
+                rect.visual.pos[0],
+                rect.visual.pos[1],
+                rect.visual.size[0],
+                rect.visual.size[1],
+                view_x,
+                view_y,
+                scale,
+                rgba([255, 80, 80, 230]),
+            );
+            draw_world_cross(
+                &mut image,
+                [
+                    rect.visual.pos[0] + rect.visual.size[0] * 0.5,
+                    rect.visual.pos[1] + rect.visual.size[1] * 0.5,
+                ],
+                view_x,
+                view_y,
+                scale,
+                rgba([255, 80, 80, 230]),
+            );
+        } else {
+            fill_world_rect(
+                &mut image,
+                rect.visual.pos[0],
+                rect.visual.pos[1],
+                rect.visual.size[0],
+                rect.visual.size[1],
+                view_x,
+                view_y,
+                scale,
+                color,
+            );
+        }
+    }
+
+    for sprite in &scene.sprites {
+        if !sprite.visual.visible || sprite.visual.template {
+            continue;
+        }
+        let color = scene_color_rgba(sprite.visual.color);
+        let texture = sprite.textures.first().map(String::as_str).unwrap_or("");
+        if color[3] == 0 {
+            draw_world_outline(
+                &mut image,
+                sprite.visual.pos[0],
+                sprite.visual.pos[1],
+                sprite.visual.size[0],
+                sprite.visual.size[1],
+                view_x,
+                view_y,
+                scale,
+                rgba([255, 0, 255, 230]),
+            );
+            draw_world_cross(
+                &mut image,
+                [
+                    sprite.visual.pos[0] + sprite.visual.size[0] * 0.5,
+                    sprite.visual.pos[1] + sprite.visual.size[1] * 0.5,
+                ],
+                view_x,
+                view_y,
+                scale,
+                rgba([255, 0, 255, 230]),
+            );
+        } else if texture.starts_with("generated://circle") {
+            draw_world_circle(
+                &mut image,
+                [
+                    sprite.visual.pos[0] + sprite.visual.size[0] * 0.5,
+                    sprite.visual.pos[1] + sprite.visual.size[1] * 0.5,
+                ],
+                sprite.visual.size[0].min(sprite.visual.size[1]) * 0.5,
+                view_x,
+                view_y,
+                scale,
+                color,
+            );
+        } else if texture.starts_with("generated://capsule") {
+            draw_world_capsule(
+                &mut image,
+                sprite.visual.pos[0],
+                sprite.visual.pos[1],
+                sprite.visual.size[0],
+                sprite.visual.size[1],
+                view_x,
+                view_y,
+                scale,
+                color,
+            );
+        } else {
+            fill_world_rect(
+                &mut image,
+                sprite.visual.pos[0],
+                sprite.visual.pos[1],
+                sprite.visual.size[0],
+                sprite.visual.size[1],
+                view_x,
+                view_y,
+                scale,
+                color,
+            );
+        }
+    }
+
+    let points = rpu_core::compile_shape_map_points(map);
+    for wall in &map.walls {
+        let path = rpu_core::compile_shape_wall_path(wall, &points);
+        for segment in path.windows(2) {
+            draw_thick_world_line(
+                &mut image,
+                segment[0],
+                segment[1],
+                wall.thickness.max(1.0),
+                view_x,
+                view_y,
+                scale,
+                scene_color_rgba(wall.color),
+            );
+        }
+    }
+
+    for pipe in &map.pipes {
+        for (start, end) in rpu_core::compile_shape_pipe_segments(pipe, &points) {
+            draw_thick_world_line(
+                &mut image,
+                start,
+                end,
+                pipe.thickness.max(1.0),
+                view_x,
+                view_y,
+                scale,
+                scene_color_rgba(pipe.color),
+            );
+        }
+    }
+
+    for sdf_wall in &map.sdf_walls {
+        for (start, end) in rpu_core::compile_shape_sdf_wall_segments(sdf_wall, &points) {
+            draw_thick_world_line(
+                &mut image,
+                start,
+                end,
+                sdf_wall.radius.max(1.0) * 2.0,
+                view_x,
+                view_y,
+                scale,
+                scene_color_rgba(sdf_wall.color),
+            );
+        }
+    }
+
+    for polyline in &map.polylines {
+        for (start, end) in rpu_core::compile_shape_polyline_segments(polyline, &points) {
+            draw_thick_world_line(
+                &mut image,
+                start,
+                end,
+                polyline.radius.max(1.0) * 2.0,
+                view_x,
+                view_y,
+                scale,
+                scene_color_rgba(polyline.color),
+            );
+        }
+    }
+
+    for spring in &map.springs {
+        let spring_points = shape_spring_points(spring, &points);
+        for segment in spring_points.windows(2) {
+            draw_thick_world_line(
+                &mut image,
+                segment[0],
+                segment[1],
+                spring.wire_radius.max(0.5) * 2.0,
+                view_x,
+                view_y,
+                scale,
+                scene_color_rgba(spring.color),
+            );
+        }
+        if let Some((start, end)) = shape_spring_cap(spring, &points) {
+            draw_thick_world_line(
+                &mut image,
+                start,
+                end,
+                spring.cap_radius.max(0.5) * 2.0,
+                view_x,
+                view_y,
+                scale,
+                scene_color_rgba(spring.color),
+            );
+        }
+    }
+
+    for bumper in &map.bumpers {
+        let Some(point) = points.get(&bumper.point) else {
+            continue;
+        };
+        let color = scene_color_rgba(bumper.color);
+        draw_world_circle(
+            &mut image,
+            *point,
+            bumper.radius * 1.72,
+            view_x,
+            view_y,
+            scale,
+            rgba([color[0], color[1], color[2], 56]),
+        );
+        draw_world_circle(
+            &mut image,
+            *point,
+            bumper.radius,
+            view_x,
+            view_y,
+            scale,
+            color,
+        );
+        draw_world_circle(
+            &mut image,
+            [
+                point[0] - bumper.radius * 0.2,
+                point[1] - bumper.radius * 0.28,
+            ],
+            bumper.radius * 0.36,
+            view_x,
+            view_y,
+            scale,
+            rgba([255, 255, 255, 72]),
+        );
+    }
+
+    for flipper in &map.flippers {
+        let Some(pivot) = points.get(&flipper.pivot) else {
+            continue;
+        };
+        let end = [
+            pivot[0] + flipper.rest_angle.cos() * flipper.length,
+            pivot[1] + flipper.rest_angle.sin() * flipper.length,
+        ];
+        draw_tapered_world_line(
+            &mut image,
+            *pivot,
+            end,
+            if flipper.base_radius > 0.0 {
+                flipper.base_radius
+            } else {
+                flipper.thickness.max(1.0) * 0.5
+            },
+            if flipper.tip_radius > 0.0 {
+                flipper.tip_radius
+            } else {
+                flipper.thickness.max(1.0) * 0.5
+            },
+            view_x,
+            view_y,
+            scale,
+            scene_color_rgba(flipper.color),
+        );
+    }
+
+    let symbols = shape_map_point_symbols(map);
+    for (symbol, point) in symbols {
+        fill_world_rect(
+            &mut image,
+            point[0] - 4.0,
+            point[1] - 4.0,
+            8.0,
+            8.0,
+            view_x,
+            view_y,
+            scale,
+            rgba([5, 10, 20, 230]),
+        );
+        draw_debug_char_world(
+            &mut image,
+            symbol,
+            point,
+            view_x,
+            view_y,
+            scale,
+            rgba([255, 240, 80, 255]),
+        );
+    }
+
+    image
+        .save(path)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn write_shape_map_runtime_debug_txt(
+    scene: &rpu_core::SceneNode,
+    map: &rpu_core::ShapeMapNode,
+    path: &Path,
+) -> Result<()> {
+    let mut output = String::new();
+    let points = rpu_core::compile_shape_map_points(map);
+
+    let _ = writeln!(output, "shape_map {}", map.name);
+    let _ = writeln!(
+        output,
+        "origin=({:.2}, {:.2}) cell=({:.2}, {:.2})",
+        map.origin[0], map.origin[1], map.cell[0], map.cell[1]
+    );
+    let _ = writeln!(output);
+    let _ = writeln!(output, "[points]");
+
+    let mut named_points = points.iter().collect::<Vec<_>>();
+    named_points.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, point) in named_points {
+        let _ = writeln!(output, "{name}: center=({:.2}, {:.2})", point[0], point[1]);
+    }
+
+    let _ = writeln!(output);
+    let _ = writeln!(output, "[symbols]");
+    for (symbol, point) in shape_map_point_symbols(map) {
+        let _ = writeln!(
+            output,
+            "{symbol}: center=({:.2}, {:.2})",
+            point[0], point[1]
+        );
+    }
+
+    let _ = writeln!(output);
+    let _ = writeln!(output, "[bumpers]");
+    for bumper in &map.bumpers {
+        match points.get(&bumper.point) {
+            Some(point) => {
+                let _ = writeln!(
+                    output,
+                    "{}: point={} center=({:.2}, {:.2}) radius={:.2} trigger_top_left_for_same_size=({:.2}, {:.2})",
+                    bumper.name,
+                    bumper.point,
+                    point[0],
+                    point[1],
+                    bumper.radius,
+                    point[0] - bumper.radius,
+                    point[1] - bumper.radius
+                );
+            }
+            None => {
+                let _ = writeln!(output, "{}: missing point={}", bumper.name, bumper.point);
+            }
+        }
+    }
+
+    let _ = writeln!(output);
+    let _ = writeln!(output, "[springs]");
+    for spring in &map.springs {
+        if let Some((bottom, top)) = shape_spring_endpoints(spring, &points) {
+            let dx = bottom[0] - top[0];
+            let dy = bottom[1] - top[1];
+            let length = (dx * dx + dy * dy).sqrt();
+            let axis = if length <= f32::EPSILON {
+                [0.0, 1.0]
+            } else {
+                [dx / length, dy / length]
+            };
+            let ball_radius = 6.0;
+            let rest_ball_center = [
+                top[0] - axis[0] * (ball_radius + spring.cap_radius),
+                top[1] - axis[1] * (ball_radius + spring.cap_radius),
+            ];
+            let _ = writeln!(
+                output,
+                "{}: bottom=({:.2}, {:.2}) top=({:.2}, {:.2}) axis=({:.3}, {:.3}) cap_width={:.2} cap_radius={:.2} suggested_ball_top_left=({:.2}, {:.2})",
+                spring.name,
+                bottom[0],
+                bottom[1],
+                top[0],
+                top[1],
+                axis[0],
+                axis[1],
+                spring.cap_width,
+                spring.cap_radius,
+                rest_ball_center[0] - ball_radius,
+                rest_ball_center[1] - ball_radius
+            );
+            if let Some((cap_start, cap_end)) = shape_spring_cap(spring, &points) {
+                let _ = writeln!(
+                    output,
+                    "  rest_cap=({:.2}, {:.2}) -> ({:.2}, {:.2})",
+                    cap_start[0], cap_start[1], cap_end[0], cap_end[1]
+                );
+            }
+        } else {
+            let _ = writeln!(output, "{}: missing endpoints", spring.name);
+        }
+    }
+
+    let _ = writeln!(output);
+    let _ = writeln!(output, "[scene rects]");
+    for rect in &scene.rects {
+        let pos = rect.visual.pos;
+        let size = rect.visual.size;
+        let _ = writeln!(
+            output,
+            "{}: group={} top_left=({:.2}, {:.2}) center=({:.2}, {:.2}) size=({:.2}, {:.2}) layer={} z={} alpha={:.2}",
+            rect.name,
+            rect.visual.group.as_deref().unwrap_or("-"),
+            pos[0],
+            pos[1],
+            pos[0] + size[0] * 0.5,
+            pos[1] + size[1] * 0.5,
+            size[0],
+            size[1],
+            rect.visual.layer,
+            rect.visual.z,
+            rect.visual.color[3]
+        );
+    }
+
+    let _ = writeln!(output);
+    let _ = writeln!(output, "[scene sprites]");
+    for sprite in &scene.sprites {
+        let pos = sprite.visual.pos;
+        let size = sprite.visual.size;
+        let _ = writeln!(
+            output,
+            "{}: group={} top_left=({:.2}, {:.2}) center=({:.2}, {:.2}) size=({:.2}, {:.2}) texture={} layer={} z={} alpha={:.2}",
+            sprite.name,
+            sprite.visual.group.as_deref().unwrap_or("-"),
+            pos[0],
+            pos[1],
+            pos[0] + size[0] * 0.5,
+            pos[1] + size[1] * 0.5,
+            size[0],
+            size[1],
+            sprite.textures.first().map(String::as_str).unwrap_or("-"),
+            sprite.visual.layer,
+            sprite.visual.z,
+            sprite.visual.color[3]
+        );
+    }
+
+    fs::write(path, output).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn fill_world_rect(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+    color: Rgba<u8>,
+) {
+    fill_rect_i32(
+        image,
+        ((x - view_x) * scale).round() as i32,
+        ((y - view_y) * scale).round() as i32,
+        (width * scale).round().max(1.0) as u32,
+        (height * scale).round().max(1.0) as u32,
+        color,
+    );
+}
+
+fn draw_world_cross(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    point: [f32; 2],
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+    color: Rgba<u8>,
+) {
+    let x = ((point[0] - view_x) * scale).round() as i32;
+    let y = ((point[1] - view_y) * scale).round() as i32;
+    draw_line(image, x - 5, y, x + 5, y, color);
+    draw_line(image, x, y - 5, x, y + 5, color);
+}
+
+fn draw_world_capsule(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+    color: Rgba<u8>,
+) {
+    let sx = (x - view_x) * scale;
+    let sy = (y - view_y) * scale;
+    let sw = (width * scale).max(1.0);
+    let sh = (height * scale).max(1.0);
+    let radius = sw.min(sh) * 0.5;
+    let center_y = sy + sh * 0.5;
+    let left = sx + radius;
+    let right = sx + sw - radius;
+    let min_x = sx.floor().max(0.0) as u32;
+    let min_y = sy.floor().max(0.0) as u32;
+    let max_x = (sx + sw).ceil().min(image.width() as f32 - 1.0) as u32;
+    let max_y = (sy + sh).ceil().min(image.height() as f32 - 1.0) as u32;
+    let radius_sq = radius * radius;
+    for py in min_y..=max_y {
+        for px in min_x..=max_x {
+            let sample_x = px as f32 + 0.5;
+            let sample_y = py as f32 + 0.5;
+            let cx = sample_x.clamp(left, right);
+            let dx = sample_x - cx;
+            let dy = sample_y - center_y;
+            if dx * dx + dy * dy <= radius_sq {
+                blend_pixel(image, px, py, color);
+            }
+        }
+    }
+}
+
+fn draw_thick_world_line(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    start: [f32; 2],
+    end: [f32; 2],
+    thickness: f32,
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+    color: Rgba<u8>,
+) {
+    let x0 = (start[0] - view_x) * scale;
+    let y0 = (start[1] - view_y) * scale;
+    let x1 = (end[0] - view_x) * scale;
+    let y1 = (end[1] - view_y) * scale;
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let len = (dx * dx + dy * dy).sqrt();
+    let radius = (thickness * scale * 0.5).max(0.5);
+    let min_x = (x0.min(x1) - radius).floor().max(0.0) as u32;
+    let min_y = (y0.min(y1) - radius).floor().max(0.0) as u32;
+    let max_x = (x0.max(x1) + radius).ceil().min(image.width() as f32 - 1.0) as u32;
+    let max_y = (y0.max(y1) + radius)
+        .ceil()
+        .min(image.height() as f32 - 1.0) as u32;
+    if len <= f32::EPSILON {
+        draw_world_circle(image, start, thickness * 0.5, view_x, view_y, scale, color);
+        return;
+    }
+    let len_sq = dx * dx + dy * dy;
+    let radius_sq = radius * radius;
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let t = (((px - x0) * dx + (py - y0) * dy) / len_sq).clamp(0.0, 1.0);
+            let closest_x = x0 + dx * t;
+            let closest_y = y0 + dy * t;
+            let dist_x = px - closest_x;
+            let dist_y = py - closest_y;
+            if dist_x * dist_x + dist_y * dist_y <= radius_sq {
+                image.put_pixel(x, y, color);
+            }
+        }
+    }
+}
+
+fn draw_tapered_world_line(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    start: [f32; 2],
+    end: [f32; 2],
+    base_radius: f32,
+    tip_radius: f32,
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+    color: Rgba<u8>,
+) {
+    let slices = 8;
+    for index in 0..slices {
+        let t0 = index as f32 / slices as f32;
+        let t1 = (index + 1) as f32 / slices as f32;
+        let p0 = [
+            start[0] + (end[0] - start[0]) * t0,
+            start[1] + (end[1] - start[1]) * t0,
+        ];
+        let p1 = [
+            start[0] + (end[0] - start[0]) * t1,
+            start[1] + (end[1] - start[1]) * t1,
+        ];
+        let mid_t = (t0 + t1) * 0.5;
+        let radius = base_radius + (tip_radius - base_radius) * mid_t;
+        draw_thick_world_line(image, p0, p1, radius * 2.0, view_x, view_y, scale, color);
+    }
+    draw_world_circle(image, start, base_radius, view_x, view_y, scale, color);
+    draw_world_circle(image, end, tip_radius, view_x, view_y, scale, color);
+}
+
+fn draw_world_circle(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    center: [f32; 2],
+    radius: f32,
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+    color: Rgba<u8>,
+) {
+    let cx = ((center[0] - view_x) * scale).round() as i32;
+    let cy = ((center[1] - view_y) * scale).round() as i32;
+    let radius = (radius * scale).round().max(1.0) as i32;
+    let radius_sq = radius * radius;
+    for y in -radius..=radius {
+        for x in -radius..=radius {
+            if x * x + y * y > radius_sq {
+                continue;
+            }
+            let px = cx + x;
+            let py = cy + y;
+            if px >= 0 && py >= 0 && (px as u32) < image.width() && (py as u32) < image.height() {
+                image.put_pixel(px as u32, py as u32, color);
+            }
+        }
+    }
+}
+
+fn shape_spring_points(
+    spring: &rpu_core::ShapeSpringNode,
+    points: &std::collections::HashMap<String, [f32; 2]>,
+) -> Vec<[f32; 2]> {
+    let Some((bottom, top)) = shape_spring_endpoints(spring, points) else {
+        return Vec::new();
+    };
+    let dx = top[0] - bottom[0];
+    let dy = top[1] - bottom[1];
+    let length = (dx * dx + dy * dy).sqrt();
+    let axis = if length <= f32::EPSILON {
+        [0.0, -1.0]
+    } else {
+        [dx / length, dy / length]
+    };
+    let normal = [-axis[1], axis[0]];
+    let steps = (spring.coils.max(1) * 8).max(2) as usize;
+    let mut polyline = Vec::with_capacity(steps + 1);
+    for index in 0..=steps {
+        let t = index as f32 / steps as f32;
+        let phase = t * std::f32::consts::TAU * spring.coils.max(1) as f32;
+        let center = [bottom[0] + dx * t, bottom[1] + dy * t];
+        let wave = phase.sin() * spring.radius.max(0.0);
+        polyline.push([center[0] + normal[0] * wave, center[1] + normal[1] * wave]);
+    }
+    polyline
+}
+
+fn shape_spring_cap(
+    spring: &rpu_core::ShapeSpringNode,
+    points: &std::collections::HashMap<String, [f32; 2]>,
+) -> Option<([f32; 2], [f32; 2])> {
+    let (bottom, top) = shape_spring_endpoints(spring, points)?;
+    let dx = bottom[0] - top[0];
+    let dy = bottom[1] - top[1];
+    let length = (dx * dx + dy * dy).sqrt();
+    let axis = if length <= f32::EPSILON {
+        [0.0, 1.0]
+    } else {
+        [dx / length, dy / length]
+    };
+    let normal = [-axis[1], axis[0]];
+    let half = spring.cap_width.max(1.0) * 0.5;
+    Some((
+        [top[0] - normal[0] * half, top[1] - normal[1] * half],
+        [top[0] + normal[0] * half, top[1] + normal[1] * half],
+    ))
+}
+
+fn shape_spring_endpoints(
+    spring: &rpu_core::ShapeSpringNode,
+    points: &std::collections::HashMap<String, [f32; 2]>,
+) -> Option<([f32; 2], [f32; 2])> {
+    if spring.points.len() < 2 {
+        return None;
+    }
+    let bottom = *points.get(&spring.points[0])?;
+    let top = *points.get(&spring.points[1])?;
+    Some((bottom, top))
+}
+
+fn shape_map_point_symbols(map: &rpu_core::ShapeMapNode) -> Vec<(char, [f32; 2])> {
+    let legend: std::collections::HashMap<char, &rpu_core::ShapeMapLegendEntry> = map
+        .legend
+        .iter()
+        .map(|entry| (entry.symbol, entry))
+        .collect();
+    let mut symbols = Vec::new();
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, symbol) in line.chars().enumerate() {
+            let Some(entry) = legend.get(&symbol) else {
+                continue;
+            };
+            symbols.push((
+                symbol,
+                [
+                    map.origin[0] + (col as f32 + 0.5) * map.cell[0] + entry.offset[0],
+                    map.origin[1] + (row as f32 + 0.5) * map.cell[1] + entry.offset[1],
+                ],
+            ));
+        }
+    }
+    symbols
+}
+
+fn draw_debug_char_world(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ch: char,
+    point: [f32; 2],
+    view_x: f32,
+    view_y: f32,
+    scale: f32,
+    color: Rgba<u8>,
+) {
+    let x = ((point[0] - view_x) * scale).round() as i32 - 5;
+    let y = ((point[1] - view_y) * scale).round() as i32 - 7;
+    draw_debug_char(image, ch, x, y, 2, color);
+}
+
+fn draw_debug_char(
+    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ch: char,
+    x: i32,
+    y: i32,
+    pixel: u32,
+    color: Rgba<u8>,
+) {
+    for (row, bits) in debug_char_pattern(ch).iter().enumerate() {
+        for (col, bit) in bits.chars().enumerate() {
+            if bit != '1' {
+                continue;
+            }
+            fill_rect_i32(
+                image,
+                x + col as i32 * pixel as i32,
+                y + row as i32 * pixel as i32,
+                pixel,
+                pixel,
+                color,
+            );
+        }
+    }
+}
+
+fn debug_char_pattern(ch: char) -> [&'static str; 7] {
+    match ch.to_ascii_lowercase() {
+        'a' => [
+            "01110", "10001", "10001", "11111", "10001", "10001", "10001",
+        ],
+        'b' => [
+            "11110", "10001", "10001", "11110", "10001", "10001", "11110",
+        ],
+        'c' => [
+            "01111", "10000", "10000", "10000", "10000", "10000", "01111",
+        ],
+        'd' => [
+            "11110", "10001", "10001", "10001", "10001", "10001", "11110",
+        ],
+        'e' => [
+            "11111", "10000", "10000", "11110", "10000", "10000", "11111",
+        ],
+        'f' => [
+            "11111", "10000", "10000", "11110", "10000", "10000", "10000",
+        ],
+        'g' => [
+            "01111", "10000", "10000", "10111", "10001", "10001", "01111",
+        ],
+        'h' => [
+            "10001", "10001", "10001", "11111", "10001", "10001", "10001",
+        ],
+        'i' => [
+            "11111", "00100", "00100", "00100", "00100", "00100", "11111",
+        ],
+        'j' => [
+            "00111", "00010", "00010", "00010", "00010", "10010", "01100",
+        ],
+        'k' => [
+            "10001", "10010", "10100", "11000", "10100", "10010", "10001",
+        ],
+        'l' => [
+            "10000", "10000", "10000", "10000", "10000", "10000", "11111",
+        ],
+        'm' => [
+            "10001", "11011", "10101", "10101", "10001", "10001", "10001",
+        ],
+        'n' => [
+            "10001", "11001", "10101", "10011", "10001", "10001", "10001",
+        ],
+        'o' => [
+            "01110", "10001", "10001", "10001", "10001", "10001", "01110",
+        ],
+        'p' => [
+            "11110", "10001", "10001", "11110", "10000", "10000", "10000",
+        ],
+        'q' => [
+            "01110", "10001", "10001", "10001", "10101", "10010", "01101",
+        ],
+        'r' => [
+            "11110", "10001", "10001", "11110", "10100", "10010", "10001",
+        ],
+        's' => [
+            "01111", "10000", "10000", "01110", "00001", "00001", "11110",
+        ],
+        't' => [
+            "11111", "00100", "00100", "00100", "00100", "00100", "00100",
+        ],
+        'u' => [
+            "10001", "10001", "10001", "10001", "10001", "10001", "01110",
+        ],
+        'v' => [
+            "10001", "10001", "10001", "10001", "10001", "01010", "00100",
+        ],
+        'w' => [
+            "10001", "10001", "10001", "10101", "10101", "10101", "01010",
+        ],
+        'x' => [
+            "10001", "10001", "01010", "00100", "01010", "10001", "10001",
+        ],
+        'y' => [
+            "10001", "10001", "01010", "00100", "00100", "00100", "00100",
+        ],
+        'z' => [
+            "11111", "00001", "00010", "00100", "01000", "10000", "11111",
+        ],
+        _ => [
+            "11111", "10001", "00010", "00100", "00100", "00000", "00100",
+        ],
+    }
 }
 
 fn draw_map_top_collision_edges(
@@ -3500,11 +4377,53 @@ fn fill_rect(
     height: u32,
     color: Rgba<u8>,
 ) {
+    let alpha = color[3] as f32 / 255.0;
+    if alpha <= 0.0 {
+        return;
+    }
     for py in y..(y + height).min(image.height()) {
         for px in x..(x + width).min(image.width()) {
-            image.put_pixel(px, py, color);
+            if alpha >= 1.0 {
+                image.put_pixel(px, py, color);
+            } else {
+                let bottom = *image.get_pixel(px, py);
+                let inv = 1.0 - alpha;
+                image.put_pixel(
+                    px,
+                    py,
+                    Rgba([
+                        (color[0] as f32 * alpha + bottom[0] as f32 * inv).round() as u8,
+                        (color[1] as f32 * alpha + bottom[1] as f32 * inv).round() as u8,
+                        (color[2] as f32 * alpha + bottom[2] as f32 * inv).round() as u8,
+                        255,
+                    ]),
+                );
+            }
         }
     }
+}
+
+fn blend_pixel(image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, x: u32, y: u32, color: Rgba<u8>) {
+    if color[3] == 0 || x >= image.width() || y >= image.height() {
+        return;
+    }
+    if color[3] == 255 {
+        image.put_pixel(x, y, color);
+        return;
+    }
+    let alpha = color[3] as f32 / 255.0;
+    let inv = 1.0 - alpha;
+    let bottom = *image.get_pixel(x, y);
+    image.put_pixel(
+        x,
+        y,
+        Rgba([
+            (color[0] as f32 * alpha + bottom[0] as f32 * inv).round() as u8,
+            (color[1] as f32 * alpha + bottom[1] as f32 * inv).round() as u8,
+            (color[2] as f32 * alpha + bottom[2] as f32 * inv).round() as u8,
+            255,
+        ]),
+    );
 }
 
 fn draw_shape_accent(
@@ -6132,11 +7051,14 @@ fn terrain_debug_readme() -> String {
 Files:
 
 - direct texture or color maps always get *__layout.png
+- shape maps always get *__shape_layout.png
 - terrain maps additionally get terrain analysis files
 - synth files are only written for `render = synth`
 
 - *__layout.png
   Camera-space map layout preview with direct tiles, inferred top collision edges, and visible sprite/rect spawn boxes.
+- *__shape_layout.png
+  Camera-space shape-map preview with scene rects, walls, bumpers, point markers, and point labels.
 - *_terrain.png
   Per-cell shape classification debug image.
 - *__tangents.png
@@ -6174,6 +7096,15 @@ In *__layout.png:
 - magenta outlines = visible sprite spawn/collision boxes
 - green outlines = custom sprite collider boxes
 - red outlines = visible rect boxes
+
+In *__shape_layout.png:
+
+- background = scene camera background color
+- solid filled rects = visible scene rects
+- thick colored lines = declared shape-map walls
+- filled circles = declared shape-map bumpers
+- dark squares = declared shape-map points
+- yellow letters = source map point labels
 
 In *_terrain.png:
 

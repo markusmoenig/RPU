@@ -106,6 +106,10 @@
         {
           "type": "SYMBOL",
           "name": "map_definition"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "shape_map_definition"
         }
       ]
     },
@@ -381,6 +385,235 @@
         {
           "type": "STRING",
           "value": "}"
+        }
+      ]
+    },
+    "shape_map_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "shape_map"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "shape_map_block"
+        }
+      ]
+    },
+    "shape_map_block": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "property_assignment"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "legend_block"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "ascii_block"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "wall_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "pipe_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "sdf_wall_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "polyline_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "bumper_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "flipper_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "spring_definition"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "wall_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "wall"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "property_block"
+        }
+      ]
+    },
+    "pipe_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "pipe"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "property_block"
+        }
+      ]
+    },
+    "sdf_wall_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "sdf_wall"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "property_block"
+        }
+      ]
+    },
+    "polyline_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "polyline"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "property_block"
+        }
+      ]
+    },
+    "bumper_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "bumper"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "property_block"
+        }
+      ]
+    },
+    "flipper_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "flipper"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "property_block"
+        }
+      ]
+    },
+    "spring_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "spring"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "property_block"
         }
       ]
     },

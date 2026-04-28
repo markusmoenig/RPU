@@ -53,6 +53,140 @@ Current map support includes:
 - terrain legend entries with topology + material parsing
 - derived terrain shape classification for debug rendering
 
+## Shape Maps
+
+`shape_map` is the first vector-map path for games such as pinball. It still uses an ASCII grid, but the cells define named control points instead of tile collision.
+
+```rpu
+shape_map Table {
+    origin = (40, 40)
+    cell = (8, 8)
+    debug_labels = true
+
+    legend {
+        a = point("left_top")
+        b = point("left_mid")
+        c = point("left_bottom")
+        l = point("lane_top", 0, -8)
+        k = point("lane_bottom")
+        r = point("lane_exit_edge")
+        q = point("lane_exit_guide")
+        x = point("bumper_left")
+    }
+
+    ascii {
+        a......q.
+        ........lr
+        ....x...
+        b.......
+        c........k
+    }
+
+    wall LeftRail {
+        points = [left_top, left_mid, left_bottom]
+        corner = round
+        radius = 12
+        segments = 8
+        thickness = 5
+        color = #9ad8ff
+        bounce = 0.9
+    }
+
+    polyline PlayfieldBoundary {
+        points = [left_bottom, left_mid, left_top, lane_exit_guide, lane_top]
+        closed = false
+        radius = 3
+        smooth = 8
+        corner = round
+        corner_radius = 16
+        segments = 10
+        color = #9ad8ff
+        bounce = 0.9
+    }
+
+    pipe ShooterLane {
+        points = [lane_top, lane_bottom]
+        width = 20
+        thickness = 4
+        color = #ffe08a
+        bounce = 0.6
+    }
+
+    sdf_wall ShooterExitGuide {
+        points = [lane_exit_edge, lane_exit_guide, left_top]
+        radius = 4
+        smooth = 8
+        corner = round
+        corner_radius = 12
+        segments = 8
+        color = #ffe08a
+        bounce = 0.9
+    }
+
+    bumper LeftBumper {
+        point = bumper_left
+        radius = 13
+        color = #ff4f9a
+        bounce = 1.7
+    }
+
+    flipper LeftFlipper {
+        pivot = left_bottom
+        length = 34
+        thickness = 5
+        rest_angle = 0.28
+        active_angle = -0.55
+        up_speed = 24
+        down_speed = 12
+        impulse = 1.25
+        input = left
+        color = #fff39a
+        bounce = 1.45
+    }
+}
+```
+
+Current shape-map behavior:
+
+- `origin` and `cell` define the control-point grid.
+- `cell` can be non-square, for example `(8, 36)`, to stretch a compact ASCII sketch over a taller playfield.
+- `debug_labels = true` draws each authored point symbol at its resolved world position.
+- `legend` maps ASCII symbols to named points with `point("name")`.
+- `point("name", dx, dy)` applies an optional world-space offset to a control point, useful when the ASCII grid is too coarse for final pinball tuning.
+- `wall` connects named points into prototype polyline geometry.
+- `corner = round` rounds interior wall corners; omit it or use `corner = sharp` for raw line segments.
+- `radius` controls how far the rounded corner cuts back along each adjacent segment.
+- `segments` controls how many short debug/render segments approximate each rounded corner.
+- `pipe` creates two parallel wall rails from a named centerline. It is useful for launcher lanes, tubes, and other constrained ball paths.
+- `pipe.width` is the rail-to-rail center distance; `pipe.thickness`, `color`, and `bounce` use the same meaning as walls.
+- `sdf_wall` creates a smooth signed-distance wall from named points. Collision samples the SDF and uses the field gradient as the response normal.
+- `sdf_wall.radius` is the wall radius, and `smooth` blends neighboring segments so bends are less brittle than raw polylines.
+- `sdf_wall` also supports `corner = round`, `corner_radius`, and `segments` to round the authored polyline before SDF collision sampling.
+- `polyline` is the same rounded SDF collision/render path as `sdf_wall`, but intended for larger authored boundaries. Use `closed = true` to connect the last point back to the first.
+- `bumper` places prototype circular bumper geometry at a named point.
+- `flipper` creates an input-driven pinball segment around a named `pivot`.
+- `rest_angle` and `active_angle` are radians in world coordinates, where `0` points right and positive angles rotate downward.
+- `up_speed` and `down_speed` control flipper angular motion in radians per second.
+- `impulse` scales the extra velocity transferred from moving flippers into the ball.
+- `input` can be `left`, `right`, `up`, `down`, `action`, or a concrete key name.
+- `bounce` controls the restitution used by `physics = pinball` balls.
+
+Pinball balls are regular sprites:
+
+```rpu
+sprite Ball {
+    pos = (154, 72)
+    size = (12, 12)
+    collider_size = (12, 12)
+    texture = "generated://circle/ball"
+    physics = pinball
+    gravity = 180
+    max_speed = 420
+}
+```
+
+`physics = pinball` treats the sprite collider as a circle and collides it against all shape-map walls and bumpers in the scene. `generated://circle/...` creates an internal circular alpha texture, so prototypes do not need a separate ball image asset.
+
 ## Markers
 
 Sprites can resolve their position from a symbol:

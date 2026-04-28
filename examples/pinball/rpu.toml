@@ -1,0 +1,14 @@
+[project]
+name = "Pinball Prototype"
+version = "0.1.0"
+start_scene = "Main"
+
+[window]
+width = 640
+height = 360
+default_scale = 2.0
+resize = "letterbox"
+
+[meta]
+bundle_id = "org.rpu.pinball_prototype"
+display_name = "Pinball Prototype"

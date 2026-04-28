@@ -46,6 +46,7 @@ module.exports = grammar({
         $.stack_definition,
         $.highscore_definition,
         $.map_definition,
+        $.shape_map_definition,
       ),
 
     meta_block: ($) => seq("meta", $.property_block),
@@ -89,6 +90,36 @@ module.exports = grammar({
         repeat(choice($.property_assignment, $.legend_block, $.ascii_block)),
         "}",
       ),
+
+    shape_map_definition: ($) => seq("shape_map", field("name", $.identifier), $.shape_map_block),
+
+    shape_map_block: ($) =>
+      seq(
+        "{",
+        repeat(choice($.property_assignment, $.legend_block, $.ascii_block, $.wall_definition, $.pipe_definition, $.sdf_wall_definition, $.polyline_definition, $.bumper_definition, $.flipper_definition, $.spring_definition)),
+        "}",
+      ),
+
+    wall_definition: ($) =>
+      seq("wall", field("name", $.identifier), $.property_block),
+
+    pipe_definition: ($) =>
+      seq("pipe", field("name", $.identifier), $.property_block),
+
+    sdf_wall_definition: ($) =>
+      seq("sdf_wall", field("name", $.identifier), $.property_block),
+
+    polyline_definition: ($) =>
+      seq("polyline", field("name", $.identifier), $.property_block),
+
+    bumper_definition: ($) =>
+      seq("bumper", field("name", $.identifier), $.property_block),
+
+    flipper_definition: ($) =>
+      seq("flipper", field("name", $.identifier), $.property_block),
+
+    spring_definition: ($) =>
+      seq("spring", field("name", $.identifier), $.property_block),
 
     legend_block: ($) => seq("legend", "{", repeat($.legend_entry), "}"),
 

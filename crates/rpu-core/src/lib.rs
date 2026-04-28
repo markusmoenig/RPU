@@ -309,6 +309,7 @@ pub struct SceneNode {
     pub meta: SceneMeta,
     pub camera: Option<CameraNode>,
     pub maps: Vec<AsciiMapNode>,
+    pub shape_maps: Vec<ShapeMapNode>,
     pub stacks: Vec<StackNode>,
     pub rects: Vec<RectNode>,
     pub sprites: Vec<SpriteNode>,
@@ -431,6 +432,7 @@ pub enum AnimationMode {
 pub enum PhysicsMode {
     None,
     Platformer,
+    Pinball,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -515,6 +517,129 @@ pub struct AsciiMapNode {
     pub terrain_style: TerrainStyleSettings,
     pub legend: Vec<MapLegendEntry>,
     pub rows: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapeMapNode {
+    pub name: String,
+    pub origin: [f32; 2],
+    pub cell: [f32; 2],
+    pub debug_labels: bool,
+    pub legend: Vec<ShapeMapLegendEntry>,
+    pub rows: Vec<String>,
+    pub walls: Vec<ShapeWallNode>,
+    pub pipes: Vec<ShapePipeNode>,
+    pub sdf_walls: Vec<ShapeSdfWallNode>,
+    pub polylines: Vec<ShapePolylineNode>,
+    pub bumpers: Vec<ShapeBumperNode>,
+    pub flippers: Vec<ShapeFlipperNode>,
+    pub springs: Vec<ShapeSpringNode>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapeMapLegendEntry {
+    pub symbol: char,
+    pub point: String,
+    pub offset: [f32; 2],
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapeWallNode {
+    pub name: String,
+    pub points: Vec<String>,
+    pub corner: ShapeWallCorner,
+    pub radius: f32,
+    pub segments: i32,
+    pub thickness: f32,
+    pub color: [f32; 4],
+    pub bounce: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapeWallCorner {
+    Sharp,
+    Round,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapePipeNode {
+    pub name: String,
+    pub points: Vec<String>,
+    pub width: f32,
+    pub thickness: f32,
+    pub color: [f32; 4],
+    pub bounce: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapeSdfWallNode {
+    pub name: String,
+    pub points: Vec<String>,
+    pub radius: f32,
+    pub smooth: f32,
+    pub corner: ShapeWallCorner,
+    pub corner_radius: f32,
+    pub segments: i32,
+    pub color: [f32; 4],
+    pub bounce: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapePolylineNode {
+    pub name: String,
+    pub points: Vec<String>,
+    pub closed: bool,
+    pub radius: f32,
+    pub smooth: f32,
+    pub corner: ShapeWallCorner,
+    pub corner_radius: f32,
+    pub segments: i32,
+    pub color: [f32; 4],
+    pub bounce: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapeBumperNode {
+    pub name: String,
+    pub point: String,
+    pub radius: f32,
+    pub color: [f32; 4],
+    pub bounce: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapeFlipperNode {
+    pub name: String,
+    pub pivot: String,
+    pub length: f32,
+    pub thickness: f32,
+    pub base_radius: f32,
+    pub tip_radius: f32,
+    pub rest_angle: f32,
+    pub active_angle: f32,
+    pub up_speed: f32,
+    pub down_speed: f32,
+    pub impulse: f32,
+    pub input: String,
+    pub color: [f32; 4],
+    pub bounce: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapeSpringNode {
+    pub name: String,
+    pub points: Vec<String>,
+    pub coils: i32,
+    pub radius: f32,
+    pub wire_radius: f32,
+    pub cap_width: f32,
+    pub cap_radius: f32,
+    pub max_compression: f32,
+    pub pull_speed: f32,
+    pub release_speed: f32,
+    pub input: String,
+    pub color: [f32; 4],
+    pub bounce: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1352,6 +1477,9 @@ fn compile_project_sources(
     }
 
     for texture_name in &texture_references {
+        if is_generated_texture(texture_name) {
+            continue;
+        }
         let expected = PathBuf::from("assets").join(texture_name);
         if !asset_paths.iter().any(|asset| asset == &expected) {
             diagnostics.push(Diagnostic::error(
@@ -1521,6 +1649,14 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
     let mut current_scene: Option<SceneNode> = None;
     let mut current_camera: Option<CameraNode> = None;
     let mut current_map: Option<AsciiMapNode> = None;
+    let mut current_shape_map: Option<ShapeMapNode> = None;
+    let mut current_shape_wall: Option<ShapeWallNode> = None;
+    let mut current_shape_pipe: Option<ShapePipeNode> = None;
+    let mut current_shape_sdf_wall: Option<ShapeSdfWallNode> = None;
+    let mut current_shape_polyline: Option<ShapePolylineNode> = None;
+    let mut current_shape_bumper: Option<ShapeBumperNode> = None;
+    let mut current_shape_flipper: Option<ShapeFlipperNode> = None;
+    let mut current_shape_spring: Option<ShapeSpringNode> = None;
     let mut current_stack: Option<StackNode> = None;
     let mut current_rect: Option<RectNode> = None;
     let mut current_sprite: Option<SpriteNode> = None;
@@ -1531,6 +1667,8 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
     let mut in_meta = false;
     let mut in_legend = false;
     let mut in_ascii = false;
+    let mut in_shape_legend = false;
+    let mut in_shape_ascii = false;
 
     for (index, raw_line) in scene.contents.lines().enumerate() {
         let raw_line = raw_line.trim_end_matches('\r');
@@ -1543,6 +1681,15 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             if line == "}" {
                 in_ascii = false;
             } else if let Some(map) = current_map.as_mut() {
+                map.rows.push(raw_line.to_string());
+            }
+            continue;
+        }
+
+        if in_shape_ascii {
+            if line == "}" {
+                in_shape_ascii = false;
+            } else if let Some(map) = current_shape_map.as_mut() {
                 map.rows.push(raw_line.to_string());
             }
             continue;
@@ -1601,6 +1748,7 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 meta: SceneMeta::default(),
                 camera: None,
                 maps: Vec::new(),
+                shape_maps: Vec::new(),
                 stacks: Vec::new(),
                 rects: Vec::new(),
                 sprites: Vec::new(),
@@ -1643,6 +1791,33 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             continue;
         }
 
+        if let Some(name) = parse_block_start(line, "shape_map") {
+            if current_scene.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("shape_map block outside scene at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_shape_map = Some(ShapeMapNode {
+                name,
+                origin: [0.0, 0.0],
+                cell: [8.0, 8.0],
+                debug_labels: false,
+                legend: Vec::new(),
+                rows: Vec::new(),
+                walls: Vec::new(),
+                pipes: Vec::new(),
+                sdf_walls: Vec::new(),
+                polylines: Vec::new(),
+                bumpers: Vec::new(),
+                flippers: Vec::new(),
+                springs: Vec::new(),
+            });
+            continue;
+        }
+
         if let Some(name) = parse_block_start(line, "stack") {
             if current_scene.is_none() {
                 diagnostics.push(Diagnostic::warning_at(
@@ -1665,6 +1840,10 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
         }
 
         if line == "legend {" {
+            if current_shape_map.is_some() {
+                in_shape_legend = true;
+                continue;
+            }
             if current_map.is_none() {
                 diagnostics.push(Diagnostic::warning_at(
                     format!("legend block outside map at line {}", index + 1),
@@ -1677,6 +1856,10 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
         }
 
         if line == "ascii {" {
+            if current_shape_map.is_some() {
+                in_shape_ascii = true;
+                continue;
+            }
             if current_map.is_none() {
                 diagnostics.push(Diagnostic::warning_at(
                     format!("ascii block outside map at line {}", index + 1),
@@ -1685,6 +1868,169 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 ));
             }
             in_ascii = true;
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "wall") {
+            if current_shape_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("wall block outside shape_map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_shape_wall = Some(ShapeWallNode {
+                name,
+                points: Vec::new(),
+                corner: ShapeWallCorner::Sharp,
+                radius: 0.0,
+                segments: 6,
+                thickness: 4.0,
+                color: [0.88, 0.96, 1.0, 1.0],
+                bounce: 0.8,
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "pipe") {
+            if current_shape_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("pipe block outside shape_map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_shape_pipe = Some(ShapePipeNode {
+                name,
+                points: Vec::new(),
+                width: 20.0,
+                thickness: 4.0,
+                color: [1.0, 0.88, 0.54, 1.0],
+                bounce: 0.7,
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "sdf_wall") {
+            if current_shape_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("sdf_wall block outside shape_map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_shape_sdf_wall = Some(ShapeSdfWallNode {
+                name,
+                points: Vec::new(),
+                radius: 4.0,
+                smooth: 0.0,
+                corner: ShapeWallCorner::Sharp,
+                corner_radius: 0.0,
+                segments: 6,
+                color: [1.0, 0.88, 0.54, 1.0],
+                bounce: 0.8,
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "polyline") {
+            if current_shape_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("polyline block outside shape_map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_shape_polyline = Some(ShapePolylineNode {
+                name,
+                points: Vec::new(),
+                closed: false,
+                radius: 4.0,
+                smooth: 0.0,
+                corner: ShapeWallCorner::Sharp,
+                corner_radius: 0.0,
+                segments: 6,
+                color: [0.88, 0.96, 1.0, 1.0],
+                bounce: 0.8,
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "bumper") {
+            if current_shape_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("bumper block outside shape_map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_shape_bumper = Some(ShapeBumperNode {
+                name,
+                point: String::new(),
+                radius: 12.0,
+                color: [1.0, 0.74, 0.24, 1.0],
+                bounce: 1.4,
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "flipper") {
+            if current_shape_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("flipper block outside shape_map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_shape_flipper = Some(ShapeFlipperNode {
+                name,
+                pivot: String::new(),
+                length: 34.0,
+                thickness: 5.0,
+                base_radius: 0.0,
+                tip_radius: 0.0,
+                rest_angle: 0.0,
+                active_angle: 0.0,
+                up_speed: 18.0,
+                down_speed: 10.0,
+                impulse: 1.0,
+                input: "action".to_string(),
+                color: [1.0, 0.95, 0.45, 1.0],
+                bounce: 1.2,
+            });
+            continue;
+        }
+
+        if let Some(name) = parse_block_start(line, "spring") {
+            if current_shape_map.is_none() {
+                diagnostics.push(Diagnostic::warning_at(
+                    format!("spring block outside shape_map at line {}", index + 1),
+                    Some(scene.relative_path.clone()),
+                    index + 1,
+                ));
+                continue;
+            }
+            current_shape_spring = Some(ShapeSpringNode {
+                name,
+                points: Vec::new(),
+                coils: 10,
+                radius: 4.0,
+                wire_radius: 1.0,
+                cap_width: 14.0,
+                cap_radius: 2.0,
+                max_compression: 36.0,
+                pull_speed: 70.0,
+                release_speed: 360.0,
+                input: "action".to_string(),
+                color: [0.85, 0.93, 1.0, 1.0],
+                bounce: 0.8,
+            });
             continue;
         }
 
@@ -1843,8 +2189,60 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
                 }
                 continue;
             }
+            if in_shape_legend {
+                in_shape_legend = false;
+                continue;
+            }
+            if let Some(wall) = current_shape_wall.take() {
+                if let Some(map) = current_shape_map.as_mut() {
+                    map.walls.push(wall);
+                }
+                continue;
+            }
+            if let Some(pipe) = current_shape_pipe.take() {
+                if let Some(map) = current_shape_map.as_mut() {
+                    map.pipes.push(pipe);
+                }
+                continue;
+            }
+            if let Some(sdf_wall) = current_shape_sdf_wall.take() {
+                if let Some(map) = current_shape_map.as_mut() {
+                    map.sdf_walls.push(sdf_wall);
+                }
+                continue;
+            }
+            if let Some(polyline) = current_shape_polyline.take() {
+                if let Some(map) = current_shape_map.as_mut() {
+                    map.polylines.push(polyline);
+                }
+                continue;
+            }
+            if let Some(bumper) = current_shape_bumper.take() {
+                if let Some(map) = current_shape_map.as_mut() {
+                    map.bumpers.push(bumper);
+                }
+                continue;
+            }
+            if let Some(flipper) = current_shape_flipper.take() {
+                if let Some(map) = current_shape_map.as_mut() {
+                    map.flippers.push(flipper);
+                }
+                continue;
+            }
+            if let Some(spring) = current_shape_spring.take() {
+                if let Some(map) = current_shape_map.as_mut() {
+                    map.springs.push(spring);
+                }
+                continue;
+            }
             if in_legend {
                 in_legend = false;
+                continue;
+            }
+            if let Some(map) = current_shape_map.take() {
+                if let Some(scene_node) = current_scene.as_mut() {
+                    scene_node.shape_maps.push(normalize_shape_map(map));
+                }
                 continue;
             }
             if let Some(map) = current_map.take() {
@@ -1948,6 +2346,110 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             continue;
         }
 
+        if in_shape_legend {
+            if let Some(property) = parse_property(line) {
+                apply_shape_map_legend_property(
+                    current_shape_map.as_mut(),
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(wall) = current_shape_wall.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_shape_wall_property(
+                    wall,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(pipe) = current_shape_pipe.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_shape_pipe_property(
+                    pipe,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(sdf_wall) = current_shape_sdf_wall.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_shape_sdf_wall_property(
+                    sdf_wall,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(polyline) = current_shape_polyline.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_shape_polyline_property(
+                    polyline,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(bumper) = current_shape_bumper.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_shape_bumper_property(
+                    bumper,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(flipper) = current_shape_flipper.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_shape_flipper_property(
+                    flipper,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
+        if let Some(spring) = current_shape_spring.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_shape_spring_property(
+                    spring,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
         if let Some(rect) = current_rect.as_mut() {
             if let Some(property) = parse_property(line) {
                 apply_visual_property(
@@ -2008,6 +2510,19 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
             continue;
         }
 
+        if let Some(map) = current_shape_map.as_mut() {
+            if let Some(property) = parse_property(line) {
+                apply_shape_map_property(
+                    map,
+                    &property,
+                    index + 1,
+                    &scene.relative_path,
+                    diagnostics,
+                );
+            }
+            continue;
+        }
+
         if let Some(stack) = current_stack.as_mut() {
             if let Some(property) = parse_property(line) {
                 apply_stack_property(
@@ -2057,6 +2572,11 @@ fn parse_scene_document(scene: &SourceFile, diagnostics: &mut Vec<Diagnostic>) -
     if let Some(map) = current_map.take() {
         if let Some(scene_node) = current_scene.as_mut() {
             scene_node.maps.push(normalize_ascii_map(map));
+        }
+    }
+    if let Some(map) = current_shape_map.take() {
+        if let Some(scene_node) = current_scene.as_mut() {
+            scene_node.shape_maps.push(normalize_shape_map(map));
         }
     }
     if let Some(stack) = current_stack.take() {
@@ -2178,17 +2698,32 @@ fn extract_texture_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
         .collect()
 }
 
+fn is_generated_texture(texture_name: &str) -> bool {
+    texture_name.starts_with("generated://")
+}
+
 fn extract_font_references(parsed_scenes: &[SceneDocument]) -> Vec<String> {
     parsed_scenes
         .iter()
         .flat_map(|document| document.scenes.iter())
         .flat_map(|scene| {
-            scene.texts.iter().map(|text| text.font.clone()).chain(
-                scene
-                    .high_scores
-                    .iter()
-                    .map(|high_score| high_score.font.clone()),
-            )
+            scene
+                .texts
+                .iter()
+                .map(|text| text.font.clone())
+                .chain(
+                    scene
+                        .high_scores
+                        .iter()
+                        .map(|high_score| high_score.font.clone()),
+                )
+                .chain(
+                    scene
+                        .shape_maps
+                        .iter()
+                        .filter(|map| map.debug_labels)
+                        .map(|_| "BetterPixels.ttf".to_string()),
+                )
         })
         .filter(|font| !font.is_empty())
         .collect()
@@ -2418,6 +2953,7 @@ fn compile_scene_draw_commands(parsed_scenes: &[SceneDocument]) -> Vec<DrawComma
             let scene = apply_scene_layout(scene);
             let markers = compile_map_markers(&scene.maps);
             commands.extend(scene.maps.iter().flat_map(compile_map_rects));
+            commands.extend(scene.shape_maps.iter().flat_map(compile_shape_map_commands));
             for rect in &scene.rects {
                 if !rect.visual.visible || rect.visual.template {
                     continue;
@@ -2593,6 +3129,456 @@ fn legend_tile_texture(meaning: Option<&&MapLegendMeaning>) -> Option<String> {
         Some(MapLegendMeaning::Texture(texture)) => Some((*texture).clone()),
         _ => None,
     }
+}
+
+pub fn compile_shape_map_commands(map: &ShapeMapNode) -> Vec<DrawCommand> {
+    let points = compile_shape_map_points(map);
+    let mut commands = Vec::new();
+    let mut z = 0;
+
+    for wall in &map.walls {
+        let path = compile_shape_wall_path(wall, &points);
+        for segment in path.windows(2) {
+            let start = segment[0];
+            let end = segment[1];
+            let dx = end[0] - start[0];
+            let dy = end[1] - start[1];
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= 0.1 {
+                continue;
+            }
+            let thickness = wall.thickness.max(1.0);
+            commands.push(DrawCommand::Sprite(SceneSprite {
+                anchor: Anchor::World,
+                layer: -5,
+                z,
+                x: (start[0] + end[0]) * 0.5 - length * 0.5,
+                y: (start[1] + end[1]) * 0.5 - thickness * 0.5,
+                width: length,
+                height: thickness,
+                rotation: dy.atan2(dx),
+                color: wall.color,
+                textures: Vec::new(),
+                animations: std::collections::HashMap::new(),
+                animation_fps: 0.0,
+                animation_mode: AnimationMode::Loop,
+                destroy_on_animation_end: false,
+                scroll: [0.0, 0.0],
+                repeat_x: false,
+                repeat_y: false,
+                flip_x: false,
+                flip_y: false,
+                visible: true,
+            }));
+            z += 1;
+        }
+    }
+
+    for pipe in &map.pipes {
+        for (start, end) in compile_shape_pipe_segments(pipe, &points) {
+            let dx = end[0] - start[0];
+            let dy = end[1] - start[1];
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= 0.1 {
+                continue;
+            }
+            let thickness = pipe.thickness.max(1.0);
+            commands.push(DrawCommand::Sprite(SceneSprite {
+                anchor: Anchor::World,
+                layer: -5,
+                z,
+                x: (start[0] + end[0]) * 0.5 - length * 0.5,
+                y: (start[1] + end[1]) * 0.5 - thickness * 0.5,
+                width: length,
+                height: thickness,
+                rotation: dy.atan2(dx),
+                color: pipe.color,
+                textures: Vec::new(),
+                animations: std::collections::HashMap::new(),
+                animation_fps: 0.0,
+                animation_mode: AnimationMode::Loop,
+                destroy_on_animation_end: false,
+                scroll: [0.0, 0.0],
+                repeat_x: false,
+                repeat_y: false,
+                flip_x: false,
+                flip_y: false,
+                visible: true,
+            }));
+            z += 1;
+        }
+    }
+
+    for sdf_wall in &map.sdf_walls {
+        for (start, end) in compile_shape_sdf_wall_segments(sdf_wall, &points) {
+            let dx = end[0] - start[0];
+            let dy = end[1] - start[1];
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= 0.1 {
+                continue;
+            }
+            let thickness = sdf_wall.radius.max(1.0) * 2.0;
+            commands.push(DrawCommand::Sprite(SceneSprite {
+                anchor: Anchor::World,
+                layer: -5,
+                z,
+                x: (start[0] + end[0]) * 0.5 - length * 0.5,
+                y: (start[1] + end[1]) * 0.5 - thickness * 0.5,
+                width: length,
+                height: thickness,
+                rotation: dy.atan2(dx),
+                color: sdf_wall.color,
+                textures: Vec::new(),
+                animations: std::collections::HashMap::new(),
+                animation_fps: 0.0,
+                animation_mode: AnimationMode::Loop,
+                destroy_on_animation_end: false,
+                scroll: [0.0, 0.0],
+                repeat_x: false,
+                repeat_y: false,
+                flip_x: false,
+                flip_y: false,
+                visible: true,
+            }));
+            z += 1;
+        }
+    }
+
+    for polyline in &map.polylines {
+        for (start, end) in compile_shape_polyline_segments(polyline, &points) {
+            let dx = end[0] - start[0];
+            let dy = end[1] - start[1];
+            let length = (dx * dx + dy * dy).sqrt();
+            if length <= 0.1 {
+                continue;
+            }
+            let thickness = polyline.radius.max(1.0) * 2.0;
+            commands.push(DrawCommand::Sprite(SceneSprite {
+                anchor: Anchor::World,
+                layer: -5,
+                z,
+                x: (start[0] + end[0]) * 0.5 - length * 0.5,
+                y: (start[1] + end[1]) * 0.5 - thickness * 0.5,
+                width: length,
+                height: thickness,
+                rotation: dy.atan2(dx),
+                color: polyline.color,
+                textures: Vec::new(),
+                animations: std::collections::HashMap::new(),
+                animation_fps: 0.0,
+                animation_mode: AnimationMode::Loop,
+                destroy_on_animation_end: false,
+                scroll: [0.0, 0.0],
+                repeat_x: false,
+                repeat_y: false,
+                flip_x: false,
+                flip_y: false,
+                visible: true,
+            }));
+            z += 1;
+        }
+    }
+
+    for bumper in &map.bumpers {
+        let Some(point) = points.get(&bumper.point) else {
+            continue;
+        };
+        let radius = bumper.radius.max(1.0);
+        let diameter = radius * 2.0;
+        let glow = diameter + radius * 1.45;
+        commands.push(DrawCommand::Sprite(SceneSprite {
+            anchor: Anchor::World,
+            layer: -5,
+            z,
+            x: point[0] - glow * 0.5,
+            y: point[1] - glow * 0.5,
+            width: glow,
+            height: glow,
+            rotation: 0.0,
+            color: [bumper.color[0], bumper.color[1], bumper.color[2], 0.22],
+            textures: vec![format!("generated://circle/shape_bumper_glow_{glow:.0}")],
+            animations: std::collections::HashMap::new(),
+            animation_fps: 0.0,
+            animation_mode: AnimationMode::Loop,
+            destroy_on_animation_end: false,
+            scroll: [0.0, 0.0],
+            repeat_x: false,
+            repeat_y: false,
+            flip_x: false,
+            flip_y: false,
+            visible: true,
+        }));
+        z += 1;
+        commands.push(DrawCommand::Sprite(SceneSprite {
+            anchor: Anchor::World,
+            layer: -4,
+            z,
+            x: point[0] - bumper.radius,
+            y: point[1] - bumper.radius,
+            width: diameter,
+            height: diameter,
+            rotation: 0.0,
+            color: bumper.color,
+            textures: vec![format!("generated://circle/shape_bumper_{diameter:.0}")],
+            animations: std::collections::HashMap::new(),
+            animation_fps: 0.0,
+            animation_mode: AnimationMode::Loop,
+            destroy_on_animation_end: false,
+            scroll: [0.0, 0.0],
+            repeat_x: false,
+            repeat_y: false,
+            flip_x: false,
+            flip_y: false,
+            visible: true,
+        }));
+        z += 1;
+        let highlight = radius * 0.72;
+        commands.push(DrawCommand::Sprite(SceneSprite {
+            anchor: Anchor::World,
+            layer: -3,
+            z,
+            x: point[0] - radius * 0.45,
+            y: point[1] - radius * 0.55,
+            width: highlight,
+            height: highlight,
+            rotation: 0.0,
+            color: [1.0, 1.0, 1.0, 0.28],
+            textures: vec![format!(
+                "generated://circle/shape_bumper_highlight_{highlight:.0}"
+            )],
+            animations: std::collections::HashMap::new(),
+            animation_fps: 0.0,
+            animation_mode: AnimationMode::Loop,
+            destroy_on_animation_end: false,
+            scroll: [0.0, 0.0],
+            repeat_x: false,
+            repeat_y: false,
+            flip_x: false,
+            flip_y: false,
+            visible: true,
+        }));
+        z += 1;
+    }
+
+    if map.debug_labels {
+        for (symbol, point) in compile_shape_map_point_symbols(map) {
+            commands.push(DrawCommand::Rect(SceneRect {
+                anchor: Anchor::World,
+                layer: 19,
+                z,
+                x: point[0] - 4.0,
+                y: point[1] - 4.0,
+                width: 8.0,
+                height: 8.0,
+                color: [0.02, 0.04, 0.08, 0.9],
+                visible: true,
+            }));
+            z += 1;
+            commands.push(DrawCommand::Text(SceneText {
+                anchor: Anchor::World,
+                align: TextAlign::Center,
+                layer: 20,
+                z,
+                x: point[0],
+                y: point[1] - 8.0,
+                color: [1.0, 0.94, 0.42, 1.0],
+                value: symbol.to_string(),
+                font: "BetterPixels.ttf".to_string(),
+                font_size: 12.0,
+                visible: true,
+            }));
+            z += 1;
+        }
+    }
+
+    commands
+}
+
+pub fn compile_shape_map_points(map: &ShapeMapNode) -> std::collections::HashMap<String, [f32; 2]> {
+    let legend: std::collections::HashMap<char, &ShapeMapLegendEntry> = map
+        .legend
+        .iter()
+        .map(|entry| (entry.symbol, entry))
+        .collect();
+    let mut points = std::collections::HashMap::new();
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            let Some(entry) = legend.get(&ch) else {
+                continue;
+            };
+            points.insert(
+                entry.point.clone(),
+                [
+                    map.origin[0] + (col as f32 + 0.5) * map.cell[0] + entry.offset[0],
+                    map.origin[1] + (row as f32 + 0.5) * map.cell[1] + entry.offset[1],
+                ],
+            );
+        }
+    }
+    points
+}
+
+pub fn compile_shape_wall_path(
+    wall: &ShapeWallNode,
+    points: &std::collections::HashMap<String, [f32; 2]>,
+) -> Vec<[f32; 2]> {
+    let raw = wall
+        .points
+        .iter()
+        .filter_map(|name| points.get(name).copied())
+        .collect::<Vec<_>>();
+    round_shape_polyline(raw, wall.corner, wall.radius, wall.segments)
+}
+
+pub fn compile_shape_pipe_segments(
+    pipe: &ShapePipeNode,
+    points: &std::collections::HashMap<String, [f32; 2]>,
+) -> Vec<([f32; 2], [f32; 2])> {
+    let raw = pipe
+        .points
+        .iter()
+        .filter_map(|name| points.get(name).copied())
+        .collect::<Vec<_>>();
+    if raw.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut segments = Vec::new();
+    let offset = pipe.width.max(1.0) * 0.5;
+    for segment in raw.windows(2) {
+        let start = segment[0];
+        let end = segment[1];
+        let dx = end[0] - start[0];
+        let dy = end[1] - start[1];
+        let length = (dx * dx + dy * dy).sqrt();
+        if length <= f32::EPSILON {
+            continue;
+        }
+        let normal = [-dy / length, dx / length];
+        let left_start = [start[0] + normal[0] * offset, start[1] + normal[1] * offset];
+        let left_end = [end[0] + normal[0] * offset, end[1] + normal[1] * offset];
+        let right_start = [start[0] - normal[0] * offset, start[1] - normal[1] * offset];
+        let right_end = [end[0] - normal[0] * offset, end[1] - normal[1] * offset];
+        segments.push((left_start, left_end));
+        segments.push((right_start, right_end));
+    }
+    segments
+}
+
+fn round_shape_polyline(
+    raw: Vec<[f32; 2]>,
+    corner: ShapeWallCorner,
+    radius: f32,
+    segments: i32,
+) -> Vec<[f32; 2]> {
+    if raw.len() < 3 || corner != ShapeWallCorner::Round || radius <= 0.0 {
+        return raw;
+    }
+
+    let mut path = Vec::new();
+    path.push(raw[0]);
+    for index in 1..raw.len() - 1 {
+        let prev = raw[index - 1];
+        let curr = raw[index];
+        let next = raw[index + 1];
+        let to_prev = [prev[0] - curr[0], prev[1] - curr[1]];
+        let to_next = [next[0] - curr[0], next[1] - curr[1]];
+        let prev_len = (to_prev[0] * to_prev[0] + to_prev[1] * to_prev[1]).sqrt();
+        let next_len = (to_next[0] * to_next[0] + to_next[1] * to_next[1]).sqrt();
+        if prev_len <= f32::EPSILON || next_len <= f32::EPSILON {
+            path.push(curr);
+            continue;
+        }
+        let radius = radius.min(prev_len * 0.45).min(next_len * 0.45);
+        let prev_dir = [to_prev[0] / prev_len, to_prev[1] / prev_len];
+        let next_dir = [to_next[0] / next_len, to_next[1] / next_len];
+        let start = [
+            curr[0] + prev_dir[0] * radius,
+            curr[1] + prev_dir[1] * radius,
+        ];
+        let end = [
+            curr[0] + next_dir[0] * radius,
+            curr[1] + next_dir[1] * radius,
+        ];
+        path.push(start);
+        for step in 1..=segments.max(1) {
+            let t = step as f32 / segments.max(1) as f32;
+            let inv = 1.0 - t;
+            path.push([
+                inv * inv * start[0] + 2.0 * inv * t * curr[0] + t * t * end[0],
+                inv * inv * start[1] + 2.0 * inv * t * curr[1] + t * t * end[1],
+            ]);
+        }
+    }
+    path.push(*raw.last().expect("shape polyline is non-empty"));
+    path
+}
+
+pub fn compile_shape_sdf_wall_segments(
+    sdf_wall: &ShapeSdfWallNode,
+    points: &std::collections::HashMap<String, [f32; 2]>,
+) -> Vec<([f32; 2], [f32; 2])> {
+    let raw = sdf_wall
+        .points
+        .iter()
+        .filter_map(|name| points.get(name).copied())
+        .collect::<Vec<_>>();
+    let path = round_shape_polyline(
+        raw,
+        sdf_wall.corner,
+        sdf_wall.corner_radius,
+        sdf_wall.segments,
+    );
+    path.windows(2)
+        .map(|segment| (segment[0], segment[1]))
+        .collect()
+}
+
+pub fn compile_shape_polyline_segments(
+    polyline: &ShapePolylineNode,
+    points: &std::collections::HashMap<String, [f32; 2]>,
+) -> Vec<([f32; 2], [f32; 2])> {
+    let mut raw = polyline
+        .points
+        .iter()
+        .filter_map(|name| points.get(name).copied())
+        .collect::<Vec<_>>();
+    if polyline.closed && raw.len() >= 2 && raw.first().copied() != raw.last().copied() {
+        raw.push(raw[0]);
+    }
+    let path = round_shape_polyline(
+        raw,
+        polyline.corner,
+        polyline.corner_radius,
+        polyline.segments,
+    );
+    path.windows(2)
+        .map(|segment| (segment[0], segment[1]))
+        .collect()
+}
+
+fn compile_shape_map_point_symbols(map: &ShapeMapNode) -> Vec<(char, [f32; 2])> {
+    let legend: std::collections::HashMap<char, &ShapeMapLegendEntry> = map
+        .legend
+        .iter()
+        .map(|entry| (entry.symbol, entry))
+        .collect();
+    let mut points = Vec::new();
+    for (row, line) in map.rows.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            let Some(entry) = legend.get(&ch) else {
+                continue;
+            };
+            points.push((
+                ch,
+                [
+                    map.origin[0] + (col as f32 + 0.5) * map.cell[0] + entry.offset[0],
+                    map.origin[1] + (row as f32 + 0.5) * map.cell[1] + entry.offset[1],
+                ],
+            ));
+        }
+    }
+    points
 }
 
 fn compile_map_markers(maps: &[AsciiMapNode]) -> std::collections::HashMap<String, [f32; 2]> {
@@ -3122,6 +4108,254 @@ const MAP_SCHEMA: &[SchemaEntry] = &[
     },
 ];
 
+const SHAPE_MAP_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "origin",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "cell",
+        kind: PropertyKind::Vec2,
+    },
+    SchemaEntry {
+        key: "debug_labels",
+        kind: PropertyKind::Bool,
+    },
+];
+
+const SHAPE_WALL_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "corner",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "segments",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "thickness",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "bounce",
+        kind: PropertyKind::F32,
+    },
+];
+
+const SHAPE_PIPE_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "width",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "thickness",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "bounce",
+        kind: PropertyKind::F32,
+    },
+];
+
+const SHAPE_SDF_WALL_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "smooth",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "corner",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "corner_radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "segments",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "bounce",
+        kind: PropertyKind::F32,
+    },
+];
+
+const SHAPE_POLYLINE_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "closed",
+        kind: PropertyKind::Bool,
+    },
+    SchemaEntry {
+        key: "radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "smooth",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "corner",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "corner_radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "segments",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "bounce",
+        kind: PropertyKind::F32,
+    },
+];
+
+const SHAPE_BUMPER_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "point",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "bounce",
+        kind: PropertyKind::F32,
+    },
+];
+
+const SHAPE_FLIPPER_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "pivot",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "length",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "thickness",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "base_radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "tip_radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "rest_angle",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "active_angle",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "up_speed",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "down_speed",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "impulse",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "input",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "bounce",
+        kind: PropertyKind::F32,
+    },
+];
+
+const SHAPE_SPRING_SCHEMA: &[SchemaEntry] = &[
+    SchemaEntry {
+        key: "coils",
+        kind: PropertyKind::I32,
+    },
+    SchemaEntry {
+        key: "radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "wire_radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "cap_width",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "cap_radius",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "max_compression",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "pull_speed",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "release_speed",
+        kind: PropertyKind::F32,
+    },
+    SchemaEntry {
+        key: "input",
+        kind: PropertyKind::BareString,
+    },
+    SchemaEntry {
+        key: "color",
+        kind: PropertyKind::Color,
+    },
+    SchemaEntry {
+        key: "bounce",
+        kind: PropertyKind::F32,
+    },
+];
+
 impl<'a> Property<'a> {
     fn as_string(&self) -> Option<String> {
         parse_string(self.raw)
@@ -3200,6 +4434,27 @@ fn parse_string_list(value: &str) -> Option<Vec<String>> {
     inner
         .split(',')
         .map(|part| parse_string(part.trim()))
+        .collect()
+}
+
+fn parse_identifier_list(value: &str) -> Option<Vec<String>> {
+    if let Some(strings) = parse_string_list(value) {
+        return Some(strings);
+    }
+    let inner = value.trim().strip_prefix('[')?.strip_suffix(']')?.trim();
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+    inner
+        .split(',')
+        .map(|part| {
+            let value = part.trim();
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        })
         .collect()
 }
 
@@ -3553,6 +4808,7 @@ fn apply_sprite_property(
             ("physics", PropertyValue::String(mode)) => {
                 sprite.physics = match mode.as_str() {
                     "platformer" => PhysicsMode::Platformer,
+                    "pinball" => PhysicsMode::Pinball,
                     _ => PhysicsMode::None,
                 }
             }
@@ -3820,6 +5076,34 @@ fn apply_map_property(
     }
 }
 
+fn apply_shape_map_property(
+    map: &mut ShapeMapNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) = parse_schema_value(
+        SHAPE_MAP_SCHEMA,
+        property,
+        line,
+        "shape_map",
+        path,
+        diagnostics,
+    ) {
+        match (key, value) {
+            ("origin", PropertyValue::Vec2(origin)) => map.origin = origin,
+            ("cell", PropertyValue::Vec2(cell)) => {
+                map.cell = [cell[0].max(1.0), cell[1].max(1.0)];
+            }
+            ("debug_labels", PropertyValue::Bool(debug_labels)) => {
+                map.debug_labels = debug_labels;
+            }
+            _ => {}
+        }
+    }
+}
+
 fn apply_map_legend_property(
     map: Option<&mut AsciiMapNode>,
     property: &Property<'_>,
@@ -3867,6 +5151,318 @@ fn apply_map_legend_property(
         existing.meaning = meaning;
     } else {
         map.legend.push(MapLegendEntry { symbol, meaning });
+    }
+}
+
+fn apply_shape_map_legend_property(
+    map: Option<&mut ShapeMapNode>,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(map) = map else {
+        diagnostics.push(Diagnostic::warning_at(
+            "legend entry outside shape_map",
+            Some(path.to_path_buf()),
+            line,
+        ));
+        return;
+    };
+    let Some(symbol) = parse_symbol_ref(property.key).and_then(|value| value.chars().next()) else {
+        diagnostics.push(Diagnostic::warning_at(
+            "invalid shape_map legend symbol",
+            Some(path.to_path_buf()),
+            line,
+        ));
+        return;
+    };
+    let Some((point, offset)) = parse_shape_point_legend_call(property.raw) else {
+        diagnostics.push(Diagnostic::warning_at(
+            "invalid shape_map legend mapping",
+            Some(path.to_path_buf()),
+            line,
+        ));
+        return;
+    };
+    if let Some(existing) = map.legend.iter_mut().find(|entry| entry.symbol == symbol) {
+        existing.point = point;
+        existing.offset = offset;
+    } else {
+        map.legend.push(ShapeMapLegendEntry {
+            symbol,
+            point,
+            offset,
+        });
+    }
+}
+
+fn apply_shape_wall_property(
+    wall: &mut ShapeWallNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if property.key == "points" {
+        match parse_identifier_list(property.raw) {
+            Some(points) => wall.points = points,
+            None => diagnostics.push(Diagnostic::warning_at(
+                "invalid wall points",
+                Some(path.to_path_buf()),
+                line,
+            )),
+        }
+        return;
+    }
+    if let Some((key, value)) =
+        parse_schema_value(SHAPE_WALL_SCHEMA, property, line, "wall", path, diagnostics)
+    {
+        match (key, value) {
+            ("corner", PropertyValue::String(corner)) => {
+                wall.corner = match corner.as_str() {
+                    "round" | "rounded" => ShapeWallCorner::Round,
+                    "sharp" => ShapeWallCorner::Sharp,
+                    _ => wall.corner,
+                };
+            }
+            ("radius", PropertyValue::F32(radius)) => wall.radius = radius.max(0.0),
+            ("segments", PropertyValue::I32(segments)) => wall.segments = segments.max(1),
+            ("thickness", PropertyValue::F32(thickness)) => wall.thickness = thickness.max(1.0),
+            ("color", PropertyValue::Color(color)) => wall.color = color,
+            ("bounce", PropertyValue::F32(bounce)) => wall.bounce = bounce.max(0.0),
+            _ => {}
+        }
+    }
+}
+
+fn apply_shape_pipe_property(
+    pipe: &mut ShapePipeNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if property.key == "points" {
+        match parse_identifier_list(property.raw) {
+            Some(points) => pipe.points = points,
+            None => diagnostics.push(Diagnostic::warning_at(
+                "invalid pipe points",
+                Some(path.to_path_buf()),
+                line,
+            )),
+        }
+        return;
+    }
+    if let Some((key, value)) =
+        parse_schema_value(SHAPE_PIPE_SCHEMA, property, line, "pipe", path, diagnostics)
+    {
+        match (key, value) {
+            ("width", PropertyValue::F32(width)) => pipe.width = width.max(1.0),
+            ("thickness", PropertyValue::F32(thickness)) => pipe.thickness = thickness.max(1.0),
+            ("color", PropertyValue::Color(color)) => pipe.color = color,
+            ("bounce", PropertyValue::F32(bounce)) => pipe.bounce = bounce.max(0.0),
+            _ => {}
+        }
+    }
+}
+
+fn apply_shape_sdf_wall_property(
+    sdf_wall: &mut ShapeSdfWallNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if property.key == "points" {
+        match parse_identifier_list(property.raw) {
+            Some(points) => sdf_wall.points = points,
+            None => diagnostics.push(Diagnostic::warning_at(
+                "invalid sdf_wall points",
+                Some(path.to_path_buf()),
+                line,
+            )),
+        }
+        return;
+    }
+    if let Some((key, value)) = parse_schema_value(
+        SHAPE_SDF_WALL_SCHEMA,
+        property,
+        line,
+        "sdf_wall",
+        path,
+        diagnostics,
+    ) {
+        match (key, value) {
+            ("radius", PropertyValue::F32(radius)) => sdf_wall.radius = radius.max(1.0),
+            ("smooth", PropertyValue::F32(smooth)) => sdf_wall.smooth = smooth.max(0.0),
+            ("corner", PropertyValue::String(corner)) => {
+                sdf_wall.corner = match corner.as_str() {
+                    "round" | "rounded" => ShapeWallCorner::Round,
+                    "sharp" => ShapeWallCorner::Sharp,
+                    _ => sdf_wall.corner,
+                };
+            }
+            ("corner_radius", PropertyValue::F32(radius)) => {
+                sdf_wall.corner_radius = radius.max(0.0)
+            }
+            ("segments", PropertyValue::I32(segments)) => sdf_wall.segments = segments.max(1),
+            ("color", PropertyValue::Color(color)) => sdf_wall.color = color,
+            ("bounce", PropertyValue::F32(bounce)) => sdf_wall.bounce = bounce.max(0.0),
+            _ => {}
+        }
+    }
+}
+
+fn apply_shape_polyline_property(
+    polyline: &mut ShapePolylineNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if property.key == "points" {
+        match parse_identifier_list(property.raw) {
+            Some(points) => polyline.points = points,
+            None => diagnostics.push(Diagnostic::warning_at(
+                "invalid polyline points",
+                Some(path.to_path_buf()),
+                line,
+            )),
+        }
+        return;
+    }
+    if let Some((key, value)) = parse_schema_value(
+        SHAPE_POLYLINE_SCHEMA,
+        property,
+        line,
+        "polyline",
+        path,
+        diagnostics,
+    ) {
+        match (key, value) {
+            ("closed", PropertyValue::Bool(closed)) => polyline.closed = closed,
+            ("radius", PropertyValue::F32(radius)) => polyline.radius = radius.max(1.0),
+            ("smooth", PropertyValue::F32(smooth)) => polyline.smooth = smooth.max(0.0),
+            ("corner", PropertyValue::String(corner)) => {
+                polyline.corner = match corner.as_str() {
+                    "round" | "rounded" => ShapeWallCorner::Round,
+                    "sharp" => ShapeWallCorner::Sharp,
+                    _ => polyline.corner,
+                };
+            }
+            ("corner_radius", PropertyValue::F32(radius)) => {
+                polyline.corner_radius = radius.max(0.0)
+            }
+            ("segments", PropertyValue::I32(segments)) => polyline.segments = segments.max(1),
+            ("color", PropertyValue::Color(color)) => polyline.color = color,
+            ("bounce", PropertyValue::F32(bounce)) => polyline.bounce = bounce.max(0.0),
+            _ => {}
+        }
+    }
+}
+
+fn apply_shape_bumper_property(
+    bumper: &mut ShapeBumperNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) = parse_schema_value(
+        SHAPE_BUMPER_SCHEMA,
+        property,
+        line,
+        "bumper",
+        path,
+        diagnostics,
+    ) {
+        match (key, value) {
+            ("point", PropertyValue::String(point)) => bumper.point = point,
+            ("radius", PropertyValue::F32(radius)) => bumper.radius = radius.max(1.0),
+            ("color", PropertyValue::Color(color)) => bumper.color = color,
+            ("bounce", PropertyValue::F32(bounce)) => bumper.bounce = bounce.max(0.0),
+            _ => {}
+        }
+    }
+}
+
+fn apply_shape_flipper_property(
+    flipper: &mut ShapeFlipperNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some((key, value)) = parse_schema_value(
+        SHAPE_FLIPPER_SCHEMA,
+        property,
+        line,
+        "flipper",
+        path,
+        diagnostics,
+    ) {
+        match (key, value) {
+            ("pivot", PropertyValue::String(pivot)) => flipper.pivot = pivot,
+            ("length", PropertyValue::F32(length)) => flipper.length = length.max(1.0),
+            ("thickness", PropertyValue::F32(thickness)) => flipper.thickness = thickness.max(1.0),
+            ("base_radius", PropertyValue::F32(radius)) => flipper.base_radius = radius.max(0.5),
+            ("tip_radius", PropertyValue::F32(radius)) => flipper.tip_radius = radius.max(0.5),
+            ("rest_angle", PropertyValue::F32(angle)) => flipper.rest_angle = angle,
+            ("active_angle", PropertyValue::F32(angle)) => flipper.active_angle = angle,
+            ("up_speed", PropertyValue::F32(speed)) => flipper.up_speed = speed.max(0.0),
+            ("down_speed", PropertyValue::F32(speed)) => flipper.down_speed = speed.max(0.0),
+            ("impulse", PropertyValue::F32(impulse)) => flipper.impulse = impulse.max(0.0),
+            ("input", PropertyValue::String(input)) => flipper.input = input,
+            ("color", PropertyValue::Color(color)) => flipper.color = color,
+            ("bounce", PropertyValue::F32(bounce)) => flipper.bounce = bounce.max(0.0),
+            _ => {}
+        }
+    }
+}
+
+fn apply_shape_spring_property(
+    spring: &mut ShapeSpringNode,
+    property: &Property<'_>,
+    line: usize,
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if property.key == "points" {
+        match parse_identifier_list(property.raw) {
+            Some(points) => spring.points = points,
+            None => diagnostics.push(Diagnostic::warning_at(
+                "invalid spring points",
+                Some(path.to_path_buf()),
+                line,
+            )),
+        }
+        return;
+    }
+    if let Some((key, value)) = parse_schema_value(
+        SHAPE_SPRING_SCHEMA,
+        property,
+        line,
+        "spring",
+        path,
+        diagnostics,
+    ) {
+        match (key, value) {
+            ("coils", PropertyValue::I32(coils)) => spring.coils = coils.max(1),
+            ("radius", PropertyValue::F32(radius)) => spring.radius = radius.max(0.0),
+            ("wire_radius", PropertyValue::F32(radius)) => spring.wire_radius = radius.max(0.5),
+            ("cap_width", PropertyValue::F32(width)) => spring.cap_width = width.max(1.0),
+            ("cap_radius", PropertyValue::F32(radius)) => spring.cap_radius = radius.max(0.5),
+            ("max_compression", PropertyValue::F32(value)) => {
+                spring.max_compression = value.max(0.0)
+            }
+            ("pull_speed", PropertyValue::F32(speed)) => spring.pull_speed = speed.max(0.0),
+            ("release_speed", PropertyValue::F32(speed)) => spring.release_speed = speed.max(0.0),
+            ("input", PropertyValue::String(input)) => spring.input = input,
+            ("color", PropertyValue::Color(color)) => spring.color = color,
+            ("bounce", PropertyValue::F32(bounce)) => spring.bounce = bounce.max(0.0),
+            _ => {}
+        }
     }
 }
 
@@ -3923,6 +5519,45 @@ fn parse_named_legend_call(value: &str, name: &str) -> Option<String> {
         return None;
     }
     Some(inner.to_string())
+}
+
+fn parse_shape_point_legend_call(value: &str) -> Option<(String, [f32; 2])> {
+    let inner = parse_named_legend_call(value, "point")?;
+    let parts = split_call_args(&inner);
+    let point = parts.first()?.trim();
+    let point = parse_string(point).unwrap_or_else(|| point.to_string());
+    let offset = if parts.len() >= 3 {
+        [
+            parts.get(1)?.trim().parse::<f32>().ok()?,
+            parts.get(2)?.trim().parse::<f32>().ok()?,
+        ]
+    } else {
+        [0.0, 0.0]
+    };
+    Some((point, offset))
+}
+
+fn split_call_args(value: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+    for ch in value.chars() {
+        match ch {
+            '"' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            ',' if !in_string => {
+                args.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        args.push(current.trim().to_string());
+    }
+    args
 }
 
 fn parse_terrain_render_mode(value: &str) -> Option<TerrainRenderMode> {
@@ -4573,6 +6208,45 @@ fn terrain_shape_debug_color(shape: TerrainShape) -> [f32; 4] {
 }
 
 fn normalize_ascii_map(mut map: AsciiMapNode) -> AsciiMapNode {
+    let min_indent = map
+        .rows
+        .iter()
+        .filter(|row| !row.trim().is_empty())
+        .map(|row| {
+            row.chars()
+                .take_while(|ch| *ch == ' ' || *ch == '\t')
+                .count()
+        })
+        .min()
+        .unwrap_or(0);
+
+    map.rows = map
+        .rows
+        .into_iter()
+        .map(|row| {
+            let mut skip = min_indent;
+            let mut start = 0usize;
+            for (index, ch) in row.char_indices() {
+                if skip == 0 {
+                    start = index;
+                    break;
+                }
+                if ch == ' ' || ch == '\t' {
+                    skip -= 1;
+                    start = index + ch.len_utf8();
+                } else {
+                    start = index;
+                    break;
+                }
+            }
+            row[start..].trim_end().to_string()
+        })
+        .collect();
+
+    map
+}
+
+fn normalize_shape_map(mut map: ShapeMapNode) -> ShapeMapNode {
     let min_indent = map
         .rows
         .iter()

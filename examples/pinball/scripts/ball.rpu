@@ -1,0 +1,192 @@
+state launch_ready = 1
+state launch_pulled = 0
+state score = 0
+state left_bumper_flash = 0
+state top_bumper_flash = 0
+state right_bumper_flash = 0
+state top_a = 0
+state top_b = 0
+state top_c = 0
+state lower_a = 0
+state lower_b = 0
+state lower_c = 0
+state enemy_disabled_until = 0
+state next_missile = 1.5
+state missile_flash_until = 0
+
+fn reset_ball() {
+    self.x = 367
+    self.y = 537
+    self.vx = 0
+    self.vy = 0
+    launch_ready = 1
+    launch_pulled = 0
+}
+
+fn set_score(value) {
+    score = value
+    ScoreLabel.text = format_int(score, 6)
+}
+
+fn add_score(value) {
+    set_score(score + value)
+}
+
+fn clear_top_lights() {
+    top_a = 0
+    top_b = 0
+    top_c = 0
+    TopLightA.color = #16243b
+    TopLightB.color = #16243b
+    TopLightC.color = #16243b
+}
+
+fn clear_lower_lights() {
+    lower_a = 0
+    lower_b = 0
+    lower_c = 0
+    LowerLightA.color = #16243b
+    LowerLightB.color = #16243b
+    LowerLightC.color = #16243b
+}
+
+fn check_light_banks() {
+    if top_a == 1 && top_b == 1 && top_c == 1 {
+        add_score(1000)
+        clear_top_lights()
+    }
+    if lower_a == 1 && lower_b == 1 && lower_c == 1 {
+        add_score(1200)
+        clear_lower_lights()
+    }
+}
+
+fn stun_enemy() {
+    enemy_disabled_until = time() + 5.0
+    next_missile = enemy_disabled_until + 0.8
+    add_score(1500)
+    EnemyCore.color = #637083
+    EnemyAura.color = alpha(#ffffff, 0.0)
+    EnemyEye.color = #9ea9b5
+    MissileFlash.color = alpha(#ffd35c, 0.0)
+    ModeLabel.text = "CREATURE STUNNED"
+}
+
+fn fire_missile() {
+    next_missile = time() + 1.35
+    missile_flash_until = time() + 0.16
+    MissileFlash.x = self.x
+    MissileFlash.y = self.y
+    MissileFlash.color = alpha(#ffd35c, 0.95)
+    self.vx = self.vx - 70
+    self.vy = self.vy + 38
+}
+
+on ready() {
+    set_score(0)
+    clear_top_lights()
+    clear_lower_lights()
+    reset_ball()
+}
+
+on collision_enter(other, group) {
+    if group == "drain" {
+        reset_ball()
+    } else if group == "rollover" {
+        add_score(100)
+    } else if group == "bumper" {
+        add_score(250)
+        if other == "LeftBumperTrigger" {
+            left_bumper_flash = time() + 0.18
+        } else if other == "TopBumperTrigger" {
+            top_bumper_flash = time() + 0.18
+        } else if other == "RightBumperTrigger" {
+            right_bumper_flash = time() + 0.18
+        }
+    } else if group == "target" {
+        add_score(150)
+        if other == "TopTargetA" {
+            top_a = 1
+            TopLightA.color = #62f2ff
+        } else if other == "TopTargetB" {
+            top_b = 1
+            TopLightB.color = #62f2ff
+        } else if other == "TopTargetC" {
+            top_c = 1
+            TopLightC.color = #62f2ff
+        } else if other == "LowerTargetA" {
+            lower_a = 1
+            LowerLightA.color = #ff4f9a
+        } else if other == "LowerTargetB" {
+            lower_b = 1
+            LowerLightB.color = #ff4f9a
+        } else if other == "LowerTargetC" {
+            lower_c = 1
+            LowerLightC.color = #ff4f9a
+        }
+        check_light_banks()
+    } else if group == "enemy" {
+        stun_enemy()
+    } else if group == "mouth" {
+        if time() > enemy_disabled_until {
+            reset_ball()
+            ModeLabel.text = "BALL EATEN"
+        }
+    }
+}
+
+on update(dt) {
+    if self.y > 650 {
+        reset_ball()
+    }
+
+    if launch_ready && input_action() {
+        launch_pulled = 1
+        self.color = #f6f3dc
+    } else if launch_ready && launch_pulled {
+        launch_ready = 0
+        self.color = #f6f3dc
+    } else if launch_ready {
+        self.x = 367
+        self.y = 537
+        self.vx = 0
+        self.vy = 0
+        self.color = #f6f3dc
+    }
+
+    if time() > enemy_disabled_until {
+        EnemyCore.color = #ff4f4f
+        EnemyAura.color = alpha(#ff4f4f, 0.32)
+        EnemyEye.color = #fff39a
+        MouthVisual.color = #26101a
+        ModeLabel.text = "CREATURE ACTIVE"
+        if time() > next_missile && launch_ready == 0 {
+            fire_missile()
+        }
+    } else {
+        MouthVisual.color = #102b44
+    }
+
+    if time() > missile_flash_until {
+        MissileFlash.color = alpha(#ffd35c, 0.0)
+    }
+
+    if time() < left_bumper_flash {
+        LeftBumperFlash.color = alpha(#ffffff, 0.75)
+    } else {
+        LeftBumperFlash.color = alpha(#ffffff, 0.0)
+    }
+
+    if time() < top_bumper_flash {
+        TopBumperFlash.color = alpha(#ffffff, 0.75)
+    } else {
+        TopBumperFlash.color = alpha(#ffffff, 0.0)
+    }
+
+    if time() < right_bumper_flash {
+        RightBumperFlash.color = alpha(#ffffff, 0.75)
+    } else {
+        RightBumperFlash.color = alpha(#ffffff, 0.0)
+    }
+
+}

@@ -8,8 +8,16 @@
   "animation"
   "text"
   "map"
+  "shape_map"
   "legend"
   "ascii"
+  "wall"
+  "pipe"
+  "sdf_wall"
+  "polyline"
+  "bumper"
+  "flipper"
+  "spring"
   "on"
   "fn"
   "if"
@@ -35,6 +43,14 @@
 (stack_definition name: (identifier) @type)
 (highscore_definition name: (identifier) @type)
 (map_definition name: (identifier) @type)
+(shape_map_definition name: (identifier) @type)
+(wall_definition name: (identifier) @type)
+(pipe_definition name: (identifier) @type)
+(sdf_wall_definition name: (identifier) @type)
+(polyline_definition name: (identifier) @type)
+(bumper_definition name: (identifier) @type)
+(flipper_definition name: (identifier) @type)
+(spring_definition name: (identifier) @type)
 
 (function_definition name: (identifier) @function)
 (event_handler name: (identifier) @function.method)

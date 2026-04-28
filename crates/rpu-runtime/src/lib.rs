@@ -4,7 +4,9 @@ use rpu_core::{
     Anchor, AnimationMode, AsciiMapNode, BinaryOp, BundledProject, BytecodeOp, CompiledProject,
     Condition, DestroyTarget, DrawCommand, Expr, MapLegendMeaning, MapTileCollision, OpCode,
     RectNode, ResizeMode, RpuProject, SceneCamera, SceneRect, ScriptProperty, ScriptTarget,
-    SpriteNode, TextAlign, TextNode, WindowConfig, apply_scene_layout,
+    SpriteNode, TextAlign, TextNode, WindowConfig, apply_scene_layout, compile_shape_map_commands,
+    compile_shape_map_points, compile_shape_pipe_segments, compile_shape_polyline_segments,
+    compile_shape_sdf_wall_segments, compile_shape_wall_path,
 };
 #[cfg(any(
     target_arch = "wasm32",
@@ -217,6 +219,9 @@ impl RpuSceneApp for RuntimeApp {
         if self.session.debug_physics {
             submit_physics_debug_overlay(frame, &camera, &view, &self.session.world);
         }
+
+        submit_pinball_flippers(frame, &camera, &view, &self.session.world);
+        submit_pinball_springs(frame, &camera, &view, &self.session.world);
     }
 }
 
@@ -250,6 +255,11 @@ struct RuntimeSession {
 struct RuntimeWorld {
     static_draw_commands: Vec<DrawCommand>,
     colliders: Vec<RuntimeCollider>,
+    pinball_colliders: Vec<PinballCollider>,
+    pinball_sdf_walls: Vec<PinballSdfWall>,
+    pinball_flippers: Vec<RuntimePinballFlipper>,
+    pinball_springs: Vec<RuntimePinballSpring>,
+    pinball_contacts: Vec<PinballContact>,
     templates: Vec<RuntimeEntity>,
     entities: Vec<RuntimeEntity>,
 }
@@ -261,6 +271,74 @@ struct RuntimeCollider {
     width: f32,
     height: f32,
     collision: MapTileCollision,
+}
+
+#[derive(Clone, Copy)]
+enum PinballCollider {
+    Segment {
+        start: [f32; 2],
+        end: [f32; 2],
+        radius: f32,
+        bounce: f32,
+    },
+    Circle {
+        center: [f32; 2],
+        radius: f32,
+        bounce: f32,
+    },
+}
+
+#[derive(Clone)]
+struct PinballSdfWall {
+    segments: Vec<([f32; 2], [f32; 2])>,
+    radius: f32,
+    smooth: f32,
+    bounce: f32,
+}
+
+#[derive(Clone)]
+struct RuntimePinballFlipper {
+    pivot: [f32; 2],
+    length: f32,
+    base_radius: f32,
+    tip_radius: f32,
+    rest_angle: f32,
+    active_angle: f32,
+    current_angle: f32,
+    previous_angle: f32,
+    angular_velocity: f32,
+    up_speed: f32,
+    down_speed: f32,
+    impulse: f32,
+    input: String,
+    color: [f32; 4],
+    bounce: f32,
+}
+
+#[derive(Clone)]
+struct RuntimePinballSpring {
+    start: [f32; 2],
+    end: [f32; 2],
+    coils: i32,
+    radius: f32,
+    wire_radius: f32,
+    cap_width: f32,
+    cap_radius: f32,
+    max_compression: f32,
+    pull_speed: f32,
+    release_speed: f32,
+    compression: f32,
+    previous_compression: f32,
+    velocity: [f32; 2],
+    input: String,
+    color: [f32; 4],
+    bounce: f32,
+}
+
+#[derive(Clone, Copy)]
+struct PinballContact {
+    point: [f32; 2],
+    normal: [f32; 2],
 }
 
 struct RuntimeMapSpawn {
@@ -504,6 +582,7 @@ impl RuntimeSession {
             self.ticks = self.ticks.saturating_add(1);
             self.execute_event("update", dt);
             self.world.apply_platformer_physics(dt);
+            self.world.apply_pinball_physics(dt, &self.query_state);
             self.dispatch_collision_events(dt);
             self.update_camera(dt);
             self.world
@@ -747,6 +826,9 @@ impl RuntimeSession {
 
     fn asset_path(&self, asset_name: &str) -> String {
         let asset_name = asset_name.trim_start_matches('/');
+        if asset_name.starts_with("generated://") {
+            return asset_name.to_string();
+        }
         if self.asset_base.is_empty() {
             asset_name.to_string()
         } else {
@@ -2571,6 +2653,11 @@ impl RuntimeWorld {
     fn from_compiled_scene(compiled: &CompiledProject, scene_name: &str, asset_base: &str) -> Self {
         let mut static_draw_commands = Vec::new();
         let mut colliders = Vec::new();
+        let mut pinball_colliders = Vec::new();
+        let mut pinball_sdf_walls = Vec::new();
+        let mut pinball_flippers = Vec::new();
+        let mut pinball_springs = Vec::new();
+        let pinball_contacts = Vec::new();
         let mut templates = Vec::new();
         let mut entities = Vec::new();
 
@@ -2581,7 +2668,14 @@ impl RuntimeWorld {
                 }
                 let scene = apply_scene_layout(scene);
                 static_draw_commands.extend(compile_static_map_commands(&scene.maps, asset_base));
+                static_draw_commands
+                    .extend(scene.shape_maps.iter().flat_map(compile_shape_map_commands));
+                register_generated_draw_command_textures(&static_draw_commands);
                 colliders.extend(compile_map_colliders(&scene.maps));
+                pinball_colliders.extend(compile_shape_map_pinball_colliders(&scene.shape_maps));
+                pinball_sdf_walls.extend(compile_shape_map_pinball_sdf_walls(&scene.shape_maps));
+                pinball_flippers.extend(compile_shape_map_pinball_flippers(&scene.shape_maps));
+                pinball_springs.extend(compile_shape_map_pinball_springs(&scene.shape_maps));
                 for high_score in &scene.high_scores {
                     if !high_score.visual.visible || high_score.visual.template {
                         continue;
@@ -2654,6 +2748,11 @@ impl RuntimeWorld {
         Self {
             static_draw_commands,
             colliders,
+            pinball_colliders,
+            pinball_sdf_walls,
+            pinball_flippers,
+            pinball_springs,
+            pinball_contacts,
             templates,
             entities,
         }
@@ -2776,6 +2875,43 @@ impl RuntimeWorld {
                 }
             }
         }
+    }
+
+    fn apply_pinball_physics(&mut self, dt: f32, query_state: &RuntimeQueryState) {
+        if self.pinball_colliders.is_empty()
+            && self.pinball_sdf_walls.is_empty()
+            && self.pinball_flippers.is_empty()
+            && self.pinball_springs.is_empty()
+        {
+            return;
+        }
+        self.pinball_contacts.clear();
+        let steps = (dt / (1.0 / 120.0)).ceil().clamp(1.0, 8.0) as usize;
+        let step_dt = dt / steps as f32;
+        let mut contacts = Vec::new();
+        for _ in 0..steps {
+            update_pinball_flippers(&mut self.pinball_flippers, query_state, step_dt);
+            update_pinball_springs(&mut self.pinball_springs, query_state, step_dt);
+            let colliders = &self.pinball_colliders;
+            let sdf_walls = &self.pinball_sdf_walls;
+            let flippers = &self.pinball_flippers;
+            let springs = &self.pinball_springs;
+            for entity in &mut self.entities {
+                if entity.physics.mode != rpu_core::PhysicsMode::Pinball {
+                    continue;
+                }
+                let settings = entity.physics.settings;
+                entity.physics.velocity[1] += settings.gravity * step_dt;
+                clamp_velocity(&mut entity.physics.velocity, settings.max_speed.max(1.0));
+                entity.pos[0] += entity.physics.velocity[0] * step_dt;
+                entity.pos[1] += entity.physics.velocity[1] * step_dt;
+                resolve_pinball_entity(entity, colliders, &mut contacts);
+                resolve_pinball_entity_with_sdf_walls(entity, sdf_walls, &mut contacts);
+                resolve_pinball_entity_with_springs(entity, springs, &mut contacts);
+                resolve_pinball_entity_with_flippers(entity, flippers, &mut contacts);
+            }
+        }
+        self.pinball_contacts = contacts;
     }
 
     fn remove_finished_animations(&mut self, elapsed_time: f32) {
@@ -3078,6 +3214,7 @@ fn runtime_sprite_entity(
     sprite: &SpriteNode,
     markers: &HashMap<String, [f32; 2]>,
 ) -> RuntimeEntity {
+    register_generated_sprite_textures(sprite);
     let pos = sprite
         .symbol
         .as_deref()
@@ -3131,6 +3268,88 @@ fn runtime_sprite_entity(
     }
 }
 
+fn register_generated_sprite_textures(sprite: &SpriteNode) {
+    for texture in &sprite.textures {
+        register_generated_shape_texture(texture, sprite.visual.size);
+    }
+}
+
+fn register_generated_draw_command_textures(commands: &[DrawCommand]) {
+    for command in commands {
+        let DrawCommand::Sprite(sprite) = command else {
+            continue;
+        };
+        for texture in &sprite.textures {
+            register_generated_shape_texture(texture, [sprite.width, sprite.height]);
+        }
+    }
+}
+
+fn register_generated_shape_texture(key: &str, size: [f32; 2]) {
+    if key.starts_with("generated://circle") {
+        register_generated_circle_texture(key, size);
+    } else if key.starts_with("generated://capsule") {
+        register_generated_capsule_texture(key, size);
+    }
+}
+
+fn register_generated_circle_texture(key: &str, size: [f32; 2]) {
+    let width = size[0].round().max(1.0) as u32;
+    let height = size[1].round().max(1.0) as u32;
+    let radius = width.min(height) as f32 * 0.5;
+    let center = [width as f32 * 0.5, height as f32 * 0.5];
+    let mut image = ImageBuffer::from_pixel(width, height, Rgba([0, 0, 0, 0]));
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 + 0.5 - center[0];
+            let dy = y as f32 + 0.5 - center[1];
+            let dist = (dx * dx + dy * dy).sqrt();
+            let edge = radius - dist;
+            if edge <= -1.0 {
+                continue;
+            }
+            let alpha = if edge >= 1.0 {
+                255
+            } else {
+                ((edge + 1.0) * 0.5 * 255.0).round().clamp(0.0, 255.0) as u8
+            };
+            image.put_pixel(x, y, Rgba([255, 255, 255, alpha]));
+        }
+    }
+    register_generated_rgba_texture(key, width, height, image.as_raw());
+}
+
+fn register_generated_capsule_texture(key: &str, size: [f32; 2]) {
+    let width = size[0].round().max(1.0) as u32;
+    let height = size[1].round().max(1.0) as u32;
+    let radius = width.min(height) as f32 * 0.5;
+    let center_y = height as f32 * 0.5;
+    let left = radius;
+    let right = width as f32 - radius;
+    let mut image = ImageBuffer::from_pixel(width, height, Rgba([0, 0, 0, 0]));
+    for y in 0..height {
+        for x in 0..width {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let cx = px.clamp(left, right);
+            let dx = px - cx;
+            let dy = py - center_y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let edge = radius - dist;
+            if edge <= -1.0 {
+                continue;
+            }
+            let alpha = if edge >= 1.0 {
+                255
+            } else {
+                ((edge + 1.0) * 0.5 * 255.0).round().clamp(0.0, 255.0) as u8
+            };
+            image.put_pixel(x, y, Rgba([255, 255, 255, alpha]));
+        }
+    }
+    register_generated_rgba_texture(key, width, height, image.as_raw());
+}
+
 fn runtime_sprite_spawn_entity(sprite: &SpriteNode, pos: [f32; 2], name: &str) -> RuntimeEntity {
     let mut entity = runtime_sprite_entity(sprite, &HashMap::new());
     entity.name = name.to_string();
@@ -3161,6 +3380,450 @@ fn entity_collider_rect(entity: &RuntimeEntity) -> (f32, f32, f32, f32) {
         entity_collider_width(entity),
         entity_collider_height(entity),
     )
+}
+
+fn entity_pinball_circle(entity: &RuntimeEntity) -> ([f32; 2], f32) {
+    let (x, y, width, height) = entity_collider_rect(entity);
+    ([x + width * 0.5, y + height * 0.5], width.min(height) * 0.5)
+}
+
+fn set_entity_pinball_center(entity: &mut RuntimeEntity, center: [f32; 2]) {
+    let (_, _, width, height) = entity_collider_rect(entity);
+    entity.pos[0] = center[0] - width * 0.5 - entity.collider_offset[0];
+    entity.pos[1] = center[1] - height * 0.5 - entity.collider_offset[1];
+}
+
+fn clamp_velocity(velocity: &mut [f32; 2], max_speed: f32) {
+    let speed_sq = velocity[0] * velocity[0] + velocity[1] * velocity[1];
+    if speed_sq <= max_speed * max_speed {
+        return;
+    }
+    let speed = speed_sq.sqrt();
+    if speed <= f32::EPSILON {
+        return;
+    }
+    let scale = max_speed / speed;
+    velocity[0] *= scale;
+    velocity[1] *= scale;
+}
+
+fn resolve_pinball_entity(
+    entity: &mut RuntimeEntity,
+    colliders: &[PinballCollider],
+    contacts: &mut Vec<PinballContact>,
+) {
+    for _ in 0..3 {
+        let mut resolved_any = false;
+        for collider in colliders {
+            if resolve_pinball_collision(entity, *collider, contacts) {
+                resolved_any = true;
+            }
+        }
+        if !resolved_any {
+            break;
+        }
+    }
+}
+
+fn resolve_pinball_entity_with_sdf_walls(
+    entity: &mut RuntimeEntity,
+    walls: &[PinballSdfWall],
+    contacts: &mut Vec<PinballContact>,
+) {
+    for _ in 0..3 {
+        let mut resolved_any = false;
+        for wall in walls {
+            if resolve_pinball_sdf_wall_collision(entity, wall, contacts) {
+                resolved_any = true;
+            }
+        }
+        if !resolved_any {
+            break;
+        }
+    }
+}
+
+fn resolve_pinball_entity_with_flippers(
+    entity: &mut RuntimeEntity,
+    flippers: &[RuntimePinballFlipper],
+    contacts: &mut Vec<PinballContact>,
+) {
+    for _ in 0..3 {
+        let mut resolved_any = false;
+        for flipper in flippers {
+            if resolve_pinball_flipper_collision(entity, flipper, contacts) {
+                resolved_any = true;
+            }
+        }
+        if !resolved_any {
+            break;
+        }
+    }
+}
+
+fn resolve_pinball_entity_with_springs(
+    entity: &mut RuntimeEntity,
+    springs: &[RuntimePinballSpring],
+    contacts: &mut Vec<PinballContact>,
+) {
+    for _ in 0..3 {
+        let mut resolved_any = false;
+        for spring in springs {
+            if resolve_pinball_spring_collision(entity, spring, contacts) {
+                resolved_any = true;
+            }
+        }
+        if !resolved_any {
+            break;
+        }
+    }
+}
+
+fn resolve_pinball_collision(
+    entity: &mut RuntimeEntity,
+    collider: PinballCollider,
+    contacts: &mut Vec<PinballContact>,
+) -> bool {
+    let (center, ball_radius) = entity_pinball_circle(entity);
+    match collider {
+        PinballCollider::Segment {
+            start,
+            end,
+            radius,
+            bounce,
+        } => {
+            let closest = closest_point_on_segment(center, start, end);
+            let normal = [center[0] - closest[0], center[1] - closest[1]];
+            resolve_pinball_overlap(
+                entity,
+                center,
+                normal,
+                ball_radius + radius,
+                bounce,
+                contacts,
+            )
+        }
+        PinballCollider::Circle {
+            center: obstacle_center,
+            radius,
+            bounce,
+        } => {
+            let normal = [
+                center[0] - obstacle_center[0],
+                center[1] - obstacle_center[1],
+            ];
+            resolve_pinball_overlap(
+                entity,
+                center,
+                normal,
+                ball_radius + radius,
+                bounce,
+                contacts,
+            )
+        }
+    }
+}
+
+fn resolve_pinball_flipper_collision(
+    entity: &mut RuntimeEntity,
+    flipper: &RuntimePinballFlipper,
+    contacts: &mut Vec<PinballContact>,
+) -> bool {
+    let (center, ball_radius) = entity_pinball_circle(entity);
+    let (start, end) = active_pinball_flipper_segment(flipper);
+    let distance = sample_pinball_tapered_segment_sdf(
+        center,
+        start,
+        end,
+        flipper.base_radius,
+        flipper.tip_radius,
+    );
+    if distance >= ball_radius {
+        return false;
+    }
+
+    let epsilon = 0.5;
+    let dx = sample_pinball_tapered_segment_sdf(
+        [center[0] + epsilon, center[1]],
+        start,
+        end,
+        flipper.base_radius,
+        flipper.tip_radius,
+    ) - sample_pinball_tapered_segment_sdf(
+        [center[0] - epsilon, center[1]],
+        start,
+        end,
+        flipper.base_radius,
+        flipper.tip_radius,
+    );
+    let dy = sample_pinball_tapered_segment_sdf(
+        [center[0], center[1] + epsilon],
+        start,
+        end,
+        flipper.base_radius,
+        flipper.tip_radius,
+    ) - sample_pinball_tapered_segment_sdf(
+        [center[0], center[1] - epsilon],
+        start,
+        end,
+        flipper.base_radius,
+        flipper.tip_radius,
+    );
+    let length = (dx * dx + dy * dy).sqrt();
+    let normal = if length <= f32::EPSILON {
+        [0.0, -1.0]
+    } else {
+        [dx / length, dy / length]
+    };
+    let penetration = ball_radius - distance;
+    set_entity_pinball_center(
+        entity,
+        [
+            center[0] + normal[0] * penetration,
+            center[1] + normal[1] * penetration,
+        ],
+    );
+    contacts.push(PinballContact {
+        point: [
+            center[0] - normal[0] * ball_radius,
+            center[1] - normal[1] * ball_radius,
+        ],
+        normal,
+    });
+    let dot = entity.physics.velocity[0] * normal[0] + entity.physics.velocity[1] * normal[1];
+    if dot < 0.0 {
+        entity.physics.velocity[0] -= (1.0 + flipper.bounce) * dot * normal[0];
+        entity.physics.velocity[1] -= (1.0 + flipper.bounce) * dot * normal[1];
+    }
+    if flipper.angular_velocity.abs() <= f32::EPSILON {
+        return true;
+    }
+
+    let (closest, t) = closest_point_on_segment_with_t(center, start, end);
+    let arm = [closest[0] - flipper.pivot[0], closest[1] - flipper.pivot[1]];
+    let surface_velocity = [
+        -arm[1] * flipper.angular_velocity,
+        arm[0] * flipper.angular_velocity,
+    ];
+    let contact_impulse = flipper.impulse * (0.45 + t * 0.75);
+    entity.physics.velocity[0] += surface_velocity[0] * contact_impulse;
+    entity.physics.velocity[1] += surface_velocity[1] * contact_impulse;
+    true
+}
+
+fn sample_pinball_tapered_segment_sdf(
+    point: [f32; 2],
+    start: [f32; 2],
+    end: [f32; 2],
+    base_radius: f32,
+    tip_radius: f32,
+) -> f32 {
+    let (closest, t) = closest_point_on_segment_with_t(point, start, end);
+    let radius = base_radius + (tip_radius - base_radius) * t;
+    let dx = point[0] - closest[0];
+    let dy = point[1] - closest[1];
+    (dx * dx + dy * dy).sqrt() - radius
+}
+
+fn resolve_pinball_spring_collision(
+    entity: &mut RuntimeEntity,
+    spring: &RuntimePinballSpring,
+    contacts: &mut Vec<PinballContact>,
+) -> bool {
+    let (cap_start, cap_end) = active_pinball_spring_cap(spring);
+    let (center, ball_radius) = entity_pinball_circle(entity);
+    let (closest, t) = closest_point_on_segment_with_t(center, cap_start, cap_end);
+    let normal = [center[0] - closest[0], center[1] - closest[1]];
+
+    // During compression the plunger cap moves away from the playfield. A ball resting
+    // on the cap should be carried by that motion, not treated as a bouncing impact.
+    if spring.compression > spring.previous_compression && (0.0..=1.0).contains(&t) {
+        let axis = pinball_spring_axis(spring);
+        let signed_axis_distance = normal[0] * axis[0] + normal[1] * axis[1];
+        let target_distance = ball_radius + spring.cap_radius;
+        if signed_axis_distance <= 0.0
+            && signed_axis_distance >= -(target_distance + 20.0)
+            && spring.velocity[0] * axis[0] + spring.velocity[1] * axis[1] > 0.0
+        {
+            set_entity_pinball_center(
+                entity,
+                [
+                    closest[0] - axis[0] * target_distance,
+                    closest[1] - axis[1] * target_distance,
+                ],
+            );
+            entity.physics.velocity[0] = spring.velocity[0];
+            entity.physics.velocity[1] = spring.velocity[1];
+            contacts.push(PinballContact {
+                point: closest,
+                normal: [-axis[0], -axis[1]],
+            });
+            return true;
+        }
+    }
+
+    let did_resolve = resolve_pinball_overlap(
+        entity,
+        center,
+        normal,
+        ball_radius + spring.cap_radius,
+        spring.bounce,
+        contacts,
+    );
+    if did_resolve {
+        entity.physics.velocity[0] += spring.velocity[0];
+        entity.physics.velocity[1] += spring.velocity[1];
+        return true;
+    }
+
+    // If the ball is just outside overlap while still resting on the moving cap, carry it.
+    if spring.compression <= spring.previous_compression || !(0.0..=1.0).contains(&t) {
+        return false;
+    }
+    let axis = pinball_spring_axis(spring);
+    let signed_axis_distance = normal[0] * axis[0] + normal[1] * axis[1];
+    let target_distance = ball_radius + spring.cap_radius;
+    if signed_axis_distance >= -target_distance || signed_axis_distance < -(target_distance + 18.0)
+    {
+        return false;
+    }
+    set_entity_pinball_center(
+        entity,
+        [
+            closest[0] - axis[0] * target_distance,
+            closest[1] - axis[1] * target_distance,
+        ],
+    );
+    entity.physics.velocity[0] = spring.velocity[0];
+    entity.physics.velocity[1] = spring.velocity[1];
+    contacts.push(PinballContact {
+        point: closest,
+        normal: [-axis[0], -axis[1]],
+    });
+    true
+}
+
+fn resolve_pinball_overlap(
+    entity: &mut RuntimeEntity,
+    center: [f32; 2],
+    normal: [f32; 2],
+    target_distance: f32,
+    bounce: f32,
+    contacts: &mut Vec<PinballContact>,
+) -> bool {
+    let dist_sq = normal[0] * normal[0] + normal[1] * normal[1];
+    if dist_sq >= target_distance * target_distance {
+        return false;
+    }
+    let dist = dist_sq.sqrt();
+    let normal = if dist <= f32::EPSILON {
+        [0.0, -1.0]
+    } else {
+        [normal[0] / dist, normal[1] / dist]
+    };
+    let push = target_distance - dist;
+    set_entity_pinball_center(
+        entity,
+        [center[0] + normal[0] * push, center[1] + normal[1] * push],
+    );
+    contacts.push(PinballContact {
+        point: [
+            center[0] - normal[0] * (target_distance - push),
+            center[1] - normal[1] * (target_distance - push),
+        ],
+        normal,
+    });
+    let dot = entity.physics.velocity[0] * normal[0] + entity.physics.velocity[1] * normal[1];
+    if dot < 0.0 {
+        entity.physics.velocity[0] -= (1.0 + bounce) * dot * normal[0];
+        entity.physics.velocity[1] -= (1.0 + bounce) * dot * normal[1];
+        entity.physics.velocity[0] *= 0.998;
+        entity.physics.velocity[1] *= 0.998;
+    }
+    true
+}
+
+fn resolve_pinball_sdf_wall_collision(
+    entity: &mut RuntimeEntity,
+    wall: &PinballSdfWall,
+    contacts: &mut Vec<PinballContact>,
+) -> bool {
+    let (center, ball_radius) = entity_pinball_circle(entity);
+    let distance = sample_pinball_sdf_wall(wall, center);
+    if distance >= ball_radius {
+        return false;
+    }
+    let epsilon = 0.5;
+    let dx = sample_pinball_sdf_wall(wall, [center[0] + epsilon, center[1]])
+        - sample_pinball_sdf_wall(wall, [center[0] - epsilon, center[1]]);
+    let dy = sample_pinball_sdf_wall(wall, [center[0], center[1] + epsilon])
+        - sample_pinball_sdf_wall(wall, [center[0], center[1] - epsilon]);
+    let len_sq = dx * dx + dy * dy;
+    let normal = if len_sq <= f32::EPSILON {
+        [0.0, -1.0]
+    } else {
+        let len = len_sq.sqrt();
+        [dx / len, dy / len]
+    };
+    let push = ball_radius - distance;
+    set_entity_pinball_center(
+        entity,
+        [center[0] + normal[0] * push, center[1] + normal[1] * push],
+    );
+    contacts.push(PinballContact {
+        point: [
+            center[0] - normal[0] * ball_radius,
+            center[1] - normal[1] * ball_radius,
+        ],
+        normal,
+    });
+    let dot = entity.physics.velocity[0] * normal[0] + entity.physics.velocity[1] * normal[1];
+    if dot < 0.0 {
+        entity.physics.velocity[0] -= (1.0 + wall.bounce) * dot * normal[0];
+        entity.physics.velocity[1] -= (1.0 + wall.bounce) * dot * normal[1];
+        entity.physics.velocity[0] *= 0.998;
+        entity.physics.velocity[1] *= 0.998;
+    }
+    true
+}
+
+fn sample_pinball_sdf_wall(wall: &PinballSdfWall, point: [f32; 2]) -> f32 {
+    let mut distance = f32::INFINITY;
+    for (start, end) in &wall.segments {
+        let closest = closest_point_on_segment(point, *start, *end);
+        let dx = point[0] - closest[0];
+        let dy = point[1] - closest[1];
+        let capsule = (dx * dx + dy * dy).sqrt() - wall.radius;
+        distance = smooth_min_distance(distance, capsule, wall.smooth);
+    }
+    distance
+}
+
+fn smooth_min_distance(a: f32, b: f32, smooth: f32) -> f32 {
+    if !a.is_finite() || smooth <= f32::EPSILON {
+        return a.min(b);
+    }
+    let h = (0.5 + 0.5 * (b - a) / smooth).clamp(0.0, 1.0);
+    b * (1.0 - h) + a * h - smooth * h * (1.0 - h)
+}
+
+fn closest_point_on_segment(point: [f32; 2], start: [f32; 2], end: [f32; 2]) -> [f32; 2] {
+    closest_point_on_segment_with_t(point, start, end).0
+}
+
+fn closest_point_on_segment_with_t(
+    point: [f32; 2],
+    start: [f32; 2],
+    end: [f32; 2],
+) -> ([f32; 2], f32) {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let len_sq = dx * dx + dy * dy;
+    if len_sq <= f32::EPSILON {
+        return (start, 0.0);
+    }
+    let t = (((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / len_sq).clamp(0.0, 1.0);
+    ([start[0] + dx * t, start[1] + dy * t], t)
 }
 
 struct VerticalPlatformerCollision {
@@ -6101,6 +6764,284 @@ fn compile_map_colliders(maps: &[AsciiMapNode]) -> Vec<RuntimeCollider> {
     colliders
 }
 
+fn compile_shape_map_pinball_colliders(maps: &[rpu_core::ShapeMapNode]) -> Vec<PinballCollider> {
+    let mut colliders = Vec::new();
+    for map in maps {
+        let points = compile_shape_map_points(map);
+        for wall in &map.walls {
+            let path = compile_shape_wall_path(wall, &points);
+            for segment in path.windows(2) {
+                colliders.push(PinballCollider::Segment {
+                    start: segment[0],
+                    end: segment[1],
+                    radius: wall.thickness.max(1.0) * 0.5,
+                    bounce: wall.bounce.max(0.0),
+                });
+            }
+        }
+        for pipe in &map.pipes {
+            for (start, end) in compile_shape_pipe_segments(pipe, &points) {
+                colliders.push(PinballCollider::Segment {
+                    start,
+                    end,
+                    radius: pipe.thickness.max(1.0) * 0.5,
+                    bounce: pipe.bounce.max(0.0),
+                });
+            }
+        }
+        for bumper in &map.bumpers {
+            let Some(center) = points.get(&bumper.point) else {
+                continue;
+            };
+            colliders.push(PinballCollider::Circle {
+                center: *center,
+                radius: bumper.radius.max(1.0),
+                bounce: bumper.bounce.max(0.0),
+            });
+        }
+    }
+    colliders
+}
+
+fn compile_shape_map_pinball_sdf_walls(maps: &[rpu_core::ShapeMapNode]) -> Vec<PinballSdfWall> {
+    let mut walls = Vec::new();
+    for map in maps {
+        let points = compile_shape_map_points(map);
+        for sdf_wall in &map.sdf_walls {
+            let segments = compile_shape_sdf_wall_segments(sdf_wall, &points);
+            if segments.is_empty() {
+                continue;
+            }
+            walls.push(PinballSdfWall {
+                segments,
+                radius: sdf_wall.radius.max(1.0),
+                smooth: sdf_wall.smooth.max(0.0),
+                bounce: sdf_wall.bounce.max(0.0),
+            });
+        }
+        for polyline in &map.polylines {
+            let segments = compile_shape_polyline_segments(polyline, &points);
+            if segments.is_empty() {
+                continue;
+            }
+            walls.push(PinballSdfWall {
+                segments,
+                radius: polyline.radius.max(1.0),
+                smooth: polyline.smooth.max(0.0),
+                bounce: polyline.bounce.max(0.0),
+            });
+        }
+    }
+    walls
+}
+
+fn compile_shape_map_pinball_flippers(
+    maps: &[rpu_core::ShapeMapNode],
+) -> Vec<RuntimePinballFlipper> {
+    let mut flippers = Vec::new();
+    register_generated_circle_texture("generated://circle/pinball_cap", [32.0, 32.0]);
+    for map in maps {
+        let points = compile_shape_map_points(map);
+        for flipper in &map.flippers {
+            let Some(pivot) = points.get(&flipper.pivot) else {
+                continue;
+            };
+            flippers.push(RuntimePinballFlipper {
+                pivot: *pivot,
+                length: flipper.length.max(1.0),
+                base_radius: if flipper.base_radius > 0.0 {
+                    flipper.base_radius
+                } else {
+                    flipper.thickness.max(1.0) * 0.5
+                },
+                tip_radius: if flipper.tip_radius > 0.0 {
+                    flipper.tip_radius
+                } else {
+                    flipper.thickness.max(1.0) * 0.5
+                },
+                rest_angle: flipper.rest_angle,
+                active_angle: flipper.active_angle,
+                current_angle: flipper.rest_angle,
+                previous_angle: flipper.rest_angle,
+                angular_velocity: 0.0,
+                up_speed: flipper.up_speed.max(0.0),
+                down_speed: flipper.down_speed.max(0.0),
+                impulse: flipper.impulse.max(0.0),
+                input: flipper.input.clone(),
+                color: flipper.color,
+                bounce: flipper.bounce.max(0.0),
+            });
+        }
+    }
+    flippers
+}
+
+fn compile_shape_map_pinball_springs(maps: &[rpu_core::ShapeMapNode]) -> Vec<RuntimePinballSpring> {
+    let mut springs = Vec::new();
+    for map in maps {
+        let points = compile_shape_map_points(map);
+        for spring in &map.springs {
+            if spring.points.len() < 2 {
+                continue;
+            }
+            let Some(start) = points.get(&spring.points[0]) else {
+                continue;
+            };
+            let Some(end) = points.get(&spring.points[1]) else {
+                continue;
+            };
+            springs.push(RuntimePinballSpring {
+                start: *start,
+                end: *end,
+                coils: spring.coils.max(1),
+                radius: spring.radius.max(0.0),
+                wire_radius: spring.wire_radius.max(0.5),
+                cap_width: spring.cap_width.max(1.0),
+                cap_radius: spring.cap_radius.max(0.5),
+                max_compression: spring.max_compression.max(0.0),
+                pull_speed: spring.pull_speed.max(0.0),
+                release_speed: spring.release_speed.max(0.0),
+                compression: 0.0,
+                previous_compression: 0.0,
+                velocity: [0.0, 0.0],
+                input: spring.input.clone(),
+                color: spring.color,
+                bounce: spring.bounce.max(0.0),
+            });
+        }
+    }
+    springs
+}
+
+fn update_pinball_flippers(
+    flippers: &mut [RuntimePinballFlipper],
+    query_state: &RuntimeQueryState,
+    dt: f32,
+) {
+    if dt <= f32::EPSILON {
+        return;
+    }
+    for flipper in flippers {
+        flipper.previous_angle = flipper.current_angle;
+        let active = pinball_flipper_input_active(&flipper.input, query_state);
+        let target = if active {
+            flipper.active_angle
+        } else {
+            flipper.rest_angle
+        };
+        let speed = if active {
+            flipper.up_speed
+        } else {
+            flipper.down_speed
+        };
+        flipper.current_angle = move_toward_angle(flipper.current_angle, target, speed * dt);
+        flipper.angular_velocity = (flipper.current_angle - flipper.previous_angle) / dt;
+    }
+}
+
+fn update_pinball_springs(
+    springs: &mut [RuntimePinballSpring],
+    query_state: &RuntimeQueryState,
+    dt: f32,
+) {
+    if dt <= f32::EPSILON {
+        return;
+    }
+    for spring in springs {
+        spring.previous_compression = spring.compression;
+        let active = pinball_input_active(&spring.input, query_state);
+        let target = if active { spring.max_compression } else { 0.0 };
+        let speed = if active {
+            spring.pull_speed
+        } else {
+            spring.release_speed
+        };
+        spring.compression = move_toward(spring.compression, target, speed * dt);
+        let axis = pinball_spring_axis(spring);
+        let compression_velocity = (spring.compression - spring.previous_compression) / dt;
+        spring.velocity = [
+            axis[0] * compression_velocity,
+            axis[1] * compression_velocity,
+        ];
+    }
+}
+
+fn move_toward(current: f32, target: f32, max_delta: f32) -> f32 {
+    if max_delta <= 0.0 || (target - current).abs() <= max_delta {
+        target
+    } else {
+        current + (target - current).signum() * max_delta
+    }
+}
+
+fn move_toward_angle(current: f32, target: f32, max_delta: f32) -> f32 {
+    if max_delta <= 0.0 {
+        return target;
+    }
+    let delta = target - current;
+    if delta.abs() <= max_delta {
+        target
+    } else {
+        current + delta.signum() * max_delta
+    }
+}
+
+fn active_pinball_flipper_segment(flipper: &RuntimePinballFlipper) -> ([f32; 2], [f32; 2]) {
+    let angle = flipper.current_angle;
+    (
+        flipper.pivot,
+        [
+            flipper.pivot[0] + angle.cos() * flipper.length,
+            flipper.pivot[1] + angle.sin() * flipper.length,
+        ],
+    )
+}
+
+fn pinball_flipper_input_active(input: &str, query_state: &RuntimeQueryState) -> bool {
+    pinball_input_active(input, query_state)
+}
+
+fn pinball_input_active(input: &str, query_state: &RuntimeQueryState) -> bool {
+    match input {
+        "left" => query_state.input_left,
+        "right" => query_state.input_right,
+        "up" => query_state.input_up,
+        "down" => query_state.input_down,
+        "action" | "space" => query_state.input_action,
+        key => query_state.pressed_keys.get(key).copied().unwrap_or(false),
+    }
+}
+
+fn pinball_spring_axis(spring: &RuntimePinballSpring) -> [f32; 2] {
+    let dx = spring.start[0] - spring.end[0];
+    let dy = spring.start[1] - spring.end[1];
+    let length = (dx * dx + dy * dy).sqrt();
+    if length <= f32::EPSILON {
+        [0.0, 1.0]
+    } else {
+        [dx / length, dy / length]
+    }
+}
+
+fn active_pinball_spring_top(spring: &RuntimePinballSpring) -> [f32; 2] {
+    let axis = pinball_spring_axis(spring);
+    [
+        spring.end[0] + axis[0] * spring.compression,
+        spring.end[1] + axis[1] * spring.compression,
+    ]
+}
+
+fn active_pinball_spring_cap(spring: &RuntimePinballSpring) -> ([f32; 2], [f32; 2]) {
+    let top = active_pinball_spring_top(spring);
+    let axis = pinball_spring_axis(spring);
+    let normal = [-axis[1], axis[0]];
+    let half = spring.cap_width * 0.5;
+    (
+        [top[0] - normal[0] * half, top[1] - normal[1] * half],
+        [top[0] + normal[0] * half, top[1] + normal[1] * half],
+    )
+}
+
 fn map_symbol_collision(
     ch: char,
     legend: &HashMap<char, &MapLegendMeaning>,
@@ -6507,6 +7448,103 @@ fn submit_physics_debug_overlay(
         order += 1;
     }
 
+    for collider in &world.pinball_colliders {
+        match *collider {
+            PinballCollider::Segment {
+                start, end, radius, ..
+            } => {
+                push_world_segment(
+                    frame,
+                    camera,
+                    view,
+                    DEBUG_LAYER,
+                    order,
+                    start,
+                    end,
+                    radius * 2.0,
+                    [0.45, 0.95, 1.0, 0.70],
+                );
+            }
+            PinballCollider::Circle { center, radius, .. } => {
+                push_world_outline(
+                    frame,
+                    camera,
+                    view,
+                    DEBUG_LAYER,
+                    order,
+                    center[0] - radius,
+                    center[1] - radius,
+                    radius * 2.0,
+                    radius * 2.0,
+                    [1.0, 0.75, 0.15, 0.75],
+                );
+            }
+        }
+        order += 1;
+    }
+
+    for wall in &world.pinball_sdf_walls {
+        for (start, end) in &wall.segments {
+            push_world_segment(
+                frame,
+                camera,
+                view,
+                DEBUG_LAYER,
+                order,
+                *start,
+                *end,
+                wall.radius * 2.0,
+                [1.0, 0.45, 0.95, 0.60],
+            );
+            order += 1;
+        }
+    }
+
+    for spring in &world.pinball_springs {
+        let (start, end) = active_pinball_spring_cap(spring);
+        push_world_segment(
+            frame,
+            camera,
+            view,
+            DEBUG_LAYER,
+            order,
+            start,
+            end,
+            spring.cap_radius * 2.0,
+            [0.75, 1.0, 0.35, 0.70],
+        );
+        order += 1;
+    }
+
+    for contact in &world.pinball_contacts {
+        push_world_segment(
+            frame,
+            camera,
+            view,
+            DEBUG_LAYER,
+            order,
+            contact.point,
+            [
+                contact.point[0] + contact.normal[0] * 14.0,
+                contact.point[1] + contact.normal[1] * 14.0,
+            ],
+            1.5,
+            [0.2, 1.0, 0.15, 0.95],
+        );
+        order += 1;
+        push_world_circle(
+            frame,
+            camera,
+            view,
+            DEBUG_LAYER,
+            order,
+            contact.point,
+            2.0,
+            [0.2, 1.0, 0.15, 0.95],
+        );
+        order += 1;
+    }
+
     for entity in &world.entities {
         if !entity.visible {
             continue;
@@ -6525,6 +7563,12 @@ fn submit_physics_debug_overlay(
         );
         order += 1;
         let (x, y, width, height) = entity_collider_rect(entity);
+        let collider_color = match entity.group.as_deref() {
+            Some("drain") => [1.0, 0.15, 0.10, 0.92],
+            Some("rollover") => [0.25, 0.75, 1.0, 0.92],
+            Some("bumper") => [1.0, 0.85, 0.15, 0.92],
+            _ => COLLIDER,
+        };
         push_world_outline(
             frame,
             camera,
@@ -6535,10 +7579,197 @@ fn submit_physics_debug_overlay(
             y,
             width,
             height,
-            COLLIDER,
+            collider_color,
         );
         order += 1;
     }
+}
+
+fn submit_pinball_flippers(
+    frame: &mut SceneFrame,
+    camera: &SceneCamera,
+    view: &RenderView,
+    world: &RuntimeWorld,
+) {
+    const FLIPPER_LAYER: i32 = 8;
+    for (index, flipper) in world.pinball_flippers.iter().enumerate() {
+        let mut shadow = flipper.clone();
+        shadow.base_radius += 1.4;
+        shadow.tip_radius += 1.2;
+        shadow.color = [0.05, 0.07, 0.11, 0.75];
+        push_world_tapered_segment(
+            frame,
+            camera,
+            view,
+            FLIPPER_LAYER - 1,
+            index as i32,
+            &shadow,
+        );
+        push_world_tapered_segment(frame, camera, view, FLIPPER_LAYER, index as i32, flipper);
+        let mut highlight = flipper.clone();
+        highlight.base_radius = (flipper.base_radius * 0.28).max(1.0);
+        highlight.tip_radius = (flipper.tip_radius * 0.28).max(0.8);
+        highlight.color = [1.0, 1.0, 1.0, 0.34];
+        push_world_tapered_segment(
+            frame,
+            camera,
+            view,
+            FLIPPER_LAYER + 1,
+            index as i32,
+            &highlight,
+        );
+    }
+}
+
+fn push_world_tapered_segment(
+    frame: &mut SceneFrame,
+    camera: &SceneCamera,
+    view: &RenderView,
+    layer: i32,
+    order: i32,
+    flipper: &RuntimePinballFlipper,
+) {
+    let (start, end) = active_pinball_flipper_segment(flipper);
+    let slices = 8;
+    for index in 0..slices {
+        let t0 = index as f32 / slices as f32;
+        let t1 = (index + 1) as f32 / slices as f32;
+        let p0 = [
+            start[0] + (end[0] - start[0]) * t0,
+            start[1] + (end[1] - start[1]) * t0,
+        ];
+        let p1 = [
+            start[0] + (end[0] - start[0]) * t1,
+            start[1] + (end[1] - start[1]) * t1,
+        ];
+        let mid_t = (t0 + t1) * 0.5;
+        let radius = flipper.base_radius + (flipper.tip_radius - flipper.base_radius) * mid_t;
+        push_world_segment(
+            frame,
+            camera,
+            view,
+            layer,
+            order * 100 + index,
+            p0,
+            p1,
+            radius * 2.0,
+            flipper.color,
+        );
+    }
+    push_world_circle(
+        frame,
+        camera,
+        view,
+        layer,
+        order * 100 + slices,
+        start,
+        flipper.base_radius,
+        flipper.color,
+    );
+    push_world_circle(
+        frame,
+        camera,
+        view,
+        layer,
+        order * 100 + slices + 1,
+        end,
+        flipper.tip_radius,
+        flipper.color,
+    );
+}
+
+fn push_world_circle(
+    frame: &mut SceneFrame,
+    camera: &SceneCamera,
+    view: &RenderView,
+    layer: i32,
+    order: i32,
+    center: [f32; 2],
+    radius: f32,
+    color: [f32; 4],
+) {
+    let diameter = radius.max(0.5) * 2.0;
+    let (sx, sy) = screen_point_for_anchor(Anchor::World, camera, view, center[0], center[1]);
+    let size = diameter * camera.zoom.max(0.01) * view.scale;
+    frame.push_sprite(
+        layer,
+        order,
+        sx - size * 0.5,
+        sy - size * 0.5,
+        size,
+        size,
+        0.0,
+        color,
+        false,
+        false,
+        Some("generated://circle/pinball_cap"),
+    );
+}
+
+fn submit_pinball_springs(
+    frame: &mut SceneFrame,
+    camera: &SceneCamera,
+    view: &RenderView,
+    world: &RuntimeWorld,
+) {
+    const SPRING_LAYER: i32 = 7;
+    for (spring_index, spring) in world.pinball_springs.iter().enumerate() {
+        let points = active_pinball_spring_points(spring);
+        for (segment_index, segment) in points.windows(2).enumerate() {
+            push_world_segment(
+                frame,
+                camera,
+                view,
+                SPRING_LAYER,
+                (spring_index as i32) * 100 + segment_index as i32,
+                segment[0],
+                segment[1],
+                spring.wire_radius * 2.0,
+                spring.color,
+            );
+        }
+        let (start, end) = active_pinball_spring_cap(spring);
+        push_world_segment(
+            frame,
+            camera,
+            view,
+            SPRING_LAYER,
+            (spring_index as i32) * 100 + 99,
+            start,
+            end,
+            spring.cap_radius * 2.0,
+            spring.color,
+        );
+    }
+}
+
+fn active_pinball_spring_points(spring: &RuntimePinballSpring) -> Vec<[f32; 2]> {
+    let top = active_pinball_spring_top(spring);
+    let bottom = spring.start;
+    let axis = {
+        let dx = top[0] - bottom[0];
+        let dy = top[1] - bottom[1];
+        let length = (dx * dx + dy * dy).sqrt();
+        if length <= f32::EPSILON {
+            [0.0, -1.0]
+        } else {
+            [dx / length, dy / length]
+        }
+    };
+    let normal = [-axis[1], axis[0]];
+    let steps = (spring.coils.max(1) * 8).max(2) as usize;
+    let mut points = Vec::with_capacity(steps + 1);
+    for index in 0..=steps {
+        let t = index as f32 / steps as f32;
+        let phase = t * std::f32::consts::TAU * spring.coils.max(1) as f32;
+        let center = [
+            bottom[0] + (top[0] - bottom[0]) * t,
+            bottom[1] + (top[1] - bottom[1]) * t,
+        ];
+        let wave = phase.sin() * spring.radius;
+        points.push([center[0] + normal[0] * wave, center[1] + normal[1] * wave]);
+    }
+    points
 }
 
 fn push_world_line(
@@ -6555,6 +7786,41 @@ fn push_world_line(
 ) {
     let (sx, sy, sw, _) = screen_rect_for_anchor(Anchor::World, camera, view, x, y, width, 1.0);
     frame.push_rect(layer, order, sx, sy, sw, screen_thickness.max(1.0), color);
+}
+
+fn push_world_segment(
+    frame: &mut SceneFrame,
+    camera: &SceneCamera,
+    view: &RenderView,
+    layer: i32,
+    order: i32,
+    start: [f32; 2],
+    end: [f32; 2],
+    thickness: f32,
+    color: [f32; 4],
+) {
+    let (sx0, sy0) = screen_point_for_anchor(Anchor::World, camera, view, start[0], start[1]);
+    let (sx1, sy1) = screen_point_for_anchor(Anchor::World, camera, view, end[0], end[1]);
+    let dx = sx1 - sx0;
+    let dy = sy1 - sy0;
+    let length = (dx * dx + dy * dy).sqrt();
+    if length <= 0.1 {
+        return;
+    }
+    let screen_thickness = thickness * camera.zoom.max(0.01) * view.scale;
+    frame.push_sprite(
+        layer,
+        order,
+        (sx0 + sx1) * 0.5 - length * 0.5,
+        (sy0 + sy1) * 0.5 - screen_thickness * 0.5,
+        length,
+        screen_thickness.max(1.0),
+        dy.atan2(dx),
+        color,
+        false,
+        false,
+        None,
+    );
 }
 
 fn push_world_outline(

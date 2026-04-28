@@ -1,0 +1,647 @@
+scene Main {
+    meta {
+        title = "Pinball Prototype"
+    }
+
+    camera MainCamera {
+        pos = (220, 430)
+        zoom = 1.35
+        follow = Ball
+        follow_offset = (0, -10)
+        follow_smoothing = 11.0
+        dead_zone = (34, 28)
+        bounds_min = (220, 200)
+        bounds_max = (220, 490)
+        background = #07121d
+    }
+
+    rect BackglassGlow {
+        anchor = world
+        layer = -20
+        z = 0
+        pos = (20, 28)
+        size = (400, 590)
+        color = #07111f
+    }
+
+    rect CabinetShadow {
+        anchor = world
+        layer = -19
+        z = 0
+        pos = (30, 38)
+        size = (380, 570)
+        color = #0a1728
+    }
+
+    rect CabinetInner {
+        anchor = world
+        layer = -18
+        z = 0
+        pos = (42, 50)
+        size = (356, 544)
+        color = #102945
+    }
+
+    rect Playfield {
+        anchor = world
+        layer = -17
+        z = 1
+        pos = (50, 58)
+        size = (340, 524)
+        color = #173252
+    }
+
+    rect PlayfieldInset {
+        anchor = world
+        layer = -16
+        z = 1
+        pos = (62, 76)
+        size = (316, 486)
+        color = #1b3a5f
+    }
+
+    rect TopShade {
+        anchor = world
+        layer = -15
+        z = 1
+        pos = (62, 76)
+        size = (316, 58)
+        color = (0.08, 0.16, 0.27, 0.62)
+    }
+
+    rect LeftDrain {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "drain"
+        pos = (78, 578)
+        size = (72, 82)
+        color = #173252
+    }
+
+    rect CenterDrain {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "drain"
+        pos = (150, 620)
+        size = (132, 54)
+        color = #173252
+    }
+
+    rect RightDrain {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "drain"
+        pos = (316, 578)
+        size = (32, 82)
+        color = #173252
+    }
+
+    rect LeftRollover {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "rollover"
+        pos = (218, 148)
+        size = (22, 22)
+        color = #173252
+    }
+
+    rect CenterRollover {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "rollover"
+        pos = (286, 148)
+        size = (22, 22)
+        color = #173252
+    }
+
+    rect RightRollover {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "rollover"
+        pos = (354, 148)
+        size = (22, 22)
+        color = #173252
+    }
+
+    sprite Ball {
+        anchor = world
+        layer = 10
+        z = 20
+        pos = (154, 72)
+        size = (14, 14)
+        collider_size = (14, 14)
+        texture = "generated://circle/ball"
+        color = #f6f3dc
+        physics = pinball
+        gravity = 180
+        max_speed = 420
+        script = "ball.rpu"
+    }
+
+    rect LeftBumperTrigger {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "bumper"
+        pos = (124, 287)
+        size = (32, 32)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    rect TopBumperTrigger {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "bumper"
+        pos = (160, 233)
+        size = (32, 32)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    rect RightBumperTrigger {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "bumper"
+        pos = (220, 287)
+        size = (32, 32)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    sprite LeftBumperFlash {
+        anchor = world
+        layer = 10
+        z = 10
+        pos = (124, 287)
+        size = (32, 32)
+        texture = "generated://circle/bumper_flash_left"
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    sprite TopBumperFlash {
+        anchor = world
+        layer = 10
+        z = 10
+        pos = (160, 233)
+        size = (32, 32)
+        texture = "generated://circle/bumper_flash_top"
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    sprite RightBumperFlash {
+        anchor = world
+        layer = 10
+        z = 10
+        pos = (220, 287)
+        size = (32, 32)
+        texture = "generated://circle/bumper_flash_right"
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    rect TopTargetA {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "target"
+        pos = (252, 118)
+        size = (20, 38)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    rect TopTargetB {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "target"
+        pos = (278, 112)
+        size = (20, 38)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    rect TopTargetC {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "target"
+        pos = (304, 118)
+        size = (20, 38)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    sprite TopLightA {
+        anchor = world
+        layer = 8
+        z = 1
+        pos = (249, 115)
+        size = (28, 44)
+        texture = "generated://capsule/top_light_a"
+        color = #16243b
+    }
+
+    sprite TopLightB {
+        anchor = world
+        layer = 8
+        z = 2
+        pos = (275, 109)
+        size = (28, 44)
+        texture = "generated://capsule/top_light_b"
+        color = #16243b
+    }
+
+    sprite TopLightC {
+        anchor = world
+        layer = 8
+        z = 3
+        pos = (301, 115)
+        size = (28, 44)
+        texture = "generated://capsule/top_light_c"
+        color = #16243b
+    }
+
+    rect LowerTargetA {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "target"
+        pos = (86, 430)
+        size = (22, 34)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    rect LowerTargetB {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "target"
+        pos = (112, 456)
+        size = (22, 34)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    rect LowerTargetC {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "target"
+        pos = (138, 482)
+        size = (22, 34)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    sprite LowerLightA {
+        anchor = world
+        layer = 8
+        z = 4
+        pos = (83, 427)
+        size = (30, 42)
+        texture = "generated://capsule/lower_light_a"
+        color = #16243b
+    }
+
+    sprite LowerLightB {
+        anchor = world
+        layer = 8
+        z = 5
+        pos = (109, 453)
+        size = (30, 42)
+        texture = "generated://capsule/lower_light_b"
+        color = #16243b
+    }
+
+    sprite LowerLightC {
+        anchor = world
+        layer = 8
+        z = 6
+        pos = (135, 479)
+        size = (30, 42)
+        texture = "generated://capsule/lower_light_c"
+        color = #16243b
+    }
+
+    rect EnemyTrigger {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "enemy"
+        pos = (190, 132)
+        size = (36, 36)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    sprite EnemyAura {
+        anchor = world
+        layer = 7
+        z = 1
+        pos = (178, 120)
+        size = (60, 60)
+        texture = "generated://circle/enemy_aura"
+        color = (1.0, 0.18, 0.08, 0.24)
+    }
+
+    sprite EnemyCore {
+        anchor = world
+        layer = 9
+        z = 1
+        pos = (190, 132)
+        size = (36, 36)
+        texture = "generated://circle/enemy_core"
+        color = #ff4f4f
+    }
+
+    sprite EnemyEye {
+        anchor = world
+        layer = 10
+        z = 2
+        pos = (202, 144)
+        size = (12, 8)
+        texture = "generated://capsule/enemy_eye"
+        color = #fff39a
+    }
+
+    rect MouthTrigger {
+        anchor = world
+        layer = -30
+        z = 0
+        group = "mouth"
+        pos = (76, 522)
+        size = (44, 38)
+        color = (1.0, 1.0, 1.0, 0.0)
+    }
+
+    sprite MouthVisual {
+        anchor = world
+        layer = 7
+        z = 2
+        pos = (70, 516)
+        size = (56, 48)
+        texture = "generated://capsule/mouth_body"
+        color = #26101a
+    }
+
+    rect MouthToothTop {
+        anchor = world
+        layer = 8
+        z = 3
+        pos = (86, 523)
+        size = (28, 5)
+        color = #f6f3dc
+    }
+
+    rect MouthToothBottom {
+        anchor = world
+        layer = 8
+        z = 4
+        pos = (86, 554)
+        size = (28, 5)
+        color = #f6f3dc
+    }
+
+    sprite MissileFlash {
+        anchor = world
+        layer = 12
+        z = 1
+        pos = (144, 108)
+        size = (12, 12)
+        texture = "generated://circle/missile_flash"
+        color = (1.0, 0.84, 0.20, 0.0)
+    }
+
+    text ScoreLabel {
+        anchor = top_left
+        layer = 20
+        z = 41
+        pos = (16, 14)
+        color = #d9ecff
+        value = "000000"
+        font = "BetterPixels.ttf"
+        font_size = 10
+    }
+
+    text ModeLabel {
+        anchor = top_left
+        layer = 20
+        z = 42
+        pos = (16, 30)
+        color = #ffd35c
+        value = "CREATURE ACTIVE"
+        font = "BetterPixels.ttf"
+        font_size = 8
+    }
+
+    text Hint {
+        anchor = bottom
+        layer = 20
+        z = 40
+        pos = (0, -16)
+        color = #d9ecff
+        value = "ACTION LAUNCH  LEFT/RIGHT FLIP"
+        font = "BetterPixels.ttf"
+        font_size = 7
+    }
+
+    shape_map Table {
+        origin = (56, 60)
+        cell = (12, 54)
+        debug_labels = false
+
+        legend {
+            a = point("left_top")
+            b = point("left_mid")
+            c = point("left_outlane")
+            d = point("left_flipper")
+            e = point("right_top", 0, -18)
+            f = point("right_mid")
+            g = point("right_outlane")
+            h = point("right_flipper")
+            i = point("left_flipper_pivot", 0, 1)
+            j = point("right_flipper_pivot", 0, 1)
+            l = point("shooter_left_top", 0, -18)
+            r = point("shooter_right_top")
+            s = point("spring_bottom")
+            t = point("spring_top", -12, -21)
+            u = point("shooter_left_bottom")
+            v = point("shooter_right_bottom")
+            m = point("top_orbit_left")
+            n = point("top_orbit_right")
+            q = point("shooter_exit")
+            x = point("bumper_left", -18, 0)
+            y = point("bumper_top", -18, 0)
+            z = point("bumper_right", -18, 0)
+            A = point("upper_left_flipper_pivot", -60, 54)
+            B = point("upper_left_flipper", -24, 54)
+            C = point("lower_right_flipper_pivot", 12, -54)
+            D = point("lower_right_flipper", -24, -54)
+        }
+
+        ascii {
+              m.................n.q
+          a..........................r
+           .....AB................el .
+            .........y............. .
+             .....x.......z........ .
+              ..................... .
+          b.......................f .
+           ......................... .
+            ...................DC..  .
+          c....di..........jh.....g. t.
+                                   usv
+        }
+
+        polyline LeftTopBoundary {
+            points = [left_flipper, left_outlane, left_mid, left_top, top_orbit_left, top_orbit_right, shooter_exit]
+            closed = false
+            radius = 3
+            smooth = 8
+            corner = round
+            corner_radius = 18
+            segments = 14
+            color = #c3f6ff
+            bounce = 0.55
+        }
+
+        polyline RightBoundary {
+            points = [right_top, right_mid, right_outlane, right_flipper]
+            closed = false
+            radius = 3
+            smooth = 8
+            corner = round
+            corner_radius = 14
+            segments = 12
+            color = #c3f6ff
+            bounce = 0.55
+        }
+
+        sdf_wall ShooterLeftRail {
+            points = [shooter_left_top, shooter_left_bottom]
+            radius = 2
+            smooth = 0
+            color = #ffe08a
+            bounce = 0.35
+        }
+
+        sdf_wall ShooterRightRail {
+            points = [shooter_right_bottom, shooter_right_top]
+            radius = 2
+            smooth = 0
+            color = #ffe08a
+            bounce = 0.35
+        }
+
+        sdf_wall ShooterExitGuide {
+            points = [shooter_right_top, shooter_exit, top_orbit_right]
+            radius = 2
+            smooth = 8
+            corner = round
+            corner_radius = 22
+            segments = 18
+            color = #ffe08a
+            bounce = 0.45
+        }
+
+        spring Plunger {
+            points = [spring_bottom, spring_top]
+            coils = 10
+            radius = 6
+            wire_radius = 1
+            cap_width = 13
+            cap_radius = 2
+            max_compression = 32
+            pull_speed = 90
+            release_speed = 420
+            input = action
+            color = #d9ecff
+            bounce = 0.45
+        }
+
+        flipper LeftFlipper {
+            pivot = left_flipper_pivot
+            length = 52
+            thickness = 8
+            base_radius = 6.8
+            tip_radius = 3.8
+            rest_angle = 0.28
+            active_angle = -0.55
+            up_speed = 24
+            down_speed = 12
+            impulse = 0.95
+            input = left
+            color = #fff39a
+            bounce = 0.7
+        }
+
+        flipper RightFlipper {
+            pivot = right_flipper_pivot
+            length = 52
+            thickness = 8
+            base_radius = 6.8
+            tip_radius = 3.8
+            rest_angle = 2.86
+            active_angle = 3.69
+            up_speed = 24
+            down_speed = 12
+            impulse = 0.95
+            input = right
+            color = #fff39a
+            bounce = 0.7
+        }
+
+        flipper UpperLeftFlipper {
+            pivot = upper_left_flipper_pivot
+            length = 38
+            thickness = 6
+            base_radius = 5.2
+            tip_radius = 2.8
+            rest_angle = 0.08
+            active_angle = -0.75
+            up_speed = 24
+            down_speed = 12
+            impulse = 0.9
+            input = left
+            color = #fff39a
+            bounce = 0.7
+        }
+
+        flipper LowerRightFlipper {
+            pivot = lower_right_flipper_pivot
+            length = 40
+            thickness = 6
+            base_radius = 5.2
+            tip_radius = 2.8
+            rest_angle = 3.05
+            active_angle = 3.82
+            up_speed = 24
+            down_speed = 12
+            impulse = 0.9
+            input = right
+            color = #fff39a
+            bounce = 0.7
+        }
+
+        bumper LeftBumper {
+            point = bumper_left
+            radius = 16
+            color = #ff4f9a
+            bounce = 1.15
+        }
+
+        bumper TopBumper {
+            point = bumper_top
+            radius = 16
+            color = #62f2ff
+            bounce = 1.15
+        }
+
+        bumper RightBumper {
+            point = bumper_right
+            radius = 16
+            color = #ffd35c
+            bounce = 1.15
+        }
+    }
+}

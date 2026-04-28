@@ -14,5 +14,8 @@ Use them as smoke-test projects while evolving the DSL and renderer.
 `sunnyland`
 - Platformer prototype with Sunnyland assets, basic ASCII terrain rendering, built-in platformer physics, pickups, and hazards.
 
+`pinball`
+- Vector-map prototype using ASCII-authored control points connected into wall and bumper shapes.
+
 `warped_space_shooter`
 - Small game-focused example for keyboard movement, runtime query calls, textured sprites, and a concrete “progress target” built from the bundled shooter art reference.

@@ -638,6 +638,129 @@ scene Main {
 }
 
 #[test]
+fn scene_parser_supports_shape_maps() {
+    let scene = source_file(
+        "scenes/main.rpu",
+        r#"
+scene Main {
+    shape_map Table {
+        origin = (10, 20)
+        cell = (8, 8)
+
+        legend {
+            a = point("left")
+            b = point("right", 2, -3)
+        }
+
+        ascii {
+            a..b
+        }
+
+        wall Rail {
+            points = [left, right]
+            thickness = 5
+            color = #9ad8ff
+            bounce = 0.9
+        }
+
+        pipe Launcher {
+            points = [left, right]
+            width = 20
+            thickness = 4
+            color = #ffe08a
+            bounce = 0.6
+        }
+
+        sdf_wall SmoothGuide {
+            points = [left, right]
+            radius = 5
+            smooth = 8
+            color = #ffe08a
+            bounce = 0.9
+        }
+
+        polyline Boundary {
+            points = [left, right]
+            closed = true
+            radius = 4
+            smooth = 6
+            corner = round
+            corner_radius = 10
+            segments = 5
+            color = #9ad8ff
+            bounce = 1.0
+        }
+
+        bumper Pop {
+            point = left
+            radius = 12
+            color = #ff4f9a
+            bounce = 1.7
+        }
+
+        flipper LeftFlip {
+            pivot = left
+            length = 34
+            thickness = 5
+            base_radius = 4
+            tip_radius = 2
+            rest_angle = 0.25
+            active_angle = -0.55
+            up_speed = 20
+            down_speed = 12
+            impulse = 1.3
+            input = left
+            color = #fff39a
+            bounce = 1.45
+        }
+
+        spring Plunger {
+            points = [left, right]
+            coils = 8
+            radius = 3
+            wire_radius = 1
+            cap_width = 12
+            max_compression = 24
+            input = action
+        }
+    }
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let parsed = parse_scene_document(&scene, &mut diagnostics);
+
+    assert!(diagnostics.is_empty());
+    let map = &parsed.scenes[0].shape_maps[0];
+    assert_eq!(map.origin, [10.0, 20.0]);
+    assert_eq!(map.cell, [8.0, 8.0]);
+    assert_eq!(map.legend[0].point, "left");
+    assert_eq!(map.legend[1].offset, [2.0, -3.0]);
+    assert_eq!(map.walls[0].points, vec!["left", "right"]);
+    assert_eq!(map.pipes[0].points, vec!["left", "right"]);
+    assert_eq!(map.pipes[0].width, 20.0);
+    assert_eq!(map.pipes[0].thickness, 4.0);
+    assert_eq!(map.sdf_walls[0].points, vec!["left", "right"]);
+    assert_eq!(map.sdf_walls[0].radius, 5.0);
+    assert_eq!(map.sdf_walls[0].smooth, 8.0);
+    assert_eq!(map.polylines[0].points, vec!["left", "right"]);
+    assert!(map.polylines[0].closed);
+    assert_eq!(map.polylines[0].corner, ShapeWallCorner::Round);
+    assert_eq!(map.bumpers[0].point, "left");
+    assert_eq!(map.flippers[0].pivot, "left");
+    assert_eq!(map.flippers[0].input, "left");
+    assert_eq!(map.flippers[0].length, 34.0);
+    assert_eq!(map.flippers[0].base_radius, 4.0);
+    assert_eq!(map.flippers[0].tip_radius, 2.0);
+    assert_eq!(map.flippers[0].up_speed, 20.0);
+    assert_eq!(map.flippers[0].impulse, 1.3);
+    assert_eq!(map.springs[0].points, vec!["left", "right"]);
+    assert_eq!(map.springs[0].coils, 8);
+    assert_eq!(map.springs[0].max_compression, 24.0);
+}
+
+#[test]
 fn scene_parser_supports_text_nodes() {
     let scene = source_file(
         "scenes/main.rpu",
