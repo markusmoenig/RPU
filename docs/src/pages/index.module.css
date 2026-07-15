@@ -1,15 +1,9 @@
 .pageShell {
-  background:
-    radial-gradient(circle at top left, rgba(214, 77, 51, 0.18), transparent 40%),
-    radial-gradient(circle at bottom right, rgba(38, 154, 189, 0.18), transparent 36%),
-    linear-gradient(180deg, #fbf7f0 0%, #f4ede1 100%);
+  background: #fbf7f0;
 }
 
 [data-theme='dark'] .pageShell {
-  background:
-    radial-gradient(circle at top left, rgba(241, 140, 89, 0.14), transparent 40%),
-    radial-gradient(circle at bottom right, rgba(72, 154, 176, 0.18), transparent 36%),
-    linear-gradient(180deg, #171717 0%, #101010 100%);
+  background: #101010;
 }
 
 .hero {
@@ -60,7 +54,7 @@
 
 .title {
   margin: 0 0 0.2rem;
-  font-size: clamp(3rem, 10vw, 5.4rem);
+  font-size: 4.8rem;
   line-height: 0.95;
 }
 
@@ -181,5 +175,9 @@
 
   .heroLogo {
     width: min(220px, 62vw);
+  }
+
+  .title {
+    font-size: 3rem;
   }
 }

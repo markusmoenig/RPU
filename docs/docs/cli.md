@@ -12,16 +12,17 @@ Current commands:
 
 ```bash
 rpu new my_app
-rpu run path/to/project
-rpu build path/to/project
-rpu build-web path/to/project
-rpu serve-web path/to/project --port 8123
-rpu export-xcode path/to/project --output /tmp/apple-export
+rpu run path/to/cartridge
+rpu run path/to/cli-cartridge -- arg1 arg2
+rpu build path/to/cartridge
+rpu build-web path/to/cartridge
+rpu serve-web path/to/cartridge --port 8123
+rpu export-xcode path/to/cartridge --output /tmp/apple-export
 ```
 
 ## `rpu new`
 
-Creates a new project with:
+Creates a new cartridge source directory with:
 
 - `rpu.toml`
 - `scenes/main.rpu`
@@ -30,19 +31,22 @@ Creates a new project with:
 
 ## `rpu run`
 
-Runs the project in a native window using `rpu-runtime` and `rpu-scenevm`.
+Runs a cartridge.
 
 Current behavior:
 
-- loads the project
+- loads the cartridge source directory
 - compiles scenes and scripts
-- opens a window
-- renders the scene
-- polls for source changes and hot reloads
+- for `kind = "app"`, opens a window, renders the scene, and hot reloads source changes
+- for `kind = "cli"`, runs headless `on run()` script handlers
+- for C/WASM source cartridges, compiles `src/*.c`, packages a `.cart` directory, and runs it with Wasmer
+- for built `.cart` directories, runs the packaged entry directly without a language toolchain
+
+CLI cartridge arguments are passed after `--` and are available through `arg_count()` and `arg(index)`.
 
 ## `rpu build-web`
 
-Builds a browser export for a project.
+Builds a browser export for an app cartridge.
 
 Preflight behavior:
 
@@ -51,7 +55,8 @@ Preflight behavior:
   - `rustup target add wasm32-unknown-unknown`
 - requires `wasm-bindgen-cli`
   - if missing, install it with:
-    - `cargo install wasm-bindgen-cli`
+    - `cargo install wasm-bindgen-cli --version 0.2.126 --locked`
+  - use `--force` to replace an older version
 
 Current output goes to:
 
@@ -64,7 +69,7 @@ This currently emits:
 - `index.html`
 - wasm-bindgen JS glue
 - `.wasm`
-- copied/bundled project scenes, scripts, and assets through the generated launcher
+- copied/bundled cartridge scenes, scripts, and assets through the generated launcher
 - a generated hidden launcher crate under `build/web/.app`
 
 The generated web build is self-contained and suitable for local preview or embedding into a website.
@@ -89,7 +94,7 @@ The local server:
 
 ## `rpu build`
 
-Current build output is a placeholder build summary written to:
+For RPU bytecode cartridges, current build output is a placeholder cartridge summary written to:
 
 ```text
 build/BUILD.txt
@@ -102,6 +107,18 @@ It currently reports:
 - draw counts
 - handler/op counts
 - diagnostics
+
+For C/WASM cartridges, `rpu build` invokes a WebAssembly-capable Clang and LLD and writes:
+
+```text
+build/<name>.cart/
+  manifest.toml
+  main.wasm
+```
+
+The generated `.cart` directory is the portable runtime artifact. `build/main.wasm` may exist as an intermediate compiler output and is not the cartridge contract.
+
+See [SDK Installation](./sdks) for toolchain setup and [C SDK](./c-sdk) for source layout.
 
 ## `rpu export-xcode`
 

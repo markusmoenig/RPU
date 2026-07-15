@@ -17,7 +17,7 @@ After changing `tree-sitter-rpu/grammar.js`, regenerate and test the parser:
 cd /Users/markusmoenig/RPU/tree-sitter-rpu
 npm run generate
 npm test
-./node_modules/.bin/tree-sitter parse --quiet ../examples/sunnyland/scenes/main.rpu ../examples/terrain/scenes/main.rpu
+./node_modules/.bin/tree-sitter parse --quiet ../examples/hello_shapes/scenes/main.rpu ../examples/warped_space_shooter/scenes/game.rpu
 ```
 
 Then reload the dev extension or restart Zed if the parser cache does not refresh.

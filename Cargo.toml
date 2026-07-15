@@ -2,16 +2,23 @@
 name = "rpu"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 
 [workspace]
 members = [
     ".",
     "crates/rpu-build",
     "crates/rpu-core",
+    "crates/rpu-graphics",
     "crates/rpu-runtime",
     "crates/rpu-scenevm",
+    "crates/rpu-system",
+    "crates/rpu-wasm",
 ]
 resolver = "2"
+
+[workspace.package]
+rust-version = "1.93"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -24,6 +31,10 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.9"
 wgpu = "27.0.1"
 winit = "0.30"
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"
+wasmer = "7.2.0"
+web-sys = "0.3.103"
 
 [dependencies]
 anyhow.workspace = true

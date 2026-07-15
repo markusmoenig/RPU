@@ -1,0 +1,9 @@
+on run() {
+    print("Hello from an RPU CLI cartridge")
+
+    if arg_count() > 0 {
+        print("first arg: " + arg(0))
+    } else {
+        print("pass an argument after -- to echo it")
+    }
+}

@@ -9,446 +9,373 @@ fn source_file(path: &str, contents: &str) -> SourceFile {
 }
 
 #[test]
-fn scene_parser_supports_maps_symbols_and_hex_colors() {
-    let scene = source_file(
-        "scenes/main.rpu",
+fn manifest_parses_capability_requirements() {
+    let manifest: ProjectManifest = toml::from_str(
         r#"
-scene Main {
-    map Terrain {
-        origin = (64, 96)
-        cell = (16, 16)
+[project]
+name = "cart_demo"
 
-        legend {
-            x = marker
-            # = #ff4455
-        }
+[requires]
+system = true
+graphics = true
+audio = false
+network = false
+"#,
+    )
+    .expect("manifest should parse");
 
-        ascii {
-            x#
-        }
-    }
+    assert!(manifest.requires.system);
+    assert!(manifest.requires.graphics);
+    assert!(!manifest.requires.audio);
+    assert!(!manifest.requires.network);
+}
 
-    rect Hero {
-        color = #00ffaa
-    }
+#[test]
+fn manifest_ignores_legacy_fine_grained_capability_fields() {
+    let manifest: ProjectManifest = toml::from_str(
+        r#"
+[project]
+name = "legacy_cli"
 
-    sprite Player {
-        symbol = x
-        size = (32, 48)
+[requires]
+graphics = false
+audio = false
+input = false
+resources = true
+time = true
+window = false
+ui = false
+storage = false
+network = false
+"#,
+    )
+    .expect("manifest should parse");
+
+    assert!(manifest.requires.system);
+    assert!(!manifest.requires.graphics);
+    assert!(!manifest.requires.audio);
+    assert!(!manifest.requires.network);
+}
+
+#[test]
+fn manifest_uses_legacy_default_capabilities_when_requires_is_missing() {
+    let manifest: ProjectManifest = toml::from_str(
+        r#"
+[project]
+name = "legacy_project"
+"#,
+    )
+    .expect("manifest should parse");
+
+    assert_eq!(manifest.requires, CapabilityConfig::default());
+    assert_eq!(manifest.build, BuildConfig::default());
+}
+
+#[test]
+fn manifest_parses_rpu_wasm_build_target() {
+    let manifest: ProjectManifest = toml::from_str(
+        r#"
+[project]
+name = "shared_abi_demo"
+kind = "cli"
+
+[build]
+language = "rpu"
+backend = "wasm"
+
+[requires]
+system = true
+graphics = false
+audio = false
+network = false
+"#,
+    )
+    .expect("manifest should parse");
+
+    assert_eq!(manifest.build.language, SourceLanguage::Rpu);
+    assert_eq!(manifest.build.backend, BuildBackend::Wasm);
+}
+
+#[test]
+fn manifest_parses_cartridge_kind_and_modules() {
+    let manifest: ProjectManifest = toml::from_str(
+        r#"
+[project]
+name = "mesh_tools"
+kind = "cli"
+
+[[modules]]
+name = "simplify"
+backend = "wasm"
+path = "modules/simplify.wasm"
+
+[[modules]]
+name = "quick_script"
+backend = "bytecode"
+path = "bytecode/quick_script.rpubc"
+"#,
+    )
+    .expect("manifest should parse");
+
+    assert_eq!(manifest.project.kind, ProjectKind::Cli);
+    assert_eq!(manifest.modules.len(), 2);
+    assert_eq!(manifest.modules[0].backend, ModuleBackend::Wasm);
+    assert_eq!(
+        manifest.modules[0].path,
+        PathBuf::from("modules/simplify.wasm")
+    );
+    assert_eq!(manifest.modules[1].backend, ModuleBackend::Bytecode);
+}
+
+#[test]
+fn built_cartridge_manifest_is_language_neutral() {
+    let manifest: BuiltCartridgeManifest = toml::from_str(
+        r#"
+[cartridge]
+format_version = 1
+abi_version = 1
+
+[project]
+name = "hello_c"
+version = "0.1.0"
+kind = "cli"
+
+[entry]
+backend = "wasm"
+path = "main.wasm"
+
+[requires]
+system = true
+graphics = false
+audio = false
+network = false
+"#,
+    )
+    .expect("built cartridge manifest should parse");
+
+    assert_eq!(manifest.cartridge.format_version, CARTRIDGE_FORMAT_VERSION);
+    assert_eq!(manifest.cartridge.abi_version, wasm_abi::ABI_VERSION);
+    assert_eq!(manifest.project.kind, ProjectKind::Cli);
+    assert_eq!(manifest.entry.backend, BuildBackend::Wasm);
+    assert_eq!(manifest.entry.path, PathBuf::from("main.wasm"));
+}
+
+#[test]
+fn cartridge_paths_cannot_escape_the_bundle() {
+    assert!(validate_cartridge_relative_path(Path::new("main.wasm"), "entry").is_ok());
+    assert!(validate_cartridge_relative_path(Path::new("modules/tool.wasm"), "module").is_ok());
+    assert!(validate_cartridge_relative_path(Path::new("../main.wasm"), "entry").is_err());
+    assert!(validate_cartridge_relative_path(Path::new("./main.wasm"), "entry").is_err());
+    assert!(validate_cartridge_relative_path(Path::new("/tmp/main.wasm"), "entry").is_err());
+}
+
+#[test]
+fn cartridge_module_names_must_be_unique_and_nonempty() {
+    let module = |name: &str| ModuleConfig {
+        name: name.to_string(),
+        backend: ModuleBackend::Wasm,
+        path: PathBuf::from(format!("modules/{name}.wasm")),
+    };
+
+    assert!(validate_module_names(&[module("one"), module("two")]).is_ok());
+    assert!(validate_module_names(&[module("same"), module("same")]).is_err());
+    assert!(validate_module_names(&[module("  ")]).is_err());
+}
+
+#[test]
+fn cli_cartridges_compile_without_scene_files() {
+    let manifest: ProjectManifest = toml::from_str(
+        r#"
+[project]
+name = "hello_cli"
+kind = "cli"
+
+[requires]
+system = true
+graphics = false
+audio = false
+network = false
+"#,
+    )
+    .expect("manifest should parse");
+    let script = source_file(
+        "scripts/main.rpu",
+        r#"
+on run() {
+    print("Hello from CLI")
+
+    if arg_count() > 0 {
+        print(arg(0))
     }
 }
 "#,
     );
 
-    let mut diagnostics = Vec::new();
-    let parsed = parse_scene_document(&scene, &mut diagnostics);
+    let compiled = compile_project_sources(&manifest, Vec::new(), vec![script], Vec::new(), 1)
+        .expect("CLI cartridge should compile");
 
-    assert!(diagnostics.is_empty());
-    assert_eq!(parsed.scenes.len(), 1);
-    let scene = &parsed.scenes[0];
-    assert_eq!(scene.maps.len(), 1);
-    assert_eq!(scene.rects[0].visual.color, [0.0, 1.0, 170.0 / 255.0, 1.0]);
-    assert_eq!(scene.sprites[0].symbol.as_deref(), Some("x"));
-
-    let commands = compile_scene_draw_commands(&[parsed.clone()]);
-    assert_eq!(commands.len(), 3);
-
-    match &commands[0] {
-        DrawCommand::Rect(rect) => {
-            assert_eq!(rect.x, 80.0);
-            assert_eq!(rect.y, 96.0);
-            assert_eq!(rect.width, 16.0);
-            assert_eq!(rect.color, [1.0, 68.0 / 255.0, 85.0 / 255.0, 1.0]);
-        }
-        other => panic!("expected map rect, got {other:?}"),
-    }
-
-    match &commands[2] {
-        DrawCommand::Sprite(sprite) => {
-            assert_eq!(sprite.x, 64.0);
-            assert_eq!(sprite.y, 96.0);
-            assert_eq!(sprite.width, 32.0);
-            assert_eq!(sprite.height, 48.0);
-        }
-        other => panic!("expected sprite, got {other:?}"),
-    }
+    assert!(!compiled.has_errors());
+    assert_eq!(compiled.kind, ProjectKind::Cli);
+    assert!(compiled.parsed_scenes.is_empty());
+    assert_eq!(compiled.bytecode_scripts[0].handlers[0].event, "run");
 }
 
 #[test]
-fn map_spawn_legend_positions_sprite_by_name() {
-    let scene = source_file(
-        "scenes/main.rpu",
+fn rpu_wasm_build_backend_warns_until_implemented() {
+    let manifest: ProjectManifest = toml::from_str(
         r#"
-scene Main {
-    map Terrain {
-        origin = (10, 20)
-        cell = (8, 12)
+[project]
+name = "hello_cli"
+kind = "cli"
 
-        legend {
-            p = spawn(Player)
-        }
+[build]
+language = "rpu"
+backend = "wasm"
 
-        ascii {
-            p
-        }
-    }
-
-    sprite Player {
-        size = (16, 24)
-    }
+[requires]
+system = true
+graphics = false
+audio = false
+network = false
+"#,
+    )
+    .expect("manifest should parse");
+    let script = source_file(
+        "scripts/main.rpu",
+        r#"
+on run() {
+    print("Hello from future WASM")
 }
 "#,
     );
 
-    let mut diagnostics = Vec::new();
-    let parsed = parse_scene_document(&scene, &mut diagnostics);
+    let compiled = compile_project_sources(&manifest, Vec::new(), vec![script], Vec::new(), 1)
+        .expect("CLI cartridge should compile");
 
-    assert!(diagnostics.is_empty());
-    let map = &parsed.scenes[0].maps[0];
-    match &map.legend[0].meaning {
-        MapLegendMeaning::Spawn(name) => assert_eq!(name, "Player"),
-        other => panic!("expected spawn legend entry, got {other:?}"),
-    }
-
-    let commands = compile_scene_draw_commands(&[parsed]);
-    assert_eq!(commands.len(), 1);
-    match &commands[0] {
-        DrawCommand::Sprite(sprite) => {
-            assert_eq!(sprite.x, 10.0);
-            assert_eq!(sprite.y, 20.0);
-            assert_eq!(sprite.width, 16.0);
-            assert_eq!(sprite.height, 24.0);
-        }
-        other => panic!("expected sprite, got {other:?}"),
-    }
+    assert!(!compiled.has_errors());
+    assert_eq!(compiled.build.backend, BuildBackend::Wasm);
+    assert!(compiled.diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == DiagnosticSeverity::Warning
+            && diagnostic.message.contains("WASM build backend")
+    }));
 }
 
 #[test]
-fn map_legend_supports_explicit_tile_collision_policy() {
-    let scene = source_file(
-        "scenes/main.rpu",
-        r#"
-scene Main {
-    map Terrain {
-        legend {
-            # = tile("tile-grass-top.png", solid)
-            - = tile("platform.png", one_way)
-            b = tile("bush.png", none)
-        }
+fn wasm_abi_defines_cli_lifecycle_exports() {
+    let exports = wasm_abi::required_exports_for_kind(ProjectKind::Cli);
+    let names = exports.iter().map(|export| export.name).collect::<Vec<_>>();
 
-        ascii {
-            #-b
-        }
-    }
-}
-"#,
-    );
+    assert_eq!(wasm_abi::ABI_VERSION, 1);
+    assert!(names.contains(&wasm_abi::EXPORT_ABI_VERSION));
+    assert!(names.contains(&wasm_abi::EXPORT_ALLOC));
+    assert!(names.contains(&wasm_abi::EXPORT_DEALLOC));
+    assert!(names.contains(&wasm_abi::EXPORT_RUN));
+    assert!(!names.contains(&wasm_abi::EXPORT_UPDATE));
 
-    let mut diagnostics = Vec::new();
-    let parsed = parse_scene_document(&scene, &mut diagnostics);
-
-    assert!(diagnostics.is_empty());
-    let entries = &parsed.scenes[0].maps[0].legend;
-    match &entries[0].meaning {
-        MapLegendMeaning::Tile(tile) => {
-            assert_eq!(tile.texture, "tile-grass-top.png");
-            assert_eq!(tile.collision, MapTileCollision::Solid);
-        }
-        other => panic!("expected solid tile legend entry, got {other:?}"),
-    }
-    match &entries[1].meaning {
-        MapLegendMeaning::Tile(tile) => {
-            assert_eq!(tile.texture, "platform.png");
-            assert_eq!(tile.collision, MapTileCollision::OneWay);
-        }
-        other => panic!("expected one-way tile legend entry, got {other:?}"),
-    }
-    match &entries[2].meaning {
-        MapLegendMeaning::Tile(tile) => {
-            assert_eq!(tile.texture, "bush.png");
-            assert_eq!(tile.collision, MapTileCollision::None);
-        }
-        other => panic!("expected non-colliding tile legend entry, got {other:?}"),
-    }
+    let run = exports
+        .iter()
+        .find(|export| export.name == wasm_abi::EXPORT_RUN)
+        .expect("CLI WASM cartridges require rpu_run");
+    assert_eq!(run.params, &[]);
+    assert_eq!(run.results, &[wasm_abi::WasmValueType::I32]);
 }
 
 #[test]
-fn scene_parser_supports_terrain_material_entries_and_shape_classification() {
-    let scene = source_file(
-        "scenes/main.rpu",
-        r#"
-scene Main {
-    map Terrain {
-        legend {
-            # = rock
-        }
+fn wasm_abi_defines_app_lifecycle_exports() {
+    let exports = wasm_abi::required_exports_for_kind(ProjectKind::App);
+    let names = exports.iter().map(|export| export.name).collect::<Vec<_>>();
 
-        ascii {
-            ####
-            ####
-        }
-    }
-}
-"#,
-    );
+    assert!(names.contains(&wasm_abi::EXPORT_START));
+    assert!(names.contains(&wasm_abi::EXPORT_UPDATE));
+    assert!(names.contains(&wasm_abi::EXPORT_STOP));
+    assert!(!names.contains(&wasm_abi::EXPORT_RUN));
 
-    let mut diagnostics = Vec::new();
-    let parsed = parse_scene_document(&scene, &mut diagnostics);
-
-    assert!(diagnostics.is_empty());
-    let map = &parsed.scenes[0].maps[0];
-    assert_eq!(map.legend.len(), 1);
-    match &map.legend[0].meaning {
-        MapLegendMeaning::Terrain(terrain) => {
-            assert_eq!(terrain.topology, TerrainTopology::Solid);
-            assert_eq!(terrain.material, "rock");
-            assert_eq!(terrain.material_stack, vec!["rock".to_string()]);
-        }
-        other => panic!("expected terrain legend entry, got {other:?}"),
-    }
-
-    let classified = map.classify_terrain();
-    assert_eq!(classified.cells.len(), 8);
-    assert!(
-        classified
-            .cells
-            .iter()
-            .any(|cell| cell.shape == TerrainShape::TopLeftOuter)
-    );
-    assert!(
-        classified
-            .cells
-            .iter()
-            .any(|cell| cell.shape == TerrainShape::Top)
-    );
-    assert!(
-        classified
-            .cells
-            .iter()
-            .any(|cell| cell.shape == TerrainShape::TopRightOuter)
-    );
-    assert_eq!(classified.regions.len(), 1);
-    assert!(classified.cells.iter().all(|cell| cell.region_id == 1));
-    let top_left = classified
-        .cells
+    let update = exports
         .iter()
-        .find(|cell| cell.row == 0 && cell.col == 0)
-        .expect("top-left terrain cell should exist");
-    assert!(top_left.is_boundary);
-    assert!(top_left.exposed.top);
-    assert!(top_left.exposed.left);
-    assert!(!top_left.exposed.right);
-    assert!(!top_left.exposed.bottom);
-    assert_eq!(top_left.style, TerrainEdgeStyle::Round);
-    assert_eq!(top_left.normal, TerrainNormal::UpLeft);
-    assert_eq!(top_left.tangent, TerrainTangent::UpRight);
-    assert!(top_left.surface_u < classified.regions[0].boundary_loop.len() as u32);
-    assert_eq!(top_left.material_key, "rock");
-    assert_eq!(top_left.material, "rock");
-    assert_eq!(top_left.boundary_distance, 0);
-    assert_eq!(top_left.depth_band, TerrainDepthBand::Edge);
-    assert_eq!(classified.regions[0].boundary_cells.len(), 8);
-    assert_eq!(classified.regions[0].boundary_loop.len(), 8);
-    assert_eq!(classified.regions[0].max_boundary_distance, 0);
+        .find(|export| export.name == wasm_abi::EXPORT_UPDATE)
+        .expect("app WASM cartridges require rpu_update");
+    assert_eq!(update.params, &[wasm_abi::WasmValueType::F32]);
+    assert_eq!(update.results, &[wasm_abi::WasmValueType::I32]);
 }
 
 #[test]
-fn terrain_classification_extracts_connected_regions_by_material() {
-    let scene = source_file(
-        "scenes/main.rpu",
-        r##"
-scene Main {
-    map Terrain {
-        legend {
-            # = rock
-            - = grass
-        }
+fn wasm_abi_system_capability_imports_first_cli_surface() {
+    let requires = CapabilityConfig {
+        system: true,
+        graphics: false,
+        audio: false,
+        network: false,
+    };
+    let imports = wasm_abi::required_imports_for_capabilities(&requires);
+    let names = imports.iter().map(|import| import.name).collect::<Vec<_>>();
 
-        ascii {
-            ##  --
-            ##  --
-        }
-    }
-}
-"##,
+    assert!(
+        imports
+            .iter()
+            .all(|import| import.module == Some(wasm_abi::SYSTEM_IMPORT_MODULE))
     );
+    assert!(names.contains(&wasm_abi::IMPORT_ARG_COUNT));
+    assert!(names.contains(&wasm_abi::IMPORT_ARG_LEN));
+    assert!(names.contains(&wasm_abi::IMPORT_ARG_READ));
+    assert!(names.contains(&wasm_abi::IMPORT_PRINT));
+    assert!(names.contains(&wasm_abi::IMPORT_EPRINT));
+    assert!(names.contains(&wasm_abi::IMPORT_EXIT));
+    assert!(names.contains(&wasm_abi::IMPORT_NOW_MS));
 
-    let mut diagnostics = Vec::new();
-    let parsed = parse_scene_document(&scene, &mut diagnostics);
-
-    assert!(diagnostics.is_empty());
-    let classified = parsed.scenes[0].maps[0].classify_terrain();
-    assert_eq!(classified.regions.len(), 2);
-    assert_eq!(classified.regions[0].material, "rock");
-    assert_eq!(classified.regions[0].cells.len(), 4);
-    assert_eq!(classified.regions[1].material, "grass");
-    assert_eq!(classified.regions[1].cells.len(), 4);
-
-    let rock_ids: std::collections::HashSet<_> = classified
-        .cells
+    let arg_read = imports
         .iter()
-        .filter(|cell| cell.material == "rock")
-        .map(|cell| cell.region_id)
-        .collect();
-    let grass_ids: std::collections::HashSet<_> = classified
-        .cells
-        .iter()
-        .filter(|cell| cell.material == "grass")
-        .map(|cell| cell.region_id)
-        .collect();
-
-    assert_eq!(rock_ids.len(), 1);
-    assert_eq!(grass_ids.len(), 1);
-    assert_ne!(rock_ids, grass_ids);
-    assert_eq!(classified.regions[0].boundary_cells.len(), 4);
-    assert_eq!(classified.regions[1].boundary_cells.len(), 4);
-    assert!(
-        classified
-            .cells
-            .iter()
-            .filter(|cell| cell.material == "rock")
-            .all(|cell| cell.style == TerrainEdgeStyle::Round
-                || cell.style == TerrainEdgeStyle::Square)
+        .find(|import| import.name == wasm_abi::IMPORT_ARG_READ)
+        .expect("system imports include arg_read");
+    assert_eq!(
+        arg_read.params,
+        &[
+            wasm_abi::WasmValueType::I32,
+            wasm_abi::WasmValueType::I32,
+            wasm_abi::WasmValueType::I32
+        ]
     );
-    assert!(
-        classified
-            .cells
-            .iter()
-            .any(|cell| cell.normal == TerrainNormal::UpLeft)
-    );
-    assert!(
-        classified
-            .cells
-            .iter()
-            .any(|cell| cell.tangent == TerrainTangent::UpRight)
-    );
-    assert!(
-        classified
-            .cells
-            .iter()
-            .all(|cell| cell.boundary_distance == 0)
-    );
-    assert!(
-        classified
-            .cells
-            .iter()
-            .all(|cell| cell.depth_band == TerrainDepthBand::Edge)
-    );
-    assert_eq!(classified.regions[0].boundary_loop.len(), 4);
-    assert_eq!(classified.regions[1].boundary_loop.len(), 4);
+    assert_eq!(arg_read.results, &[wasm_abi::WasmValueType::I32]);
 }
 
 #[test]
-fn terrain_classification_computes_boundary_distance_and_depth_bands() {
-    let scene = source_file(
-        "scenes/main.rpu",
-        r#"
-scene Main {
-    map Terrain {
-        legend {
-            # = rock
-        }
+fn wasm_abi_respects_missing_system_capability() {
+    let requires = CapabilityConfig {
+        system: false,
+        graphics: false,
+        audio: false,
+        network: false,
+    };
 
-        ascii {
-            #####
-            #####
-            #####
-            #####
-            #####
-        }
-    }
-}
-"#,
-    );
-
-    let mut diagnostics = Vec::new();
-    let parsed = parse_scene_document(&scene, &mut diagnostics);
-
-    assert!(diagnostics.is_empty());
-    let classified = parsed.scenes[0].maps[0].classify_terrain();
-    let center = classified
-        .cells
-        .iter()
-        .find(|cell| cell.row == 2 && cell.col == 2)
-        .expect("center cell should exist");
-    assert_eq!(center.boundary_distance, 2);
-    assert_eq!(center.depth_band, TerrainDepthBand::Interior);
-    assert_eq!(classified.regions[0].max_boundary_distance, 2);
+    assert!(wasm_abi::required_imports_for_capabilities(&requires).is_empty());
 }
 
 #[test]
-fn terrain_classification_resolves_material_stack_from_depth_bands() {
-    let scene = source_file(
-        "scenes/main.rpu",
-        r#"
-scene Main {
-    map Terrain {
-        legend {
-            # = grass>dirt>rock
-        }
+fn wasm_abi_graphics_capability_imports_first_frame_surface() {
+    let requires = CapabilityConfig {
+        system: false,
+        graphics: true,
+        audio: false,
+        network: false,
+    };
+    let imports = wasm_abi::required_imports_for_capabilities(&requires);
+    let names = imports.iter().map(|import| import.name).collect::<Vec<_>>();
 
-        ascii {
-            #####
-            #####
-            #####
-            #####
-            #####
-        }
-    }
-}
-"#,
+    assert!(
+        imports
+            .iter()
+            .all(|import| import.module == Some(wasm_abi::GRAPHICS_IMPORT_MODULE))
     );
+    assert!(names.contains(&wasm_abi::IMPORT_GRAPHICS_BEGIN_FRAME));
+    assert!(names.contains(&wasm_abi::IMPORT_GRAPHICS_CLEAR));
+    assert!(names.contains(&wasm_abi::IMPORT_GRAPHICS_DRAW_RECT));
+    assert!(names.contains(&wasm_abi::IMPORT_GRAPHICS_END_FRAME));
 
-    let mut diagnostics = Vec::new();
-    let parsed = parse_scene_document(&scene, &mut diagnostics);
-
-    assert!(diagnostics.is_empty());
-    let map = &parsed.scenes[0].maps[0];
-    match &map.legend[0].meaning {
-        MapLegendMeaning::Terrain(terrain) => {
-            assert_eq!(
-                terrain.material_stack,
-                vec!["grass".to_string(), "dirt".to_string(), "rock".to_string()]
-            );
-        }
-        other => panic!("expected terrain legend entry, got {other:?}"),
-    }
-
-    let classified = map.classify_terrain();
-    let edge = classified
-        .cells
+    let draw_rect = imports
         .iter()
-        .find(|cell| cell.row == 0 && cell.col == 2)
-        .expect("edge cell should exist");
-    let near_surface = classified
-        .cells
-        .iter()
-        .find(|cell| cell.row == 1 && cell.col == 2)
-        .expect("near-surface cell should exist");
-    let side_edge = classified
-        .cells
-        .iter()
-        .find(|cell| cell.row == 2 && cell.col == 0)
-        .expect("side edge cell should exist");
-    let center = classified
-        .cells
-        .iter()
-        .find(|cell| cell.row == 2 && cell.col == 2)
-        .expect("center cell should exist");
-
-    assert_eq!(edge.material_key, "grass>dirt>rock");
-    assert!(edge.surface_u < classified.regions[0].boundary_loop.len() as u32);
-    assert_eq!(edge.material, "grass");
-    assert_eq!(edge.depth_band, TerrainDepthBand::Edge);
-    assert_eq!(side_edge.depth_band, TerrainDepthBand::Edge);
-    assert!(side_edge.surface_u < classified.regions[0].boundary_loop.len() as u32);
-    assert_eq!(side_edge.material, "dirt");
-    assert_eq!(near_surface.material, "dirt");
-    assert_eq!(near_surface.surface_u, edge.surface_u);
-    assert_eq!(near_surface.depth_band, TerrainDepthBand::NearSurface);
-    assert_eq!(center.material, "rock");
-    assert!(center.surface_u < classified.regions[0].boundary_loop.len() as u32);
-    assert_eq!(center.depth_band, TerrainDepthBand::Interior);
+        .find(|import| import.name == wasm_abi::IMPORT_GRAPHICS_DRAW_RECT)
+        .expect("graphics imports include draw_rect");
+    assert_eq!(draw_rect.params, &[wasm_abi::WasmValueType::F32; 8]);
+    assert!(draw_rect.results.is_empty());
 }
 
 #[test]
@@ -635,129 +562,6 @@ scene Main {
     assert_eq!(hurt.textures, vec!["hurt.png"]);
     assert_eq!(hurt.fps, 1.0);
     assert_eq!(hurt.mode, AnimationMode::Once);
-}
-
-#[test]
-fn scene_parser_supports_shape_maps() {
-    let scene = source_file(
-        "scenes/main.rpu",
-        r#"
-scene Main {
-    shape_map Table {
-        origin = (10, 20)
-        cell = (8, 8)
-
-        legend {
-            a = point("left")
-            b = point("right", 2, -3)
-        }
-
-        ascii {
-            a..b
-        }
-
-        wall Rail {
-            points = [left, right]
-            thickness = 5
-            color = #9ad8ff
-            bounce = 0.9
-        }
-
-        pipe Launcher {
-            points = [left, right]
-            width = 20
-            thickness = 4
-            color = #ffe08a
-            bounce = 0.6
-        }
-
-        sdf_wall SmoothGuide {
-            points = [left, right]
-            radius = 5
-            smooth = 8
-            color = #ffe08a
-            bounce = 0.9
-        }
-
-        polyline Boundary {
-            points = [left, right]
-            closed = true
-            radius = 4
-            smooth = 6
-            corner = round
-            corner_radius = 10
-            segments = 5
-            color = #9ad8ff
-            bounce = 1.0
-        }
-
-        bumper Pop {
-            point = left
-            radius = 12
-            color = #ff4f9a
-            bounce = 1.7
-        }
-
-        flipper LeftFlip {
-            pivot = left
-            length = 34
-            thickness = 5
-            base_radius = 4
-            tip_radius = 2
-            rest_angle = 0.25
-            active_angle = -0.55
-            up_speed = 20
-            down_speed = 12
-            impulse = 1.3
-            input = left
-            color = #fff39a
-            bounce = 1.45
-        }
-
-        spring Plunger {
-            points = [left, right]
-            coils = 8
-            radius = 3
-            wire_radius = 1
-            cap_width = 12
-            max_compression = 24
-            input = action
-        }
-    }
-}
-"#,
-    );
-
-    let mut diagnostics = Vec::new();
-    let parsed = parse_scene_document(&scene, &mut diagnostics);
-
-    assert!(diagnostics.is_empty());
-    let map = &parsed.scenes[0].shape_maps[0];
-    assert_eq!(map.origin, [10.0, 20.0]);
-    assert_eq!(map.cell, [8.0, 8.0]);
-    assert_eq!(map.legend[0].point, "left");
-    assert_eq!(map.legend[1].offset, [2.0, -3.0]);
-    assert_eq!(map.walls[0].points, vec!["left", "right"]);
-    assert_eq!(map.pipes[0].points, vec!["left", "right"]);
-    assert_eq!(map.pipes[0].width, 20.0);
-    assert_eq!(map.pipes[0].thickness, 4.0);
-    assert_eq!(map.sdf_walls[0].points, vec!["left", "right"]);
-    assert_eq!(map.sdf_walls[0].radius, 5.0);
-    assert_eq!(map.sdf_walls[0].smooth, 8.0);
-    assert_eq!(map.polylines[0].points, vec!["left", "right"]);
-    assert!(map.polylines[0].closed);
-    assert_eq!(map.polylines[0].corner, ShapeWallCorner::Round);
-    assert_eq!(map.bumpers[0].point, "left");
-    assert_eq!(map.flippers[0].pivot, "left");
-    assert_eq!(map.flippers[0].input, "left");
-    assert_eq!(map.flippers[0].length, 34.0);
-    assert_eq!(map.flippers[0].base_radius, 4.0);
-    assert_eq!(map.flippers[0].tip_radius, 2.0);
-    assert_eq!(map.flippers[0].up_speed, 20.0);
-    assert_eq!(map.flippers[0].impulse, 1.3);
-    assert_eq!(map.springs[0].points, vec!["left", "right"]);
-    assert_eq!(map.springs[0].coils, 8);
-    assert_eq!(map.springs[0].max_compression, 24.0);
 }
 
 #[test]
@@ -1259,6 +1063,29 @@ fn compatibility_builtins_still_compile_to_specific_opcodes() {
         OpCode::SetColor(color)
             if color == [1.0, 68.0 / 255.0, 85.0 / 255.0, 1.0]
     ));
+}
+
+#[test]
+fn compatibility_builtins_take_precedence_over_generic_calls_in_scripts() {
+    let script = source_file(
+        "scripts/main.rpu",
+        r#"
+on ready() {
+    log("ready")
+    move_by(4.0, 2.0)
+    set_color(#ff4455)
+}
+"#,
+    );
+
+    let mut diagnostics = Vec::new();
+    let compiled = compile_script(&script, &mut diagnostics);
+    let ops = &compiled.handlers[0].ops;
+
+    assert!(diagnostics.is_empty());
+    assert!(matches!(&ops[0].op, OpCode::Log(message) if message == "ready"));
+    assert!(matches!(&ops[1].op, OpCode::MoveBy(delta) if *delta == [4.0, 2.0]));
+    assert!(matches!(&ops[2].op, OpCode::SetColor(_)));
 }
 
 #[test]

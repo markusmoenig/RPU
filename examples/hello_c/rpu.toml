@@ -1,0 +1,14 @@
+[project]
+name = "hello_c"
+version = "0.1.0"
+kind = "cli"
+
+[build]
+language = "c"
+backend = "wasm"
+
+[requires]
+system = true
+graphics = false
+audio = false
+network = false

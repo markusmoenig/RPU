@@ -1,0 +1,12 @@
+[package]
+name = "rpu-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rpu-core = { path = "../rpu-core" }
+rpu-graphics = { path = "../rpu-graphics", features = ["wasm-host"] }
+rpu-system = { path = "../rpu-system" }
+wasmer.workspace = true

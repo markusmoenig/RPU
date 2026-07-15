@@ -6,7 +6,7 @@ sidebar_position: 5
 
 # Scenes
 
-Scenes describe the structure of the world.
+Scenes are the current visual resource format for app cartridges written with the RPU DSL.
 
 Current top-level scene syntax:
 
@@ -36,7 +36,6 @@ Current scene nodes:
 - `text`
 - `stack`
 - `highscore`
-- `map`
 
 ## Cameras
 
@@ -63,7 +62,7 @@ camera MainCamera {
 }
 ```
 
-`follow_offset` shifts the followed camera center in world units. For platformers this is useful to show more space ahead or above the player while still keeping the camera tied to movement.
+`follow_offset` shifts the followed camera center in world units. This is useful when the camera should lead or frame a followed entity instead of sitting exactly on its center.
 
 `follow_smoothing` eases camera movement toward the target. `0` disables smoothing. Larger values catch up faster.
 
@@ -199,22 +198,12 @@ Sprites also support:
 - `animation_fps`
 - `animation_mode`
 - `destroy_on_animation_end`
-- `symbol`
-- `physics`
-- `acceleration`
-- `friction`
-- `max_speed`
-- `gravity`
-- `jump_speed`
-- `max_fall_speed`
 - `rotation`
 - `scroll`
 - `repeat_x`
 - `repeat_y`
 - `flip_x`
 - `flip_y`
-- `collider_offset`
-- `collider_size`
 
 `scroll = (x, y)` applies a continuous authored-space offset over time.
 
@@ -272,54 +261,6 @@ sprite Player {
 Animation blocks support `frames`, `fps`, `mode = loop|once`, and `loop = true|false`. The older `animation_<name>` property form remains supported for compact declarations.
 
 Scripts switch named animations through `self.animation = "idle"` or `self.animation = "run"`.
-
-## Platformer Physics
-
-Sprites can opt into the built-in kinematic platformer physics layer:
-
-```rpu
-sprite Player {
-    physics = platformer
-    acceleration = 520.0
-    friction = 840.0
-    max_speed = 96.0
-    gravity = 560.0
-    jump_speed = 255.0
-    max_fall_speed = 280.0
-    coyote_time = 0.10
-    jump_buffer = 0.12
-    collider_offset = (4, 2)
-    collider_size = (16, 22)
-}
-```
-
-The runtime applies acceleration, friction, gravity, jump impulse, and axis-separated AABB collision against map cells with collision.
-
-Direct `tile(...)` map cells control collision explicitly with `solid`, `one_way`, or `none`. Legacy color, quoted texture, and terrain map cells are treated as solid. `marker` and `spawn(...)` cells are ignored.
-
-`coyote_time` keeps jump eligibility alive briefly after leaving a platform. `jump_buffer` remembers a jump press briefly before landing. Both values are in seconds and make platforming less brittle without script-side timing code.
-
-`collider_offset` and `collider_size` define the runtime collision rectangle relative to the sprite's visual top-left. If omitted, the sprite's full visual `size` is used. Rendering still uses the visual size, so sprites with transparent padding can use tighter collision bounds.
-
-Scripts drive platformer physics through intent properties:
-
-```rpu
-self.move_x = -1
-self.move_x = 1
-self.move_x = 0
-
-if input_action() && self.grounded {
-    self.jump = 1
-}
-```
-
-Runtime physics exposes:
-
-- `self.vx`
-- `self.vy`
-- `self.move_x`
-- `self.jump`
-- `self.grounded`
 
 `rotation = 1.57` rotates the sprite in radians around its center. Rotation is also script-visible through `self.rotation` and `Name.rotation`.
 

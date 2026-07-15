@@ -6,9 +6,9 @@ sidebar_position: 6
 
 # Scripts
 
-Scripts are compiled to bytecode and executed by the runtime.
+Scripts are compiled to RPU bytecode and executed by the runtime.
 
-They are currently event-driven. They can live in external files under `scripts/` or be embedded directly inside `rect` and `sprite` scene nodes.
+They are currently event-driven. They can live in external files under `scripts/`, be embedded directly inside visual scene nodes, or provide a headless `on run()` entry point for CLI cartridges.
 
 External example:
 
@@ -42,6 +42,18 @@ on update(dt) {
 }
 ```
 
+CLI cartridges use `on run()`:
+
+```rpu
+on run() {
+    print("Hello from CLI")
+
+    if arg_count() > 0 {
+        print("first arg: " + arg(0))
+    }
+}
+```
+
 ## Current language features
 
 Supported today:
@@ -56,7 +68,27 @@ Supported today:
 - boolean conditions with `&&`, `||`, `!`
 - top-level reusable functions
 - runtime query calls like `input_left()`, `input_action()`, and `key("Space")`
-- action builtins like `play_sound(...)`, `play_music(...)`, and `stop_music()`
+- action builtins like `print(...)`, `log(...)`, `play_sound(...)`, `play_music(...)`, and `stop_music()`
+
+## CLI System Builtins
+
+CLI cartridges currently support a small `system` surface:
+
+- `arg_count()`
+- `arg(index)`
+- `print(value)`
+- `eprint(value)`
+- `exit(code)`
+
+`print(...)` writes to stdout with a newline.
+
+`eprint(...)` writes to stderr with a newline.
+
+`arg_count()` returns the number of arguments passed after `--`.
+
+`arg(index)` returns the argument at the zero-based index, or an empty string when the index is out of range.
+
+`exit(code)` stops the CLI cartridge and returns the process exit code.
 
 ## Properties
 
@@ -74,11 +106,6 @@ Current readable/writable properties:
 - `self.animation` for named sprite animations
 - `self.flip_x` for sprites
 - `self.flip_y` for sprites
-- `self.vx` for platformer sprites
-- `self.vy` for platformer sprites
-- `self.move_x` for platformer sprites
-- `self.jump` for platformer sprites
-- `self.grounded` for platformer sprites
 - `self.text` for text nodes
 - `self.some_state`
 - `Name.x`
@@ -93,11 +120,6 @@ Current readable/writable properties:
 - `Name.animation` for named sprite animations
 - `Name.flip_x`
 - `Name.flip_y`
-- `Name.vx`
-- `Name.vy`
-- `Name.move_x`
-- `Name.jump`
-- `Name.grounded`
 - `Name.text` for text nodes
 - `Name.some_state`
 
@@ -110,7 +132,7 @@ self.width = 96.0
 self.rotation = self.rotation + 1.6 * dt
 ```
 
-`flip_x`, `flip_y`, `jump`, and `grounded` are represented as scalar `0` or `1` values in scripts.
+`flip_x` and `flip_y` are represented as scalar `0` or `1` values in scripts.
 
 ## Script Events
 
@@ -136,33 +158,9 @@ on event(event, value) {
 
 String equality and inequality are supported in conditions, so `event == "motion"` and `value != "idle"` are valid.
 
-## Platformer Input
-
-For sprites using `physics = platformer`, scripts should express input intent and let the runtime handle acceleration, friction, gravity, jumping, and collision:
-
-```rpu
-on update(dt) {
-    if input_left() {
-        self.move_x = -1
-        self.flip_x = 1
-    } else if input_right() {
-        self.move_x = 1
-        self.flip_x = 0
-    } else {
-        self.move_x = 0
-    }
-
-    if input_action() && self.grounded {
-        self.jump = 1
-    }
-}
-```
-
-The runtime updates `self.vx`, `self.vy`, and `self.grounded`.
-
 ## Collision Events
 
-The runtime emits entity collision events after movement and platformer physics.
+The runtime emits entity collision events when visible entities overlap.
 
 `collision_enter(other, group)` fires once when two visible entities begin overlapping.
 
@@ -174,16 +172,11 @@ Both events are sent to both entities. `other` is the other entity name and `gro
 on collision_enter(other, group) {
     if group == "pickup" {
         destroy(other)
-    } else if group == "hazard" && is_stomping(other) {
-        destroy(other)
-        self.vy = -185.0
     } else if group == "hazard" {
-        self.vy = -150.0
+        self.color = #ff8899
     }
 }
 ```
-
-`is_stomping(other)` is a platformer helper for collision handlers. It returns true when the current entity is falling into the top band of `other`, which is useful for enemy stomp behavior.
 
 ## Locals
 
@@ -308,7 +301,6 @@ Current built-in runtime queries:
 - `key("Space")`
 - `exists("Name")`
 - `first_overlap("group")`
-- `is_stomping("Name")`
 - `high_score_name(index)`
 - `high_score_value(index)`
 - `format_int(value, digits)`

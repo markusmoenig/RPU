@@ -6,26 +6,48 @@ sidebar_position: 1
 
 # Getting Started
 
+RPU requires Rust 1.93 or newer. This is also the minimum supported by the embedded Wasmer 7 runtime.
+
+RPU is a tiny creative computer for portable cartridges.
+
 ## Install Rust
 
 RPU is built with Rust. Install the current stable toolchain first:
 
 - [Install Rust with rustup](https://www.rust-lang.org/tools/install)
 
-## Create Or Run A Project
+## Create Or Run A Cartridge
 
 Current starting points:
 
 ```bash
-rpu new my_game
-rpu run path/to/project
+rpu new my_cart
+rpu run path/to/cartridge
 ```
 
-For the maintained example:
+For a windowed app cartridge:
 
 ```bash
 rpu run examples/warped_space_shooter
 ```
+
+For a headless CLI cartridge:
+
+```bash
+rpu run examples/hello_cli
+rpu run examples/hello_cli -- RPU
+```
+
+For a freestanding C cartridge compiled to WASM:
+
+```bash
+brew install llvm lld # macOS toolchain setup
+rpu run examples/hello_c -- RPU
+rpu build examples/hello_c
+rpu run examples/hello_c/build/hello_c.cart -- RPU
+```
+
+See [SDK Installation](./sdks) for other platforms, verification, and toolchain overrides. The [C SDK](./c-sdk) page documents source layout and its API.
 
 ## Build For The Web
 
@@ -46,8 +68,10 @@ If the wasm target is missing, RPU will try to install it automatically with `ru
 If `wasm-bindgen-cli` is missing, install it with:
 
 ```bash
-cargo install wasm-bindgen-cli
+cargo install wasm-bindgen-cli --version 0.2.126 --locked
 ```
+
+The CLI version must match RPU's `wasm-bindgen` crate version. Use `--force` to replace an older installation.
 
 ## Export For Xcode
 
@@ -63,7 +87,7 @@ This requires:
 - Xcode / `xcodebuild`
 - Rust / Cargo
 
-If your project defines:
+If your cartridge defines:
 
 ```toml
 [meta]
@@ -75,4 +99,4 @@ the Xcode export will use that metadata for the generated app.
 
 ## Next
 
-More setup steps will go here.
+Read the [concept](./concept), then the [cartridge manifest](./cartridges) and [system API](./system-api) pages.

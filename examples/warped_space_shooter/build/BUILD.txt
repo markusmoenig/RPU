@@ -1,7 +1,11 @@
 RPU build placeholder
 project = Warped Space Shooter
 version = 0.1.0
+kind = App
+build_language = Rpu
+build_backend = Bytecode
 root = examples/warped_space_shooter
+modules = 0
 scene_defs = 3
 scene_files = 3
 scripts = 15

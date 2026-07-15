@@ -56,21 +56,6 @@
     }
   },
   {
-    "type": "ascii_block",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "ascii_row",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "assignment_statement",
     "named": true,
     "fields": {
@@ -184,32 +169,6 @@
     "type": "boolean",
     "named": true,
     "fields": {}
-  },
-  {
-    "type": "bumper_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "property_block",
-          "named": true
-        }
-      ]
-    }
   },
   {
     "type": "call_expression",
@@ -387,32 +346,6 @@
     }
   },
   {
-    "type": "flipper_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "property_block",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "function_definition",
     "named": true,
     "fields": {
@@ -509,47 +442,6 @@
     }
   },
   {
-    "type": "legend_block",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "legend_entry",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "legend_entry",
-    "named": true,
-    "fields": {
-      "symbol": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "legend_symbol",
-            "named": true
-          }
-        ]
-      },
-      "value": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "legend_value",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "let_statement",
     "named": true,
     "fields": {
@@ -577,55 +469,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "map_block",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "ascii_block",
-          "named": true
-        },
-        {
-          "type": "legend_block",
-          "named": true
-        },
-        {
-          "type": "property_assignment",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "map_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "map_block",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -668,58 +511,6 @@
       "types": [
         {
           "type": "expression",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "pipe_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "property_block",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "polyline_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "property_block",
           "named": true
         }
       ]
@@ -855,19 +646,11 @@
           "named": true
         },
         {
-          "type": "map_definition",
-          "named": true
-        },
-        {
           "type": "meta_block",
           "named": true
         },
         {
           "type": "rect_definition",
-          "named": true
-        },
-        {
-          "type": "shape_map_definition",
           "named": true
         },
         {
@@ -906,109 +689,6 @@
       "types": [
         {
           "type": "scene_block",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "sdf_wall_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "property_block",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "shape_map_block",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "ascii_block",
-          "named": true
-        },
-        {
-          "type": "bumper_definition",
-          "named": true
-        },
-        {
-          "type": "flipper_definition",
-          "named": true
-        },
-        {
-          "type": "legend_block",
-          "named": true
-        },
-        {
-          "type": "pipe_definition",
-          "named": true
-        },
-        {
-          "type": "polyline_definition",
-          "named": true
-        },
-        {
-          "type": "property_assignment",
-          "named": true
-        },
-        {
-          "type": "sdf_wall_definition",
-          "named": true
-        },
-        {
-          "type": "spring_definition",
-          "named": true
-        },
-        {
-          "type": "wall_definition",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "shape_map_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "shape_map_block",
           "named": true
         }
       ]
@@ -1061,32 +741,6 @@
         },
         {
           "type": "state_declaration",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "spring_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "property_block",
           "named": true
         }
       ]
@@ -1312,32 +966,6 @@
     }
   },
   {
-    "type": "wall_definition",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "property_block",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "!",
     "named": false
   },
@@ -1422,18 +1050,6 @@
     "named": false
   },
   {
-    "type": "ascii",
-    "named": false
-  },
-  {
-    "type": "ascii_row",
-    "named": true
-  },
-  {
-    "type": "bumper",
-    "named": false
-  },
-  {
     "type": "call",
     "named": false
   },
@@ -1458,10 +1074,6 @@
     "named": false
   },
   {
-    "type": "flipper",
-    "named": false
-  },
-  {
     "type": "fn",
     "named": false
   },
@@ -1478,23 +1090,7 @@
     "named": false
   },
   {
-    "type": "legend",
-    "named": false
-  },
-  {
-    "type": "legend_symbol",
-    "named": true
-  },
-  {
-    "type": "legend_value",
-    "named": true
-  },
-  {
     "type": "let",
-    "named": false
-  },
-  {
-    "type": "map",
     "named": false
   },
   {
@@ -1510,14 +1106,6 @@
     "named": false
   },
   {
-    "type": "pipe",
-    "named": false
-  },
-  {
-    "type": "polyline",
-    "named": false
-  },
-  {
     "type": "rect",
     "named": false
   },
@@ -1530,20 +1118,8 @@
     "named": false
   },
   {
-    "type": "sdf_wall",
-    "named": false
-  },
-  {
     "type": "self",
     "named": true
-  },
-  {
-    "type": "shape_map",
-    "named": false
-  },
-  {
-    "type": "spring",
-    "named": false
   },
   {
     "type": "sprite",
@@ -1567,10 +1143,6 @@
   },
   {
     "type": "true",
-    "named": false
-  },
-  {
-    "type": "wall",
     "named": false
   },
   {

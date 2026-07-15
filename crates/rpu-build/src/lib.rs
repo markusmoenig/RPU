@@ -1,8 +1,10 @@
 use anyhow::{Context, Result, bail};
-use image::{ImageBuffer, Rgba, imageops::FilterType};
-use rpu_core::{Diagnostic, RpuProject};
+use rpu_core::{
+    BinaryOp, BuildBackend, BuiltCartridge, BuiltCartridgeManifest, BytecodeOp, CartridgeEntry,
+    CartridgeFormatInfo, CartridgeProjectInfo, CompareOp, Condition, Diagnostic, Expr,
+    ModuleBackend, OpCode, ProjectKind, RpuProject, SourceLanguage, wasm_abi,
+};
 use std::env;
-use std::fmt::Write as _;
 use std::fs;
 use std::io::Read;
 use std::net::TcpListener;
@@ -10,32 +12,57 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tiny_http::{Header, Response, Server, StatusCode};
 
+const WASM_BINDGEN_VERSION: &str = "0.2.126";
+
 pub fn new_project(name: &str, path: Option<&Path>) -> Result<()> {
     let root = path
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from(name));
     RpuProject::create(&root, name)?;
-    println!("Created RPU project at {}", root.display());
+    println!("Created RPU cartridge at {}", root.display());
     Ok(())
 }
 
-pub fn run_project(project_root: &Path) -> Result<()> {
+pub fn run_project(project_root: &Path, args: &[String]) -> Result<i32> {
+    if BuiltCartridge::is_bundle_path(project_root) {
+        return run_built_cartridge(project_root, args);
+    }
     let project = RpuProject::load(project_root)?;
-    rpu_runtime::run(project)
+    if project.build().backend == BuildBackend::Wasm {
+        let cartridge = build_cartridge(&project)?;
+        return run_built_cartridge(&cartridge, args);
+    }
+    match project.kind() {
+        ProjectKind::App => {
+            rpu_runtime::run(project)?;
+            Ok(0)
+        }
+        ProjectKind::Cli => run_cli_project(project, args),
+        ProjectKind::Module => bail!("module cartridges cannot be run directly"),
+    }
 }
 
 pub fn build_project(project_root: &Path) -> Result<()> {
     let project = RpuProject::load(project_root)?;
+    if project.build().backend == BuildBackend::Wasm {
+        let cartridge = build_cartridge(&project)?;
+        println!("Built cartridge at {}", cartridge.display());
+        return Ok(());
+    }
     let compiled = project.compile()?;
     let build_dir = project.root().join("build");
     fs::create_dir_all(&build_dir)
         .with_context(|| format!("failed to create {}", build_dir.display()))?;
 
     let summary = format!(
-        "RPU build placeholder\nproject = {}\nversion = {}\nroot = {}\nscene_defs = {}\nscene_files = {}\nscripts = {}\ncameras = {}\nrects = {}\nsprites = {}\nhandlers = {}\nops = {}\nassets = {}\nwarnings = {}\nerrors = {}\n\n{}",
+        "RPU build placeholder\nproject = {}\nversion = {}\nkind = {:?}\nbuild_language = {:?}\nbuild_backend = {:?}\nroot = {}\nmodules = {}\nscene_defs = {}\nscene_files = {}\nscripts = {}\ncameras = {}\nrects = {}\nsprites = {}\nhandlers = {}\nops = {}\nassets = {}\nwarnings = {}\nerrors = {}\n\n{}",
         compiled.name,
         compiled.version,
+        compiled.kind,
+        compiled.build.language,
+        compiled.build.backend,
         project.root().display(),
+        compiled.modules.len(),
         compiled.scene_count(),
         compiled.scenes.len(),
         compiled.bytecode_scripts.len(),
@@ -51,15 +78,561 @@ pub fn build_project(project_root: &Path) -> Result<()> {
     );
     fs::write(build_dir.join("BUILD.txt"), summary)
         .with_context(|| format!("failed to write {}", build_dir.join("BUILD.txt").display()))?;
-    export_terrain_debug_images(&compiled, project.root(), &build_dir)?;
 
     println!("Wrote build placeholder to {}", build_dir.display());
     Ok(())
 }
 
+fn run_built_cartridge(cartridge_root: &Path, args: &[String]) -> Result<i32> {
+    let cartridge = BuiltCartridge::load(cartridge_root)?;
+    let manifest = cartridge.manifest();
+    match manifest.project.kind {
+        ProjectKind::Cli => {}
+        ProjectKind::Module => bail!("module cartridges cannot be run directly"),
+        ProjectKind::App => bail!("WASM app cartridge execution is not implemented yet"),
+    }
+    if manifest.entry.backend != BuildBackend::Wasm {
+        bail!(
+            "cartridge entry backend {:?} is not executable yet",
+            manifest.entry.backend
+        );
+    }
+    let mut loaded_modules = Vec::with_capacity(manifest.modules.len());
+    for module in &manifest.modules {
+        if module.backend != ModuleBackend::Wasm {
+            bail!(
+                "module `{}` backend {:?} is not executable yet",
+                module.name,
+                module.backend
+            );
+        }
+        let path = cartridge.module_path(module);
+        let bytes = fs::read(&path).with_context(|| {
+            format!(
+                "failed to read module `{}` at {}",
+                module.name,
+                path.display()
+            )
+        })?;
+        let loaded = rpu_wasm::load_module(&bytes, &manifest.requires, args)
+            .with_context(|| format!("failed to initialize module `{}`", module.name))?;
+        loaded_modules.push(loaded);
+    }
+    let entry = cartridge.entry_path();
+    let bytes = fs::read(&entry).with_context(|| format!("failed to read {}", entry.display()))?;
+    rpu_wasm::run_cli(&bytes, &manifest.requires, args)
+        .with_context(|| format!("failed to run cartridge {}", cartridge.root().display()))
+}
+
+fn build_cartridge(project: &RpuProject) -> Result<PathBuf> {
+    let entry_artifact = build_wasm_project(project)?;
+    package_wasm_cartridge(project, &entry_artifact)
+}
+
+fn build_wasm_project(project: &RpuProject) -> Result<PathBuf> {
+    match project.build().language {
+        SourceLanguage::C => build_c_wasm_project(project),
+        SourceLanguage::Rpu => bail!("RPU-to-WASM compilation is not implemented yet"),
+        language => bail!("{language:?}-to-WASM compilation is not implemented yet"),
+    }
+}
+
+fn build_c_wasm_project(project: &RpuProject) -> Result<PathBuf> {
+    let sources_dir = project.root().join("src");
+    let mut sources = Vec::new();
+    collect_files_with_extension(&sources_dir, "c", &mut sources)?;
+    sources.sort();
+    if sources.is_empty() {
+        bail!(
+            "C cartridge does not contain any `.c` files under {}",
+            sources_dir.display()
+        );
+    }
+
+    let clang = find_wasm_clang().context(
+        "no WebAssembly-capable Clang found; install upstream LLVM and LLD (for example `brew install llvm lld`) or set RPU_CLANG",
+    )?;
+    let sdk_root = c_sdk_root();
+    let sdk_include = sdk_root.join("include");
+    let sdk_source = sdk_root.join("src/rpu.c");
+    if !sdk_include.join("rpu.h").is_file() || !sdk_source.is_file() {
+        bail!(
+            "RPU C SDK not found at {}; set RPU_C_SDK to its directory",
+            sdk_root.display()
+        );
+    }
+
+    let build_dir = project.root().join("build");
+    fs::create_dir_all(&build_dir)
+        .with_context(|| format!("failed to create {}", build_dir.display()))?;
+    let artifact = build_dir.join("main.wasm");
+
+    let mut command = Command::new(&clang);
+    command
+        .arg("--target=wasm32-unknown-unknown")
+        .arg("-std=c11")
+        .arg("-O2")
+        .arg("-ffreestanding")
+        .arg("-fno-builtin")
+        .arg("-fvisibility=hidden")
+        .arg("-nostdlib")
+        .arg("-I")
+        .arg(&sdk_include)
+        .arg(&sdk_source);
+    if project.kind() == ProjectKind::Module {
+        command.arg("-DRPU_CARTRIDGE_MODULE=1");
+    }
+    for source in &sources {
+        command.arg(source);
+    }
+    let output = command
+        .arg("-Wl,--no-entry")
+        .arg("-Wl,--allow-undefined")
+        .arg("-Wl,--export-memory")
+        .arg("-Wl,--initial-memory=131072")
+        .arg("-Wl,--max-memory=16777216")
+        .arg("-Wl,--strip-all")
+        .arg("-o")
+        .arg(&artifact)
+        .output()
+        .with_context(|| format!("failed to launch {}", clang.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("C-to-WASM compilation failed:\n{}", stderr.trim());
+    }
+
+    Ok(artifact)
+}
+
+fn package_wasm_cartridge(project: &RpuProject, entry_artifact: &Path) -> Result<PathBuf> {
+    let build_dir = project.root().join("build");
+    let artifact_name = cartridge_artifact_name(project.name());
+    let cartridge_dir = build_dir.join(format!("{artifact_name}.cart"));
+    let staging_dir = build_dir.join(format!(".{artifact_name}.cart.tmp"));
+
+    if staging_dir.exists() {
+        fs::remove_dir_all(&staging_dir)
+            .with_context(|| format!("failed to clean {}", staging_dir.display()))?;
+    }
+    fs::create_dir_all(&staging_dir)
+        .with_context(|| format!("failed to create {}", staging_dir.display()))?;
+
+    fs::copy(entry_artifact, staging_dir.join("main.wasm")).with_context(|| {
+        format!(
+            "failed to copy WASM entry {} into cartridge",
+            entry_artifact.display()
+        )
+    })?;
+    for directory in ["assets", "shaders", "modules"] {
+        let source = project.root().join(directory);
+        if source.exists() {
+            copy_cartridge_directory(&source, &staging_dir.join(directory))?;
+        }
+    }
+
+    let manifest = BuiltCartridgeManifest {
+        cartridge: CartridgeFormatInfo {
+            format_version: rpu_core::CARTRIDGE_FORMAT_VERSION,
+            abi_version: wasm_abi::ABI_VERSION,
+        },
+        project: CartridgeProjectInfo {
+            name: project.name().to_string(),
+            version: project.version().to_string(),
+            kind: project.kind(),
+        },
+        entry: CartridgeEntry {
+            backend: BuildBackend::Wasm,
+            path: PathBuf::from("main.wasm"),
+        },
+        requires: project.requires().clone(),
+        modules: project.modules().to_vec(),
+    };
+    let manifest_text =
+        toml::to_string_pretty(&manifest).context("failed to serialize cartridge manifest")?;
+    fs::write(staging_dir.join("manifest.toml"), manifest_text).with_context(|| {
+        format!(
+            "failed to write {}",
+            staging_dir.join("manifest.toml").display()
+        )
+    })?;
+
+    BuiltCartridge::load(&staging_dir).context("generated cartridge failed validation")?;
+    if cartridge_dir.exists() {
+        fs::remove_dir_all(&cartridge_dir)
+            .with_context(|| format!("failed to replace {}", cartridge_dir.display()))?;
+    }
+    fs::rename(&staging_dir, &cartridge_dir).with_context(|| {
+        format!(
+            "failed to move {} to {}",
+            staging_dir.display(),
+            cartridge_dir.display()
+        )
+    })?;
+    Ok(cartridge_dir)
+}
+
+fn cartridge_artifact_name(name: &str) -> String {
+    let name = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if name.is_empty() {
+        "cartridge".to_string()
+    } else {
+        name
+    }
+}
+
+fn copy_cartridge_directory(source: &Path, destination: &Path) -> Result<()> {
+    let source_metadata = fs::symlink_metadata(source)
+        .with_context(|| format!("failed to inspect {}", source.display()))?;
+    if source_metadata.file_type().is_symlink() {
+        bail!(
+            "cartridge resources may not be symbolic links: {}",
+            source.display()
+        );
+    }
+    fs::create_dir_all(destination)
+        .with_context(|| format!("failed to create {}", destination.display()))?;
+    for entry in fs::read_dir(source)
+        .with_context(|| format!("failed to read cartridge resources {}", source.display()))?
+    {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = destination.join(entry.file_name());
+        if file_type.is_symlink() {
+            bail!(
+                "cartridge resources may not be symbolic links: {}",
+                entry.path().display()
+            );
+        }
+        if file_type.is_dir() {
+            copy_cartridge_directory(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            fs::copy(entry.path(), &target).with_context(|| {
+                format!(
+                    "failed to copy cartridge resource {}",
+                    entry.path().display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_files_with_extension(dir: &Path, extension: &str, out: &mut Vec<PathBuf>) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)
+        .with_context(|| format!("failed to read source directory {}", dir.display()))?
+    {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_files_with_extension(&path, extension, out)?;
+        } else if path.extension() == Some(std::ffi::OsStr::new(extension)) {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn c_sdk_root() -> PathBuf {
+    env::var_os("RPU_C_SDK")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("sdk/c")
+        })
+}
+
+fn find_wasm_clang() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(path) = env::var_os("RPU_CLANG") {
+        candidates.push(PathBuf::from(path));
+    }
+    candidates.extend([
+        PathBuf::from("/opt/homebrew/opt/llvm/bin/clang"),
+        PathBuf::from("/usr/local/opt/llvm/bin/clang"),
+        PathBuf::from("clang"),
+    ]);
+
+    candidates
+        .into_iter()
+        .find(|candidate| clang_supports_wasm(candidate))
+}
+
+fn clang_supports_wasm(clang: &Path) -> bool {
+    Command::new(clang)
+        .arg("--print-targets")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains("wasm32"))
+        .unwrap_or(false)
+}
+
+fn run_cli_project(project: RpuProject, args: &[String]) -> Result<i32> {
+    let compiled = project.compile()?;
+    if compiled.has_errors() {
+        bail!(
+            "CLI cartridge has compile errors:\n{}",
+            format_diagnostics(&compiled.diagnostics)
+        );
+    }
+
+    let mut context = CliContext {
+        args: args.to_vec(),
+    };
+    let mut ran = false;
+    for script in &compiled.bytecode_scripts {
+        for handler in &script.handlers {
+            if handler.event != "run" {
+                continue;
+            }
+            ran = true;
+            if let CliSignal::Exit(code) = execute_cli_ops(&handler.ops, &mut context)
+                .with_context(|| format!("failed to run {}", script.path.display()))?
+            {
+                return Ok(code);
+            }
+        }
+    }
+
+    if !ran {
+        bail!("CLI cartridge does not define `on run()` in any script");
+    }
+
+    Ok(0)
+}
+
+struct CliContext {
+    args: Vec<String>,
+}
+
+enum CliSignal {
+    Continue,
+    Exit(i32),
+}
+
+#[derive(Clone)]
+enum CliValue {
+    Number(f32),
+    String(String),
+}
+
+fn execute_cli_ops(ops: &[BytecodeOp], context: &mut CliContext) -> Result<CliSignal> {
+    for op in ops {
+        match &op.op {
+            OpCode::Log(message) => println!("{message}"),
+            OpCode::Call(name, args) if name == "print" || name == "log" => {
+                execute_cli_print(name, args, op.line, context)?
+            }
+            OpCode::Call(name, args) if name == "eprint" => {
+                execute_cli_eprint(name, args, op.line, context)?
+            }
+            OpCode::Call(name, args) if name == "exit" => {
+                return Ok(CliSignal::Exit(execute_cli_exit(
+                    name, args, op.line, context,
+                )?));
+            }
+            OpCode::IgnoreValue(_) => {}
+            OpCode::Raw(raw) => bail!(
+                "unsupported CLI script statement at line {}: {}",
+                op.line,
+                raw
+            ),
+            OpCode::If(condition, body, else_body) => {
+                let branch = if eval_cli_condition(condition, context)? {
+                    body
+                } else {
+                    else_body
+                };
+                if let CliSignal::Exit(code) = execute_cli_ops(branch, context)? {
+                    return Ok(CliSignal::Exit(code));
+                }
+            }
+            other => bail!(
+                "unsupported CLI script operation at line {}: {:?}",
+                op.line,
+                other
+            ),
+        }
+    }
+    Ok(CliSignal::Continue)
+}
+
+fn execute_cli_print(name: &str, args: &[Expr], line: usize, context: &CliContext) -> Result<()> {
+    let message = cli_single_arg(name, args, line, context)?.to_output_string();
+    println!("{message}");
+    Ok(())
+}
+
+fn execute_cli_eprint(name: &str, args: &[Expr], line: usize, context: &CliContext) -> Result<()> {
+    let message = cli_single_arg(name, args, line, context)?.to_output_string();
+    eprintln!("{message}");
+    Ok(())
+}
+
+fn execute_cli_exit(name: &str, args: &[Expr], line: usize, context: &CliContext) -> Result<i32> {
+    let code = cli_single_arg(name, args, line, context)?.to_number(name, line)?;
+    Ok(code.round().clamp(0.0, 255.0) as i32)
+}
+
+fn cli_single_arg(
+    name: &str,
+    args: &[Expr],
+    line: usize,
+    context: &CliContext,
+) -> Result<CliValue> {
+    let Some(expr) = args.first() else {
+        bail!("CLI `{name}` call expects one argument at line {line}");
+    };
+    if args.len() != 1 {
+        bail!("CLI `{name}` call expects one argument at line {line}");
+    }
+    eval_cli_expr(expr, context)
+}
+
+fn eval_cli_condition(condition: &Condition, context: &CliContext) -> Result<bool> {
+    match condition {
+        Condition::Compare { left, op, right } => {
+            let left = eval_cli_expr(left, context)?;
+            let right = eval_cli_expr(right, context)?;
+            compare_cli_values(&left, *op, &right)
+        }
+        Condition::And(left, right) => {
+            Ok(eval_cli_condition(left, context)? && eval_cli_condition(right, context)?)
+        }
+        Condition::Or(left, right) => {
+            Ok(eval_cli_condition(left, context)? || eval_cli_condition(right, context)?)
+        }
+        Condition::Not(condition) => Ok(!eval_cli_condition(condition, context)?),
+    }
+}
+
+fn eval_cli_expr(expr: &Expr, context: &CliContext) -> Result<CliValue> {
+    match expr {
+        Expr::Number(value) => Ok(CliValue::Number(*value)),
+        Expr::String(value) => Ok(CliValue::String(value.clone())),
+        Expr::Call(name, args) if name == "arg_count" => {
+            if !args.is_empty() {
+                bail!("CLI `arg_count` expects no arguments");
+            }
+            Ok(CliValue::Number(context.args.len() as f32))
+        }
+        Expr::Call(name, args) if name == "arg" => {
+            let index = cli_single_arg(name, args, 0, context)?.to_number(name, 0)?;
+            let index = index.round().max(0.0) as usize;
+            Ok(CliValue::String(
+                context.args.get(index).cloned().unwrap_or_default(),
+            ))
+        }
+        Expr::Binary(left, op, right) => {
+            let left = eval_cli_expr(left, context)?;
+            let right = eval_cli_expr(right, context)?;
+            eval_cli_binary(&left, *op, &right)
+        }
+        Expr::Clamp(value, min, max) => {
+            let value = eval_cli_expr(value, context)?.to_number("clamp", 0)?;
+            let min = eval_cli_expr(min, context)?.to_number("clamp", 0)?;
+            let max = eval_cli_expr(max, context)?.to_number("clamp", 0)?;
+            Ok(CliValue::Number(value.clamp(min, max)))
+        }
+        Expr::Variable(name) => bail!("CLI variable `{name}` is not supported yet"),
+        Expr::Dt => Ok(CliValue::Number(0.0)),
+        Expr::Target(_) | Expr::Color(_) | Expr::Call(_, _) => {
+            bail!("unsupported CLI expression: {:?}", expr)
+        }
+    }
+}
+
+fn eval_cli_binary(left: &CliValue, op: BinaryOp, right: &CliValue) -> Result<CliValue> {
+    if matches!(op, BinaryOp::Add) {
+        if let (CliValue::String(left), CliValue::String(right)) = (left, right) {
+            return Ok(CliValue::String(format!("{left}{right}")));
+        }
+    }
+    let left = left.to_number("binary expression", 0)?;
+    let right = right.to_number("binary expression", 0)?;
+    Ok(CliValue::Number(match op {
+        BinaryOp::Add => left + right,
+        BinaryOp::Sub => left - right,
+        BinaryOp::Mul => left * right,
+        BinaryOp::Div => {
+            if right.abs() < f32::EPSILON {
+                0.0
+            } else {
+                left / right
+            }
+        }
+    }))
+}
+
+fn compare_cli_values(left: &CliValue, op: CompareOp, right: &CliValue) -> Result<bool> {
+    match (left, right) {
+        (CliValue::Number(left), CliValue::Number(right)) => Ok(match op {
+            CompareOp::Less => left < right,
+            CompareOp::LessEqual => left <= right,
+            CompareOp::Greater => left > right,
+            CompareOp::GreaterEqual => left >= right,
+            CompareOp::Equal => (left - right).abs() < f32::EPSILON,
+            CompareOp::NotEqual => (left - right).abs() >= f32::EPSILON,
+        }),
+        (CliValue::String(left), CliValue::String(right)) => Ok(match op {
+            CompareOp::Equal => left == right,
+            CompareOp::NotEqual => left != right,
+            _ => false,
+        }),
+        _ => Ok(match op {
+            CompareOp::Equal => false,
+            CompareOp::NotEqual => true,
+            _ => false,
+        }),
+    }
+}
+
+impl CliValue {
+    fn to_output_string(&self) -> String {
+        match self {
+            CliValue::Number(value) => {
+                if value.fract().abs() < f32::EPSILON {
+                    format!("{}", *value as i32)
+                } else {
+                    value.to_string()
+                }
+            }
+            CliValue::String(value) => value.clone(),
+        }
+    }
+
+    fn to_number(&self, name: &str, line: usize) -> Result<f32> {
+        match self {
+            CliValue::Number(value) => Ok(*value),
+            CliValue::String(value) => value.parse::<f32>().with_context(|| {
+                if line == 0 {
+                    format!("CLI `{name}` expected a number")
+                } else {
+                    format!("CLI `{name}` expected a number at line {line}")
+                }
+            }),
+        }
+    }
+}
+
 pub fn build_web_project(project_root: &Path) -> Result<()> {
-    ensure_web_prerequisites()?;
     let project = RpuProject::load(project_root)?;
+    if project.kind() != ProjectKind::App {
+        bail!("web export currently supports only app cartridges");
+    }
+    ensure_web_prerequisites()?;
     let compiled = project.compile()?;
     if compiled.has_errors() {
         bail!("project has compile errors; fix them before building for web");
@@ -104,9 +677,11 @@ pub fn build_web_project(project_root: &Path) -> Result<()> {
         bail!("cargo build for web export failed");
     }
 
-    let wasm_bindgen = find_wasm_bindgen().context(
-        "wasm-bindgen CLI is required; install it with `cargo install wasm-bindgen-cli`",
-    )?;
+    let wasm_bindgen = find_wasm_bindgen().with_context(|| {
+        format!(
+            "wasm-bindgen CLI {WASM_BINDGEN_VERSION} is required; install it with `cargo install wasm-bindgen-cli --version {WASM_BINDGEN_VERSION} --locked --force`"
+        )
+    })?;
     let wasm_path = app_root.join("target/wasm32-unknown-unknown/release/rpu_web_export.wasm");
     let status = Command::new(wasm_bindgen)
         .args(["--target", "web", "--out-dir"])
@@ -179,6 +754,9 @@ pub fn serve_web_project(project_root: &Path, port: u16) -> Result<()> {
 pub fn export_xcode(project_root: &Path, output: Option<&Path>) -> Result<()> {
     ensure_xcode_export_prerequisites()?;
     let project = RpuProject::load(project_root)?;
+    if project.kind() != ProjectKind::App {
+        bail!("Xcode export currently supports only app cartridges");
+    }
     let compiled = project.compile()?;
     let output_root = output
         .map(Path::to_path_buf)
@@ -460,7 +1038,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0"
-wasm-bindgen = "=0.2.100"
+wasm-bindgen = "={WASM_BINDGEN_VERSION}"
 rpu-core = {{ path = "{}" }}
 rpu-runtime = {{ path = "{}" }}
 rpu-scenevm = {{ path = "{}" }}
@@ -2217,14 +2795,20 @@ fn canonical_display(path: PathBuf) -> String {
 fn find_wasm_bindgen() -> Option<String> {
     let candidates = ["wasm-bindgen", "wasm-bindgen-cli"];
     for candidate in candidates {
-        let Ok(status) = Command::new(candidate).arg("--version").status() else {
+        let Ok(output) = Command::new(candidate).arg("--version").output() else {
             continue;
         };
-        if status.success() {
+        if output.status.success()
+            && parse_wasm_bindgen_version(&output.stdout) == Some(WASM_BINDGEN_VERSION)
+        {
             return Some(candidate.to_string());
         }
     }
     None
+}
+
+fn parse_wasm_bindgen_version(output: &[u8]) -> Option<&str> {
+    std::str::from_utf8(output).ok()?.split_whitespace().last()
 }
 
 fn ensure_web_prerequisites() -> Result<()> {
@@ -2253,7 +2837,7 @@ fn ensure_web_prerequisites() -> Result<()> {
 
     if find_wasm_bindgen().is_none() {
         bail!(
-            "wasm-bindgen CLI is required for web export.\nInstall it with:\n  cargo install wasm-bindgen-cli"
+            "wasm-bindgen CLI {WASM_BINDGEN_VERSION} is required for web export.\nInstall or update it with:\n  cargo install wasm-bindgen-cli --version {WASM_BINDGEN_VERSION} --locked --force"
         );
     }
 
@@ -2320,4924 +2904,4 @@ fn content_type_for(path: &Path) -> Option<&'static str> {
         Some("ttf") => Some("font/ttf"),
         _ => None,
     }
-}
-
-fn export_terrain_debug_images(
-    compiled: &rpu_core::CompiledProject,
-    project_root: &Path,
-    build_dir: &Path,
-) -> Result<()> {
-    let output_dir = build_dir.join("debug/maps");
-    let mut wrote_any = false;
-    if output_dir.exists() {
-        fs::remove_dir_all(&output_dir)
-            .with_context(|| format!("failed to clear {}", output_dir.display()))?;
-    }
-
-    for document in &compiled.parsed_scenes {
-        let document_stem = document
-            .path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("scene");
-
-        for scene in &document.scenes {
-            for shape_map in &scene.shape_maps {
-                fs::create_dir_all(&output_dir)
-                    .with_context(|| format!("failed to create {}", output_dir.display()))?;
-                let debug_prefix = format!(
-                    "{}__{}__{}",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&shape_map.name)
-                );
-                let layout_path = output_dir.join(format!("{debug_prefix}__shape_layout.png"));
-                write_shape_map_layout_png(scene, shape_map, &compiled.window, &layout_path)?;
-                let runtime_path = output_dir.join(format!("{debug_prefix}__shape_runtime.txt"));
-                write_shape_map_runtime_debug_txt(scene, shape_map, &runtime_path)?;
-                wrote_any = true;
-            }
-
-            for map in &scene.maps {
-                fs::create_dir_all(&output_dir)
-                    .with_context(|| format!("failed to create {}", output_dir.display()))?;
-                let debug_prefix = format!(
-                    "{}__{}__{}",
-                    sanitize_debug_name(document_stem),
-                    sanitize_debug_name(&scene.name),
-                    sanitize_debug_name(&map.name)
-                );
-                let layout_path = output_dir.join(format!("{debug_prefix}__layout.png"));
-                write_map_layout_png(project_root, scene, map, &compiled.window, &layout_path)?;
-                wrote_any = true;
-
-                let classified = map.classify_terrain();
-                if classified.cells.is_empty() {
-                    continue;
-                }
-
-                let path = output_dir.join(format!("{debug_prefix}.png"));
-                write_terrain_debug_png(&classified, &path)?;
-                let region_path = output_dir.join(format!("{debug_prefix}__regions.png"));
-                write_terrain_regions_png(&classified, &region_path)?;
-                let tangent_path = output_dir.join(format!("{debug_prefix}__tangents.png"));
-                write_terrain_tangents_png(&classified, &tangent_path)?;
-                let material_path = output_dir.join(format!("{debug_prefix}__materials.png"));
-                write_terrain_materials_png(&classified, &material_path)?;
-                if matches!(classified.render, rpu_core::TerrainRenderMode::Synth) {
-                    let synth_path = output_dir.join(format!("{debug_prefix}__synth.png"));
-                    write_terrain_synth_png(project_root, map, &classified, &synth_path)?;
-                    let synth_layers_path =
-                        output_dir.join(format!("{debug_prefix}__synth_layers.png"));
-                    write_terrain_synth_layers_png(project_root, &classified, &synth_layers_path)?;
-                }
-                let strip_path = output_dir.join(format!("{debug_prefix}__surface_strips.png"));
-                write_terrain_surface_strips_png(project_root, &classified, &strip_path)?;
-                let transition_path = output_dir.join(format!("{debug_prefix}__transitions.png"));
-                write_terrain_transitions_png(&classified, &transition_path)?;
-                let band_path = output_dir.join(format!("{debug_prefix}__bands.png"));
-                write_terrain_bands_png(&classified, &band_path)?;
-                let loop_path = output_dir.join(format!("{debug_prefix}__loops.png"));
-                write_terrain_loops_png(&classified, &loop_path)?;
-                let contour_path = output_dir.join(format!("{debug_prefix}__contours.png"));
-                write_terrain_contours_png(&classified, &contour_path)?;
-                let influence_path = output_dir.join(format!("{debug_prefix}__influences.png"));
-                write_terrain_influences_png(&classified, &influence_path)?;
-                let heightfield_path = output_dir.join(format!("{debug_prefix}__heightfield.png"));
-                write_terrain_heightfield_png(&classified, &heightfield_path)?;
-                let fragments_path = output_dir.join(format!("{debug_prefix}__fragments.png"));
-                write_terrain_fragments_png(map, &fragments_path)?;
-            }
-        }
-    }
-
-    if wrote_any {
-        fs::write(output_dir.join("README.txt"), terrain_debug_readme()).with_context(|| {
-            format!(
-                "failed to write {}",
-                output_dir.join("README.txt").display()
-            )
-        })?;
-        println!("Wrote map debug images to {}", output_dir.display());
-    }
-
-    Ok(())
-}
-
-fn write_map_layout_png(
-    project_root: &Path,
-    scene: &rpu_core::SceneNode,
-    map: &rpu_core::AsciiMapNode,
-    window: &rpu_core::WindowConfig,
-    path: &Path,
-) -> Result<()> {
-    let scale = 2.0f32;
-    let width = (window.width.max(1) as f32 * scale).round() as u32;
-    let height = (window.height.max(1) as f32 * scale).round() as u32;
-    let (view_x, view_y) = scene
-        .camera
-        .as_ref()
-        .map(|camera| {
-            (
-                camera.pos[0] - window.width as f32 * 0.5,
-                camera.pos[1] - window.height as f32 * 0.5,
-            )
-        })
-        .unwrap_or((0.0, 0.0));
-    let background = scene
-        .camera
-        .as_ref()
-        .map(|camera| scene_color_rgba(camera.background))
-        .unwrap_or_else(|| rgba([14, 18, 24, 255]));
-    let mut image = ImageBuffer::from_pixel(width, height, background);
-    let legend: std::collections::HashMap<char, &rpu_core::MapLegendMeaning> = map
-        .legend
-        .iter()
-        .map(|entry| (entry.symbol, &entry.meaning))
-        .collect();
-    let markers = map_debug_markers(map);
-
-    for (row, line) in map.rows.iter().enumerate() {
-        for (col, ch) in line.chars().enumerate() {
-            if map_cell_is_empty(ch) {
-                continue;
-            }
-            let x = map.origin[0] + col as f32 * map.cell[0];
-            let y = map.origin[1] + row as f32 * map.cell[1];
-            let ix = ((x - view_x) * scale).round() as i32;
-            let iy = ((y - view_y) * scale).round() as i32;
-            let iw = (map.cell[0] * scale).round().max(1.0) as u32;
-            let ih = (map.cell[1] * scale).round().max(1.0) as u32;
-            match legend.get(&ch) {
-                Some(rpu_core::MapLegendMeaning::Tile(tile)) => {
-                    if let Some(tile) = load_layout_texture(project_root, &tile.texture, iw, ih) {
-                        blit_rgba(&mut image, &tile, ix, iy);
-                    } else {
-                        fill_rect_i32(&mut image, ix, iy, iw, ih, rgba([80, 84, 94, 255]));
-                    }
-                }
-                Some(rpu_core::MapLegendMeaning::Texture(texture)) => {
-                    if let Some(tile) = load_layout_texture(project_root, texture, iw, ih) {
-                        blit_rgba(&mut image, &tile, ix, iy);
-                    } else {
-                        fill_rect_i32(&mut image, ix, iy, iw, ih, rgba([80, 84, 94, 255]));
-                    }
-                }
-                Some(rpu_core::MapLegendMeaning::Color(color)) => {
-                    fill_rect_i32(&mut image, ix, iy, iw, ih, scene_color_rgba(*color));
-                }
-                Some(rpu_core::MapLegendMeaning::Terrain(terrain)) => {
-                    fill_rect_i32(
-                        &mut image,
-                        ix,
-                        iy,
-                        iw,
-                        ih,
-                        material_fill_rgba(&terrain.material),
-                    );
-                }
-                Some(rpu_core::MapLegendMeaning::Marker)
-                | Some(rpu_core::MapLegendMeaning::Spawn(_)) => {
-                    draw_spawn_marker(&mut image, ix, iy, iw, ih);
-                }
-                _ => fill_rect_i32(&mut image, ix, iy, iw, ih, rgba([80, 84, 94, 255])),
-            }
-        }
-    }
-
-    draw_map_top_collision_edges(&mut image, map, &legend, view_x, view_y, scale);
-    draw_map_spawn_instance_colliders(&mut image, scene, map, &legend, view_x, view_y, scale);
-
-    for rect in &scene.rects {
-        if !rect.visual.visible || rect.visual.template {
-            continue;
-        }
-        draw_world_outline(
-            &mut image,
-            rect.visual.pos[0],
-            rect.visual.pos[1],
-            rect.visual.size[0],
-            rect.visual.size[1],
-            view_x,
-            view_y,
-            scale,
-            rgba([255, 80, 80, 230]),
-        );
-    }
-
-    for sprite in &scene.sprites {
-        if !sprite.visual.visible || sprite.visual.template {
-            continue;
-        }
-        let pos = sprite
-            .symbol
-            .as_ref()
-            .and_then(|symbol| markers.get(symbol))
-            .or_else(|| markers.get(&sprite.name))
-            .copied()
-            .unwrap_or(sprite.visual.pos);
-        draw_world_outline(
-            &mut image,
-            pos[0],
-            pos[1],
-            sprite.visual.size[0],
-            sprite.visual.size[1],
-            view_x,
-            view_y,
-            scale,
-            rgba([255, 0, 255, 240]),
-        );
-        if let Some(collider_size) = sprite.collider_size {
-            draw_world_outline(
-                &mut image,
-                pos[0] + sprite.collider_offset[0],
-                pos[1] + sprite.collider_offset[1],
-                collider_size[0],
-                collider_size[1],
-                view_x,
-                view_y,
-                scale,
-                rgba([0, 255, 120, 245]),
-            );
-        }
-        let cx = ((pos[0] + sprite.visual.size[0] * 0.5 - view_x) * scale).round() as i32;
-        let cy = ((pos[1] + sprite.visual.size[1] * 0.5 - view_y) * scale).round() as i32;
-        draw_line(&mut image, cx - 4, cy, cx + 4, cy, rgba([255, 0, 255, 240]));
-        draw_line(&mut image, cx, cy - 4, cx, cy + 4, rgba([255, 0, 255, 240]));
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_shape_map_layout_png(
-    scene: &rpu_core::SceneNode,
-    map: &rpu_core::ShapeMapNode,
-    window: &rpu_core::WindowConfig,
-    path: &Path,
-) -> Result<()> {
-    let scale = 2.0f32;
-    let width = (window.width.max(1) as f32 * scale).round() as u32;
-    let height = (window.height.max(1) as f32 * scale).round() as u32;
-    let (view_x, view_y) = scene
-        .camera
-        .as_ref()
-        .map(|camera| {
-            (
-                camera.pos[0] - window.width as f32 * 0.5,
-                camera.pos[1] - window.height as f32 * 0.5,
-            )
-        })
-        .unwrap_or((0.0, 0.0));
-    let background = scene
-        .camera
-        .as_ref()
-        .map(|camera| scene_color_rgba(camera.background))
-        .unwrap_or_else(|| rgba([14, 18, 24, 255]));
-    let mut image = ImageBuffer::from_pixel(width, height, background);
-
-    for rect in &scene.rects {
-        if !rect.visual.visible || rect.visual.template {
-            continue;
-        }
-        let color = scene_color_rgba(rect.visual.color);
-        if color[3] == 0 {
-            draw_world_outline(
-                &mut image,
-                rect.visual.pos[0],
-                rect.visual.pos[1],
-                rect.visual.size[0],
-                rect.visual.size[1],
-                view_x,
-                view_y,
-                scale,
-                rgba([255, 80, 80, 230]),
-            );
-            draw_world_cross(
-                &mut image,
-                [
-                    rect.visual.pos[0] + rect.visual.size[0] * 0.5,
-                    rect.visual.pos[1] + rect.visual.size[1] * 0.5,
-                ],
-                view_x,
-                view_y,
-                scale,
-                rgba([255, 80, 80, 230]),
-            );
-        } else {
-            fill_world_rect(
-                &mut image,
-                rect.visual.pos[0],
-                rect.visual.pos[1],
-                rect.visual.size[0],
-                rect.visual.size[1],
-                view_x,
-                view_y,
-                scale,
-                color,
-            );
-        }
-    }
-
-    for sprite in &scene.sprites {
-        if !sprite.visual.visible || sprite.visual.template {
-            continue;
-        }
-        let color = scene_color_rgba(sprite.visual.color);
-        let texture = sprite.textures.first().map(String::as_str).unwrap_or("");
-        if color[3] == 0 {
-            draw_world_outline(
-                &mut image,
-                sprite.visual.pos[0],
-                sprite.visual.pos[1],
-                sprite.visual.size[0],
-                sprite.visual.size[1],
-                view_x,
-                view_y,
-                scale,
-                rgba([255, 0, 255, 230]),
-            );
-            draw_world_cross(
-                &mut image,
-                [
-                    sprite.visual.pos[0] + sprite.visual.size[0] * 0.5,
-                    sprite.visual.pos[1] + sprite.visual.size[1] * 0.5,
-                ],
-                view_x,
-                view_y,
-                scale,
-                rgba([255, 0, 255, 230]),
-            );
-        } else if texture.starts_with("generated://circle") {
-            draw_world_circle(
-                &mut image,
-                [
-                    sprite.visual.pos[0] + sprite.visual.size[0] * 0.5,
-                    sprite.visual.pos[1] + sprite.visual.size[1] * 0.5,
-                ],
-                sprite.visual.size[0].min(sprite.visual.size[1]) * 0.5,
-                view_x,
-                view_y,
-                scale,
-                color,
-            );
-        } else if texture.starts_with("generated://capsule") {
-            draw_world_capsule(
-                &mut image,
-                sprite.visual.pos[0],
-                sprite.visual.pos[1],
-                sprite.visual.size[0],
-                sprite.visual.size[1],
-                view_x,
-                view_y,
-                scale,
-                color,
-            );
-        } else {
-            fill_world_rect(
-                &mut image,
-                sprite.visual.pos[0],
-                sprite.visual.pos[1],
-                sprite.visual.size[0],
-                sprite.visual.size[1],
-                view_x,
-                view_y,
-                scale,
-                color,
-            );
-        }
-    }
-
-    let points = rpu_core::compile_shape_map_points(map);
-    for wall in &map.walls {
-        let path = rpu_core::compile_shape_wall_path(wall, &points);
-        for segment in path.windows(2) {
-            draw_thick_world_line(
-                &mut image,
-                segment[0],
-                segment[1],
-                wall.thickness.max(1.0),
-                view_x,
-                view_y,
-                scale,
-                scene_color_rgba(wall.color),
-            );
-        }
-    }
-
-    for pipe in &map.pipes {
-        for (start, end) in rpu_core::compile_shape_pipe_segments(pipe, &points) {
-            draw_thick_world_line(
-                &mut image,
-                start,
-                end,
-                pipe.thickness.max(1.0),
-                view_x,
-                view_y,
-                scale,
-                scene_color_rgba(pipe.color),
-            );
-        }
-    }
-
-    for sdf_wall in &map.sdf_walls {
-        for (start, end) in rpu_core::compile_shape_sdf_wall_segments(sdf_wall, &points) {
-            draw_thick_world_line(
-                &mut image,
-                start,
-                end,
-                sdf_wall.radius.max(1.0) * 2.0,
-                view_x,
-                view_y,
-                scale,
-                scene_color_rgba(sdf_wall.color),
-            );
-        }
-    }
-
-    for polyline in &map.polylines {
-        for (start, end) in rpu_core::compile_shape_polyline_segments(polyline, &points) {
-            draw_thick_world_line(
-                &mut image,
-                start,
-                end,
-                polyline.radius.max(1.0) * 2.0,
-                view_x,
-                view_y,
-                scale,
-                scene_color_rgba(polyline.color),
-            );
-        }
-    }
-
-    for spring in &map.springs {
-        let spring_points = shape_spring_points(spring, &points);
-        for segment in spring_points.windows(2) {
-            draw_thick_world_line(
-                &mut image,
-                segment[0],
-                segment[1],
-                spring.wire_radius.max(0.5) * 2.0,
-                view_x,
-                view_y,
-                scale,
-                scene_color_rgba(spring.color),
-            );
-        }
-        if let Some((start, end)) = shape_spring_cap(spring, &points) {
-            draw_thick_world_line(
-                &mut image,
-                start,
-                end,
-                spring.cap_radius.max(0.5) * 2.0,
-                view_x,
-                view_y,
-                scale,
-                scene_color_rgba(spring.color),
-            );
-        }
-    }
-
-    for bumper in &map.bumpers {
-        let Some(point) = points.get(&bumper.point) else {
-            continue;
-        };
-        let color = scene_color_rgba(bumper.color);
-        draw_world_circle(
-            &mut image,
-            *point,
-            bumper.radius * 1.72,
-            view_x,
-            view_y,
-            scale,
-            rgba([color[0], color[1], color[2], 56]),
-        );
-        draw_world_circle(
-            &mut image,
-            *point,
-            bumper.radius,
-            view_x,
-            view_y,
-            scale,
-            color,
-        );
-        draw_world_circle(
-            &mut image,
-            [
-                point[0] - bumper.radius * 0.2,
-                point[1] - bumper.radius * 0.28,
-            ],
-            bumper.radius * 0.36,
-            view_x,
-            view_y,
-            scale,
-            rgba([255, 255, 255, 72]),
-        );
-    }
-
-    for flipper in &map.flippers {
-        let Some(pivot) = points.get(&flipper.pivot) else {
-            continue;
-        };
-        let end = [
-            pivot[0] + flipper.rest_angle.cos() * flipper.length,
-            pivot[1] + flipper.rest_angle.sin() * flipper.length,
-        ];
-        draw_tapered_world_line(
-            &mut image,
-            *pivot,
-            end,
-            if flipper.base_radius > 0.0 {
-                flipper.base_radius
-            } else {
-                flipper.thickness.max(1.0) * 0.5
-            },
-            if flipper.tip_radius > 0.0 {
-                flipper.tip_radius
-            } else {
-                flipper.thickness.max(1.0) * 0.5
-            },
-            view_x,
-            view_y,
-            scale,
-            scene_color_rgba(flipper.color),
-        );
-    }
-
-    let symbols = shape_map_point_symbols(map);
-    for (symbol, point) in symbols {
-        fill_world_rect(
-            &mut image,
-            point[0] - 4.0,
-            point[1] - 4.0,
-            8.0,
-            8.0,
-            view_x,
-            view_y,
-            scale,
-            rgba([5, 10, 20, 230]),
-        );
-        draw_debug_char_world(
-            &mut image,
-            symbol,
-            point,
-            view_x,
-            view_y,
-            scale,
-            rgba([255, 240, 80, 255]),
-        );
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_shape_map_runtime_debug_txt(
-    scene: &rpu_core::SceneNode,
-    map: &rpu_core::ShapeMapNode,
-    path: &Path,
-) -> Result<()> {
-    let mut output = String::new();
-    let points = rpu_core::compile_shape_map_points(map);
-
-    let _ = writeln!(output, "shape_map {}", map.name);
-    let _ = writeln!(
-        output,
-        "origin=({:.2}, {:.2}) cell=({:.2}, {:.2})",
-        map.origin[0], map.origin[1], map.cell[0], map.cell[1]
-    );
-    let _ = writeln!(output);
-    let _ = writeln!(output, "[points]");
-
-    let mut named_points = points.iter().collect::<Vec<_>>();
-    named_points.sort_by(|a, b| a.0.cmp(b.0));
-    for (name, point) in named_points {
-        let _ = writeln!(output, "{name}: center=({:.2}, {:.2})", point[0], point[1]);
-    }
-
-    let _ = writeln!(output);
-    let _ = writeln!(output, "[symbols]");
-    for (symbol, point) in shape_map_point_symbols(map) {
-        let _ = writeln!(
-            output,
-            "{symbol}: center=({:.2}, {:.2})",
-            point[0], point[1]
-        );
-    }
-
-    let _ = writeln!(output);
-    let _ = writeln!(output, "[bumpers]");
-    for bumper in &map.bumpers {
-        match points.get(&bumper.point) {
-            Some(point) => {
-                let _ = writeln!(
-                    output,
-                    "{}: point={} center=({:.2}, {:.2}) radius={:.2} trigger_top_left_for_same_size=({:.2}, {:.2})",
-                    bumper.name,
-                    bumper.point,
-                    point[0],
-                    point[1],
-                    bumper.radius,
-                    point[0] - bumper.radius,
-                    point[1] - bumper.radius
-                );
-            }
-            None => {
-                let _ = writeln!(output, "{}: missing point={}", bumper.name, bumper.point);
-            }
-        }
-    }
-
-    let _ = writeln!(output);
-    let _ = writeln!(output, "[springs]");
-    for spring in &map.springs {
-        if let Some((bottom, top)) = shape_spring_endpoints(spring, &points) {
-            let dx = bottom[0] - top[0];
-            let dy = bottom[1] - top[1];
-            let length = (dx * dx + dy * dy).sqrt();
-            let axis = if length <= f32::EPSILON {
-                [0.0, 1.0]
-            } else {
-                [dx / length, dy / length]
-            };
-            let ball_radius = 6.0;
-            let rest_ball_center = [
-                top[0] - axis[0] * (ball_radius + spring.cap_radius),
-                top[1] - axis[1] * (ball_radius + spring.cap_radius),
-            ];
-            let _ = writeln!(
-                output,
-                "{}: bottom=({:.2}, {:.2}) top=({:.2}, {:.2}) axis=({:.3}, {:.3}) cap_width={:.2} cap_radius={:.2} suggested_ball_top_left=({:.2}, {:.2})",
-                spring.name,
-                bottom[0],
-                bottom[1],
-                top[0],
-                top[1],
-                axis[0],
-                axis[1],
-                spring.cap_width,
-                spring.cap_radius,
-                rest_ball_center[0] - ball_radius,
-                rest_ball_center[1] - ball_radius
-            );
-            if let Some((cap_start, cap_end)) = shape_spring_cap(spring, &points) {
-                let _ = writeln!(
-                    output,
-                    "  rest_cap=({:.2}, {:.2}) -> ({:.2}, {:.2})",
-                    cap_start[0], cap_start[1], cap_end[0], cap_end[1]
-                );
-            }
-        } else {
-            let _ = writeln!(output, "{}: missing endpoints", spring.name);
-        }
-    }
-
-    let _ = writeln!(output);
-    let _ = writeln!(output, "[scene rects]");
-    for rect in &scene.rects {
-        let pos = rect.visual.pos;
-        let size = rect.visual.size;
-        let _ = writeln!(
-            output,
-            "{}: group={} top_left=({:.2}, {:.2}) center=({:.2}, {:.2}) size=({:.2}, {:.2}) layer={} z={} alpha={:.2}",
-            rect.name,
-            rect.visual.group.as_deref().unwrap_or("-"),
-            pos[0],
-            pos[1],
-            pos[0] + size[0] * 0.5,
-            pos[1] + size[1] * 0.5,
-            size[0],
-            size[1],
-            rect.visual.layer,
-            rect.visual.z,
-            rect.visual.color[3]
-        );
-    }
-
-    let _ = writeln!(output);
-    let _ = writeln!(output, "[scene sprites]");
-    for sprite in &scene.sprites {
-        let pos = sprite.visual.pos;
-        let size = sprite.visual.size;
-        let _ = writeln!(
-            output,
-            "{}: group={} top_left=({:.2}, {:.2}) center=({:.2}, {:.2}) size=({:.2}, {:.2}) texture={} layer={} z={} alpha={:.2}",
-            sprite.name,
-            sprite.visual.group.as_deref().unwrap_or("-"),
-            pos[0],
-            pos[1],
-            pos[0] + size[0] * 0.5,
-            pos[1] + size[1] * 0.5,
-            size[0],
-            size[1],
-            sprite.textures.first().map(String::as_str).unwrap_or("-"),
-            sprite.visual.layer,
-            sprite.visual.z,
-            sprite.visual.color[3]
-        );
-    }
-
-    fs::write(path, output).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn fill_world_rect(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-    color: Rgba<u8>,
-) {
-    fill_rect_i32(
-        image,
-        ((x - view_x) * scale).round() as i32,
-        ((y - view_y) * scale).round() as i32,
-        (width * scale).round().max(1.0) as u32,
-        (height * scale).round().max(1.0) as u32,
-        color,
-    );
-}
-
-fn draw_world_cross(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    point: [f32; 2],
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-    color: Rgba<u8>,
-) {
-    let x = ((point[0] - view_x) * scale).round() as i32;
-    let y = ((point[1] - view_y) * scale).round() as i32;
-    draw_line(image, x - 5, y, x + 5, y, color);
-    draw_line(image, x, y - 5, x, y + 5, color);
-}
-
-fn draw_world_capsule(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-    color: Rgba<u8>,
-) {
-    let sx = (x - view_x) * scale;
-    let sy = (y - view_y) * scale;
-    let sw = (width * scale).max(1.0);
-    let sh = (height * scale).max(1.0);
-    let radius = sw.min(sh) * 0.5;
-    let center_y = sy + sh * 0.5;
-    let left = sx + radius;
-    let right = sx + sw - radius;
-    let min_x = sx.floor().max(0.0) as u32;
-    let min_y = sy.floor().max(0.0) as u32;
-    let max_x = (sx + sw).ceil().min(image.width() as f32 - 1.0) as u32;
-    let max_y = (sy + sh).ceil().min(image.height() as f32 - 1.0) as u32;
-    let radius_sq = radius * radius;
-    for py in min_y..=max_y {
-        for px in min_x..=max_x {
-            let sample_x = px as f32 + 0.5;
-            let sample_y = py as f32 + 0.5;
-            let cx = sample_x.clamp(left, right);
-            let dx = sample_x - cx;
-            let dy = sample_y - center_y;
-            if dx * dx + dy * dy <= radius_sq {
-                blend_pixel(image, px, py, color);
-            }
-        }
-    }
-}
-
-fn draw_thick_world_line(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    start: [f32; 2],
-    end: [f32; 2],
-    thickness: f32,
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-    color: Rgba<u8>,
-) {
-    let x0 = (start[0] - view_x) * scale;
-    let y0 = (start[1] - view_y) * scale;
-    let x1 = (end[0] - view_x) * scale;
-    let y1 = (end[1] - view_y) * scale;
-    let dx = x1 - x0;
-    let dy = y1 - y0;
-    let len = (dx * dx + dy * dy).sqrt();
-    let radius = (thickness * scale * 0.5).max(0.5);
-    let min_x = (x0.min(x1) - radius).floor().max(0.0) as u32;
-    let min_y = (y0.min(y1) - radius).floor().max(0.0) as u32;
-    let max_x = (x0.max(x1) + radius).ceil().min(image.width() as f32 - 1.0) as u32;
-    let max_y = (y0.max(y1) + radius)
-        .ceil()
-        .min(image.height() as f32 - 1.0) as u32;
-    if len <= f32::EPSILON {
-        draw_world_circle(image, start, thickness * 0.5, view_x, view_y, scale, color);
-        return;
-    }
-    let len_sq = dx * dx + dy * dy;
-    let radius_sq = radius * radius;
-    for y in min_y..=max_y {
-        for x in min_x..=max_x {
-            let px = x as f32 + 0.5;
-            let py = y as f32 + 0.5;
-            let t = (((px - x0) * dx + (py - y0) * dy) / len_sq).clamp(0.0, 1.0);
-            let closest_x = x0 + dx * t;
-            let closest_y = y0 + dy * t;
-            let dist_x = px - closest_x;
-            let dist_y = py - closest_y;
-            if dist_x * dist_x + dist_y * dist_y <= radius_sq {
-                image.put_pixel(x, y, color);
-            }
-        }
-    }
-}
-
-fn draw_tapered_world_line(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    start: [f32; 2],
-    end: [f32; 2],
-    base_radius: f32,
-    tip_radius: f32,
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-    color: Rgba<u8>,
-) {
-    let slices = 8;
-    for index in 0..slices {
-        let t0 = index as f32 / slices as f32;
-        let t1 = (index + 1) as f32 / slices as f32;
-        let p0 = [
-            start[0] + (end[0] - start[0]) * t0,
-            start[1] + (end[1] - start[1]) * t0,
-        ];
-        let p1 = [
-            start[0] + (end[0] - start[0]) * t1,
-            start[1] + (end[1] - start[1]) * t1,
-        ];
-        let mid_t = (t0 + t1) * 0.5;
-        let radius = base_radius + (tip_radius - base_radius) * mid_t;
-        draw_thick_world_line(image, p0, p1, radius * 2.0, view_x, view_y, scale, color);
-    }
-    draw_world_circle(image, start, base_radius, view_x, view_y, scale, color);
-    draw_world_circle(image, end, tip_radius, view_x, view_y, scale, color);
-}
-
-fn draw_world_circle(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    center: [f32; 2],
-    radius: f32,
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-    color: Rgba<u8>,
-) {
-    let cx = ((center[0] - view_x) * scale).round() as i32;
-    let cy = ((center[1] - view_y) * scale).round() as i32;
-    let radius = (radius * scale).round().max(1.0) as i32;
-    let radius_sq = radius * radius;
-    for y in -radius..=radius {
-        for x in -radius..=radius {
-            if x * x + y * y > radius_sq {
-                continue;
-            }
-            let px = cx + x;
-            let py = cy + y;
-            if px >= 0 && py >= 0 && (px as u32) < image.width() && (py as u32) < image.height() {
-                image.put_pixel(px as u32, py as u32, color);
-            }
-        }
-    }
-}
-
-fn shape_spring_points(
-    spring: &rpu_core::ShapeSpringNode,
-    points: &std::collections::HashMap<String, [f32; 2]>,
-) -> Vec<[f32; 2]> {
-    let Some((bottom, top)) = shape_spring_endpoints(spring, points) else {
-        return Vec::new();
-    };
-    let dx = top[0] - bottom[0];
-    let dy = top[1] - bottom[1];
-    let length = (dx * dx + dy * dy).sqrt();
-    let axis = if length <= f32::EPSILON {
-        [0.0, -1.0]
-    } else {
-        [dx / length, dy / length]
-    };
-    let normal = [-axis[1], axis[0]];
-    let steps = (spring.coils.max(1) * 8).max(2) as usize;
-    let mut polyline = Vec::with_capacity(steps + 1);
-    for index in 0..=steps {
-        let t = index as f32 / steps as f32;
-        let phase = t * std::f32::consts::TAU * spring.coils.max(1) as f32;
-        let center = [bottom[0] + dx * t, bottom[1] + dy * t];
-        let wave = phase.sin() * spring.radius.max(0.0);
-        polyline.push([center[0] + normal[0] * wave, center[1] + normal[1] * wave]);
-    }
-    polyline
-}
-
-fn shape_spring_cap(
-    spring: &rpu_core::ShapeSpringNode,
-    points: &std::collections::HashMap<String, [f32; 2]>,
-) -> Option<([f32; 2], [f32; 2])> {
-    let (bottom, top) = shape_spring_endpoints(spring, points)?;
-    let dx = bottom[0] - top[0];
-    let dy = bottom[1] - top[1];
-    let length = (dx * dx + dy * dy).sqrt();
-    let axis = if length <= f32::EPSILON {
-        [0.0, 1.0]
-    } else {
-        [dx / length, dy / length]
-    };
-    let normal = [-axis[1], axis[0]];
-    let half = spring.cap_width.max(1.0) * 0.5;
-    Some((
-        [top[0] - normal[0] * half, top[1] - normal[1] * half],
-        [top[0] + normal[0] * half, top[1] + normal[1] * half],
-    ))
-}
-
-fn shape_spring_endpoints(
-    spring: &rpu_core::ShapeSpringNode,
-    points: &std::collections::HashMap<String, [f32; 2]>,
-) -> Option<([f32; 2], [f32; 2])> {
-    if spring.points.len() < 2 {
-        return None;
-    }
-    let bottom = *points.get(&spring.points[0])?;
-    let top = *points.get(&spring.points[1])?;
-    Some((bottom, top))
-}
-
-fn shape_map_point_symbols(map: &rpu_core::ShapeMapNode) -> Vec<(char, [f32; 2])> {
-    let legend: std::collections::HashMap<char, &rpu_core::ShapeMapLegendEntry> = map
-        .legend
-        .iter()
-        .map(|entry| (entry.symbol, entry))
-        .collect();
-    let mut symbols = Vec::new();
-    for (row, line) in map.rows.iter().enumerate() {
-        for (col, symbol) in line.chars().enumerate() {
-            let Some(entry) = legend.get(&symbol) else {
-                continue;
-            };
-            symbols.push((
-                symbol,
-                [
-                    map.origin[0] + (col as f32 + 0.5) * map.cell[0] + entry.offset[0],
-                    map.origin[1] + (row as f32 + 0.5) * map.cell[1] + entry.offset[1],
-                ],
-            ));
-        }
-    }
-    symbols
-}
-
-fn draw_debug_char_world(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ch: char,
-    point: [f32; 2],
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-    color: Rgba<u8>,
-) {
-    let x = ((point[0] - view_x) * scale).round() as i32 - 5;
-    let y = ((point[1] - view_y) * scale).round() as i32 - 7;
-    draw_debug_char(image, ch, x, y, 2, color);
-}
-
-fn draw_debug_char(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ch: char,
-    x: i32,
-    y: i32,
-    pixel: u32,
-    color: Rgba<u8>,
-) {
-    for (row, bits) in debug_char_pattern(ch).iter().enumerate() {
-        for (col, bit) in bits.chars().enumerate() {
-            if bit != '1' {
-                continue;
-            }
-            fill_rect_i32(
-                image,
-                x + col as i32 * pixel as i32,
-                y + row as i32 * pixel as i32,
-                pixel,
-                pixel,
-                color,
-            );
-        }
-    }
-}
-
-fn debug_char_pattern(ch: char) -> [&'static str; 7] {
-    match ch.to_ascii_lowercase() {
-        'a' => [
-            "01110", "10001", "10001", "11111", "10001", "10001", "10001",
-        ],
-        'b' => [
-            "11110", "10001", "10001", "11110", "10001", "10001", "11110",
-        ],
-        'c' => [
-            "01111", "10000", "10000", "10000", "10000", "10000", "01111",
-        ],
-        'd' => [
-            "11110", "10001", "10001", "10001", "10001", "10001", "11110",
-        ],
-        'e' => [
-            "11111", "10000", "10000", "11110", "10000", "10000", "11111",
-        ],
-        'f' => [
-            "11111", "10000", "10000", "11110", "10000", "10000", "10000",
-        ],
-        'g' => [
-            "01111", "10000", "10000", "10111", "10001", "10001", "01111",
-        ],
-        'h' => [
-            "10001", "10001", "10001", "11111", "10001", "10001", "10001",
-        ],
-        'i' => [
-            "11111", "00100", "00100", "00100", "00100", "00100", "11111",
-        ],
-        'j' => [
-            "00111", "00010", "00010", "00010", "00010", "10010", "01100",
-        ],
-        'k' => [
-            "10001", "10010", "10100", "11000", "10100", "10010", "10001",
-        ],
-        'l' => [
-            "10000", "10000", "10000", "10000", "10000", "10000", "11111",
-        ],
-        'm' => [
-            "10001", "11011", "10101", "10101", "10001", "10001", "10001",
-        ],
-        'n' => [
-            "10001", "11001", "10101", "10011", "10001", "10001", "10001",
-        ],
-        'o' => [
-            "01110", "10001", "10001", "10001", "10001", "10001", "01110",
-        ],
-        'p' => [
-            "11110", "10001", "10001", "11110", "10000", "10000", "10000",
-        ],
-        'q' => [
-            "01110", "10001", "10001", "10001", "10101", "10010", "01101",
-        ],
-        'r' => [
-            "11110", "10001", "10001", "11110", "10100", "10010", "10001",
-        ],
-        's' => [
-            "01111", "10000", "10000", "01110", "00001", "00001", "11110",
-        ],
-        't' => [
-            "11111", "00100", "00100", "00100", "00100", "00100", "00100",
-        ],
-        'u' => [
-            "10001", "10001", "10001", "10001", "10001", "10001", "01110",
-        ],
-        'v' => [
-            "10001", "10001", "10001", "10001", "10001", "01010", "00100",
-        ],
-        'w' => [
-            "10001", "10001", "10001", "10101", "10101", "10101", "01010",
-        ],
-        'x' => [
-            "10001", "10001", "01010", "00100", "01010", "10001", "10001",
-        ],
-        'y' => [
-            "10001", "10001", "01010", "00100", "00100", "00100", "00100",
-        ],
-        'z' => [
-            "11111", "00001", "00010", "00100", "01000", "10000", "11111",
-        ],
-        _ => [
-            "11111", "10001", "00010", "00100", "00100", "00000", "00100",
-        ],
-    }
-}
-
-fn draw_map_top_collision_edges(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    map: &rpu_core::AsciiMapNode,
-    legend: &std::collections::HashMap<char, &rpu_core::MapLegendMeaning>,
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-) {
-    for (row, line) in map.rows.iter().enumerate() {
-        for (col, ch) in line.chars().enumerate() {
-            let Some(collision) = map_cell_collision(ch, legend) else {
-                continue;
-            };
-            let has_solid_above = row > 0
-                && map
-                    .rows
-                    .get(row - 1)
-                    .and_then(|above| above.chars().nth(col))
-                    .is_some_and(|above| map_cell_collision(above, legend).is_some());
-            if has_solid_above {
-                continue;
-            }
-            let x0 = ((map.origin[0] + col as f32 * map.cell[0] - view_x) * scale).round() as i32;
-            let y = ((map.origin[1] + row as f32 * map.cell[1] - view_y) * scale).round() as i32;
-            let x1 = ((map.origin[0] + (col as f32 + 1.0) * map.cell[0] - view_x) * scale).round()
-                as i32;
-            let color = match collision {
-                rpu_core::MapTileCollision::Solid => rgba([255, 232, 64, 245]),
-                rpu_core::MapTileCollision::OneWay => rgba([255, 128, 24, 245]),
-                rpu_core::MapTileCollision::None => continue,
-            };
-            for dy in 0..3 {
-                draw_line(image, x0, y + dy, x1, y + dy, color);
-            }
-        }
-    }
-}
-
-fn draw_map_spawn_instance_colliders(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    scene: &rpu_core::SceneNode,
-    map: &rpu_core::AsciiMapNode,
-    legend: &std::collections::HashMap<char, &rpu_core::MapLegendMeaning>,
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-) {
-    for (row, line) in map.rows.iter().enumerate() {
-        for (col, ch) in line.chars().enumerate() {
-            let Some(rpu_core::MapLegendMeaning::Spawn(name)) = legend.get(&ch) else {
-                continue;
-            };
-            let Some(sprite) = scene.sprites.iter().find(|sprite| sprite.name == *name) else {
-                continue;
-            };
-            let pos = [
-                map.origin[0] + col as f32 * map.cell[0],
-                map.origin[1] + row as f32 * map.cell[1],
-            ];
-            draw_world_outline(
-                image,
-                pos[0],
-                pos[1],
-                sprite.visual.size[0],
-                sprite.visual.size[1],
-                view_x,
-                view_y,
-                scale,
-                rgba([255, 0, 255, 240]),
-            );
-            let collider_size = sprite.collider_size.unwrap_or(sprite.visual.size);
-            draw_world_outline(
-                image,
-                pos[0] + sprite.collider_offset[0],
-                pos[1] + sprite.collider_offset[1],
-                collider_size[0],
-                collider_size[1],
-                view_x,
-                view_y,
-                scale,
-                rgba([0, 255, 120, 245]),
-            );
-        }
-    }
-}
-
-fn map_debug_markers(map: &rpu_core::AsciiMapNode) -> std::collections::HashMap<String, [f32; 2]> {
-    let legend: std::collections::HashMap<char, &rpu_core::MapLegendMeaning> = map
-        .legend
-        .iter()
-        .map(|entry| (entry.symbol, &entry.meaning))
-        .collect();
-    let mut markers = std::collections::HashMap::new();
-    for (row, line) in map.rows.iter().enumerate() {
-        for (col, ch) in line.chars().enumerate() {
-            let Some(meaning) = legend.get(&ch) else {
-                continue;
-            };
-            let pos = [
-                map.origin[0] + col as f32 * map.cell[0],
-                map.origin[1] + row as f32 * map.cell[1],
-            ];
-            match meaning {
-                rpu_core::MapLegendMeaning::Marker => {
-                    markers.entry(ch.to_string()).or_insert(pos);
-                }
-                rpu_core::MapLegendMeaning::Spawn(name) => {
-                    markers.entry(ch.to_string()).or_insert(pos);
-                    markers.entry(name.clone()).or_insert(pos);
-                }
-                _ => {}
-            }
-        }
-    }
-    markers
-}
-
-fn draw_spawn_marker(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-) {
-    let color = rgba([255, 0, 255, 245]);
-    let cx = x + width as i32 / 2;
-    let cy = y + height as i32 / 2;
-    draw_line(image, cx - 8, cy, cx + 8, cy, color);
-    draw_line(image, cx, cy - 8, cx, cy + 8, color);
-    draw_world_outline(
-        image,
-        x as f32,
-        y as f32,
-        width as f32,
-        height as f32,
-        0.0,
-        0.0,
-        1.0,
-        color,
-    );
-}
-
-fn draw_world_outline(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    view_x: f32,
-    view_y: f32,
-    scale: f32,
-    color: Rgba<u8>,
-) {
-    let x0 = ((x - view_x) * scale).round() as i32;
-    let y0 = ((y - view_y) * scale).round() as i32;
-    let x1 = ((x + width - view_x) * scale).round() as i32;
-    let y1 = ((y + height - view_y) * scale).round() as i32;
-    draw_line(image, x0, y0, x1, y0, color);
-    draw_line(image, x1, y0, x1, y1, color);
-    draw_line(image, x1, y1, x0, y1, color);
-    draw_line(image, x0, y1, x0, y0, color);
-}
-
-fn fill_rect_i32(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-    color: Rgba<u8>,
-) {
-    let x0 = x.max(0) as u32;
-    let y0 = y.max(0) as u32;
-    let x1 = (x + width as i32).max(0) as u32;
-    let y1 = (y + height as i32).max(0) as u32;
-    if x1 <= x0 || y1 <= y0 {
-        return;
-    }
-    fill_rect(image, x0, y0, x1 - x0, y1 - y0, color);
-}
-
-fn blit_rgba(
-    target: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: i32,
-    y: i32,
-) {
-    for sy in 0..source.height() {
-        for sx in 0..source.width() {
-            let tx = x + sx as i32;
-            let ty = y + sy as i32;
-            if tx < 0 || ty < 0 || tx as u32 >= target.width() || ty as u32 >= target.height() {
-                continue;
-            }
-            let src = *source.get_pixel(sx, sy);
-            let alpha = src[3] as u16;
-            if alpha == 255 {
-                target.put_pixel(tx as u32, ty as u32, src);
-            } else if alpha > 0 {
-                let dst = *target.get_pixel(tx as u32, ty as u32);
-                target.put_pixel(
-                    tx as u32,
-                    ty as u32,
-                    rgba([
-                        blend_channel(src[0], dst[0], alpha),
-                        blend_channel(src[1], dst[1], alpha),
-                        blend_channel(src[2], dst[2], alpha),
-                        255,
-                    ]),
-                );
-            }
-        }
-    }
-}
-
-fn blend_channel(src: u8, dst: u8, alpha: u16) -> u8 {
-    (((src as u16 * alpha) + (dst as u16 * (255 - alpha))) / 255) as u8
-}
-
-fn load_layout_texture(
-    project_root: &Path,
-    texture: &str,
-    width: u32,
-    height: u32,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let path = project_root.join("assets").join(texture);
-    let image = image::open(path).ok()?;
-    Some(
-        image
-            .resize_exact(width.max(1), height.max(1), FilterType::Nearest)
-            .to_rgba8(),
-    )
-}
-
-fn scene_color_rgba(color: [f32; 4]) -> Rgba<u8> {
-    rgba([
-        (color[0].clamp(0.0, 1.0) * 255.0).round() as u8,
-        (color[1].clamp(0.0, 1.0) * 255.0).round() as u8,
-        (color[2].clamp(0.0, 1.0) * 255.0).round() as u8,
-        (color[3].clamp(0.0, 1.0) * 255.0).round() as u8,
-    ])
-}
-
-fn map_cell_is_empty(ch: char) -> bool {
-    matches!(ch, ' ' | '.')
-}
-
-fn map_cell_collision(
-    ch: char,
-    legend: &std::collections::HashMap<char, &rpu_core::MapLegendMeaning>,
-) -> Option<rpu_core::MapTileCollision> {
-    match legend.get(&ch) {
-        Some(rpu_core::MapLegendMeaning::Tile(tile)) => match tile.collision {
-            rpu_core::MapTileCollision::Solid | rpu_core::MapTileCollision::OneWay => {
-                Some(tile.collision)
-            }
-            rpu_core::MapTileCollision::None => None,
-        },
-        Some(rpu_core::MapLegendMeaning::Texture(_))
-        | Some(rpu_core::MapLegendMeaning::Color(_))
-        | Some(rpu_core::MapLegendMeaning::Terrain(_)) => Some(rpu_core::MapTileCollision::Solid),
-        Some(rpu_core::MapLegendMeaning::Marker)
-        | Some(rpu_core::MapLegendMeaning::Spawn(_))
-        | None => None,
-    }
-}
-
-fn write_terrain_debug_png(classified: &rpu_core::ClassifiedAsciiMap, path: &Path) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-
-    for row in 0..classified.height {
-        for col in 0..classified.width {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, rgba([26, 32, 40, 255]));
-        }
-    }
-
-    for cell in &classified.cells {
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        fill_rect(&mut image, x, y, tile, tile, terrain_shape_rgba(cell.shape));
-        draw_shape_accent(
-            &mut image,
-            x,
-            y,
-            tile,
-            cell.shape,
-            material_accent_rgba(&cell.material),
-        );
-        draw_style_marker(&mut image, x, y, tile, cell.style);
-        draw_exposed_sides(&mut image, x, y, tile, cell.exposed);
-        draw_normal_marker(&mut image, x, y, tile, cell.normal);
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_regions_png(classified: &rpu_core::ClassifiedAsciiMap, path: &Path) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-
-    for row in 0..classified.height {
-        for col in 0..classified.width {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, rgba([26, 32, 40, 255]));
-        }
-    }
-
-    for region in &classified.regions {
-        let fill = region_color_rgba(region.id);
-        let border_color = region_outline_rgba(region.id);
-        for &(row, col) in &region.cells {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, fill);
-            draw_region_outline(&mut image, x, y, tile, border_color);
-        }
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_tangents_png(
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-    for row in 0..classified.height {
-        for col in 0..classified.width {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, rgba([26, 32, 40, 255]));
-        }
-    }
-
-    for cell in &classified.cells {
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        fill_rect(&mut image, x, y, tile, tile, terrain_shape_rgba(cell.shape));
-        draw_shape_accent(
-            &mut image,
-            x,
-            y,
-            tile,
-            cell.shape,
-            material_accent_rgba(&cell.material),
-        );
-        draw_tangent_marker(&mut image, x, y, tile, cell.tangent);
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_materials_png(
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-    for row in 0..classified.height {
-        for col in 0..classified.width {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, rgba([26, 32, 40, 255]));
-        }
-    }
-
-    for cell in &classified.cells {
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        fill_rect(
-            &mut image,
-            x,
-            y,
-            tile,
-            tile,
-            material_fill_rgba(&cell.material),
-        );
-        draw_shape_accent(&mut image, x, y, tile, cell.shape, rgba([20, 24, 30, 255]));
-        draw_band_distance_label(&mut image, x, y, tile, cell.boundary_distance);
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_synth_png(
-    project_root: &Path,
-    map: &rpu_core::AsciiMapNode,
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    if matches!(classified.render, rpu_core::TerrainRenderMode::Debug) {
-        return write_terrain_debug_png(classified, path);
-    }
-    let asset_base = project_root.join("assets").display().to_string();
-    let image = rpu_runtime::render_terrain_map_image(map, &asset_base)
-        .unwrap_or_else(|| ImageBuffer::from_pixel(1, 1, rgba([10, 12, 16, 255])));
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_fragments_png(map: &rpu_core::AsciiMapNode, path: &Path) -> Result<()> {
-    let Some(image) = rpu_runtime::render_terrain_fragment_image(map) else {
-        return Ok(());
-    };
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_synth_layers_png(
-    project_root: &Path,
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let material_fields = build_material_fields(project_root, classified);
-    let region_lookup: std::collections::HashMap<usize, &rpu_core::TerrainRegion> = classified
-        .regions
-        .iter()
-        .map(|region| (region.id, region))
-        .collect();
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([10, 12, 16, 255]));
-    for cell in &classified.cells {
-        let Some(region) = region_lookup.get(&cell.region_id).copied() else {
-            continue;
-        };
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        for py in 0..tile {
-            for px in 0..tile {
-                let (winner, differs) =
-                    synthesize_terrain_pixel_layers(&material_fields, cell, region, px, py, tile);
-                let mut color = material_fill_rgba(winner);
-                if differs {
-                    color = lighten_rgba(color, 38);
-                }
-                image.put_pixel(x + px, y + py, color);
-            }
-        }
-        draw_exposed_sides(&mut image, x, y, tile, cell.exposed);
-        fill_rect(
-            &mut image,
-            x,
-            y,
-            tile,
-            5,
-            material_fill_rgba(&cell.material),
-        );
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_surface_strips_png(
-    project_root: &Path,
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    let tile = 40u32;
-    let border = 12u32;
-    let gap = 8u32;
-    let strip_fields = build_surface_strip_fields(
-        project_root,
-        classified,
-        tile,
-        matches!(classified.render, rpu_core::TerrainRenderMode::Synth),
-    );
-    let mut ordered = classified
-        .regions
-        .iter()
-        .filter_map(|region| strip_fields.get(&region.id).map(|field| (region.id, field)))
-        .collect::<Vec<_>>();
-    ordered.sort_by_key(|(id, _)| *id);
-
-    if ordered.is_empty() {
-        let image = ImageBuffer::from_pixel(1, 1, rgba([14, 18, 24, 255]));
-        image
-            .save(path)
-            .with_context(|| format!("failed to write {}", path.display()))?;
-        return Ok(());
-    }
-
-    let width = ordered
-        .iter()
-        .map(|(_, field)| {
-            field
-                .flat
-                .width()
-                .max(field.join.width())
-                .max(field.ramp_left.width())
-                .max(field.ramp_right.width())
-                .max(field.solved.width())
-        })
-        .max()
-        .unwrap_or(1)
-        .saturating_add(border * 2);
-    let height = ordered
-        .iter()
-        .map(|(_, field)| {
-            field.flat.height()
-                + field.join.height()
-                + field.ramp_left.height()
-                + field.ramp_right.height()
-                + field.solved.height()
-                + gap * 5
-        })
-        .sum::<u32>()
-        + border * 2;
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-
-    let mut y = border;
-    for (id, field) in ordered {
-        for fy in 0..field.flat.height() {
-            for fx in 0..field.flat.width() {
-                image.put_pixel(border + fx, y + fy, *field.flat.get_pixel(fx, fy));
-            }
-        }
-        draw_region_label_bar(
-            &mut image,
-            border,
-            y,
-            field.flat.width().min(24),
-            material_accent_rgba(&format!("{id}-flat")),
-        );
-        y += field.flat.height() + gap;
-
-        for fy in 0..field.join.height() {
-            for fx in 0..field.join.width() {
-                image.put_pixel(border + fx, y + fy, *field.join.get_pixel(fx, fy));
-            }
-        }
-        draw_region_label_bar(
-            &mut image,
-            border,
-            y,
-            field.join.width().min(24),
-            material_accent_rgba(&format!("{id}-join")),
-        );
-        y += field.join.height() + gap;
-
-        for fy in 0..field.ramp_left.height() {
-            for fx in 0..field.ramp_left.width() {
-                image.put_pixel(border + fx, y + fy, *field.ramp_left.get_pixel(fx, fy));
-            }
-        }
-        draw_region_label_bar(
-            &mut image,
-            border,
-            y,
-            field.ramp_left.width().min(24),
-            material_accent_rgba(&format!("{id}-ramp-left")),
-        );
-        y += field.ramp_left.height() + gap;
-
-        for fy in 0..field.ramp_right.height() {
-            for fx in 0..field.ramp_right.width() {
-                image.put_pixel(border + fx, y + fy, *field.ramp_right.get_pixel(fx, fy));
-            }
-        }
-        draw_region_label_bar(
-            &mut image,
-            border,
-            y,
-            field.ramp_right.width().min(24),
-            material_accent_rgba(&format!("{id}-ramp-right")),
-        );
-        y += field.ramp_right.height() + gap;
-
-        for fy in 0..field.solved.height() {
-            for fx in 0..field.solved.width() {
-                image.put_pixel(border + fx, y + fy, *field.solved.get_pixel(fx, fy));
-            }
-        }
-        draw_region_label_bar(
-            &mut image,
-            border,
-            y,
-            field.solved.width().min(24),
-            material_accent_rgba(&format!("{id}-solved")),
-        );
-        y += field.solved.height() + gap;
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-struct RegionSurfaceStrips {
-    flat: ImageBuffer<Rgba<u8>, Vec<u8>>,
-    join: ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ramp_left: ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ramp_right: ImageBuffer<Rgba<u8>, Vec<u8>>,
-    solved: ImageBuffer<Rgba<u8>, Vec<u8>>,
-}
-
-fn write_terrain_transitions_png(
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let region_loop_lengths: std::collections::HashMap<usize, usize> = classified
-        .regions
-        .iter()
-        .map(|region| (region.id, region.boundary_loop.len()))
-        .collect();
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-    for row in 0..classified.height {
-        for col in 0..classified.width {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, rgba([26, 32, 40, 255]));
-        }
-    }
-
-    for cell in &classified.cells {
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        fill_rect(
-            &mut image,
-            x,
-            y,
-            tile,
-            tile,
-            material_fill_rgba(&cell.material),
-        );
-        let loop_len = *region_loop_lengths.get(&cell.region_id).unwrap_or(&1);
-        let stripe = surface_u_rgba(cell.surface_u, loop_len);
-        fill_rect(&mut image, x, y, tile, 6, stripe);
-        draw_band_distance_label(&mut image, x, y, tile, cell.boundary_distance);
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_bands_png(classified: &rpu_core::ClassifiedAsciiMap, path: &Path) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-    for row in 0..classified.height {
-        for col in 0..classified.width {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, rgba([26, 32, 40, 255]));
-        }
-    }
-
-    for cell in &classified.cells {
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        fill_rect(
-            &mut image,
-            x,
-            y,
-            tile,
-            tile,
-            terrain_band_rgba(cell.depth_band),
-        );
-        draw_band_distance_label(&mut image, x, y, tile, cell.boundary_distance);
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_loops_png(classified: &rpu_core::ClassifiedAsciiMap, path: &Path) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-    for row in 0..classified.height {
-        for col in 0..classified.width {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, rgba([26, 32, 40, 255]));
-        }
-    }
-
-    for region in &classified.regions {
-        let fill = region_color_rgba(region.id);
-        let outline = region_outline_rgba(region.id);
-        let path_color = rgba([250, 250, 250, 235]);
-        for &(row, col) in &region.cells {
-            let x = border + col as u32 * (tile + gap);
-            let y = border + row as u32 * (tile + gap);
-            fill_rect(&mut image, x, y, tile, tile, fill);
-            draw_region_outline(&mut image, x, y, tile, outline);
-        }
-        for window in region.boundary_loop.windows(2) {
-            let (row0, col0) = window[0];
-            let (row1, col1) = window[1];
-            let x0 = border as i32 + col0 as i32 * (tile + gap) as i32 + tile as i32 / 2;
-            let y0 = border as i32 + row0 as i32 * (tile + gap) as i32 + tile as i32 / 2;
-            let x1 = border as i32 + col1 as i32 * (tile + gap) as i32 + tile as i32 / 2;
-            let y1 = border as i32 + row1 as i32 * (tile + gap) as i32 + tile as i32 / 2;
-            draw_line(&mut image, x0, y0, x1, y1, path_color);
-        }
-        if region.boundary_loop.len() > 1 {
-            let (row0, col0) = region.boundary_loop[0];
-            let (row1, col1) = region.boundary_loop[region.boundary_loop.len() - 1];
-            let x0 = border as i32 + col0 as i32 * (tile + gap) as i32 + tile as i32 / 2;
-            let y0 = border as i32 + row0 as i32 * (tile + gap) as i32 + tile as i32 / 2;
-            let x1 = border as i32 + col1 as i32 * (tile + gap) as i32 + tile as i32 / 2;
-            let y1 = border as i32 + row1 as i32 * (tile + gap) as i32 + tile as i32 / 2;
-            draw_line(&mut image, x0, y0, x1, y1, path_color);
-        }
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_contours_png(
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-    for cell in &classified.cells {
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        fill_rect(
-            &mut image,
-            x,
-            y,
-            tile,
-            tile,
-            contour_fill_rgba(cell.contour),
-        );
-        draw_terrain_contour(
-            &mut image,
-            x,
-            y,
-            tile,
-            cell.contour,
-            rgba([255, 255, 255, 255]),
-        );
-        draw_region_outline(&mut image, x, y, tile, rgba([38, 44, 56, 255]));
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_influences_png(
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-    for cell in &classified.cells {
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        fill_rect(
-            &mut image,
-            x,
-            y,
-            tile,
-            tile,
-            transition_role_rgba(cell.transition_role, cell.transition_strength),
-        );
-        draw_terrain_contour(
-            &mut image,
-            x,
-            y,
-            tile,
-            cell.contour,
-            rgba([255, 255, 255, 255]),
-        );
-        draw_region_outline(&mut image, x, y, tile, rgba([38, 44, 56, 255]));
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_terrain_heightfield_png(
-    classified: &rpu_core::ClassifiedAsciiMap,
-    path: &Path,
-) -> Result<()> {
-    let tile = 40u32;
-    let gap = 2u32;
-    let border = 12u32;
-    let width = border * 2
-        + classified.width as u32 * tile
-        + classified.width.saturating_sub(1) as u32 * gap;
-    let height = border * 2
-        + classified.height as u32 * tile
-        + classified.height.saturating_sub(1) as u32 * gap;
-
-    let mut image = ImageBuffer::from_pixel(width.max(1), height.max(1), rgba([14, 18, 24, 255]));
-    for cell in &classified.cells {
-        let x = border + cell.col as u32 * (tile + gap);
-        let y = border + cell.row as u32 * (tile + gap);
-        for py in 0..tile {
-            for px in 0..tile {
-                let surface_y = surface_height_for_cell(cell, px, tile);
-                let shade = ((surface_y as f32 / tile.max(1) as f32) * 190.0 + 30.0)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                image.put_pixel(x + px, y + py, rgba([shade, shade, shade, 255]));
-            }
-        }
-        draw_surface_profile(&mut image, x, y, tile, cell, rgba([255, 255, 255, 255]));
-        draw_region_outline(&mut image, x, y, tile, rgba([38, 44, 56, 255]));
-    }
-
-    image
-        .save(path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn fill_rect(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    color: Rgba<u8>,
-) {
-    let alpha = color[3] as f32 / 255.0;
-    if alpha <= 0.0 {
-        return;
-    }
-    for py in y..(y + height).min(image.height()) {
-        for px in x..(x + width).min(image.width()) {
-            if alpha >= 1.0 {
-                image.put_pixel(px, py, color);
-            } else {
-                let bottom = *image.get_pixel(px, py);
-                let inv = 1.0 - alpha;
-                image.put_pixel(
-                    px,
-                    py,
-                    Rgba([
-                        (color[0] as f32 * alpha + bottom[0] as f32 * inv).round() as u8,
-                        (color[1] as f32 * alpha + bottom[1] as f32 * inv).round() as u8,
-                        (color[2] as f32 * alpha + bottom[2] as f32 * inv).round() as u8,
-                        255,
-                    ]),
-                );
-            }
-        }
-    }
-}
-
-fn blend_pixel(image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, x: u32, y: u32, color: Rgba<u8>) {
-    if color[3] == 0 || x >= image.width() || y >= image.height() {
-        return;
-    }
-    if color[3] == 255 {
-        image.put_pixel(x, y, color);
-        return;
-    }
-    let alpha = color[3] as f32 / 255.0;
-    let inv = 1.0 - alpha;
-    let bottom = *image.get_pixel(x, y);
-    image.put_pixel(
-        x,
-        y,
-        Rgba([
-            (color[0] as f32 * alpha + bottom[0] as f32 * inv).round() as u8,
-            (color[1] as f32 * alpha + bottom[1] as f32 * inv).round() as u8,
-            (color[2] as f32 * alpha + bottom[2] as f32 * inv).round() as u8,
-            255,
-        ]),
-    );
-}
-
-fn draw_shape_accent(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    shape: rpu_core::TerrainShape,
-    color: Rgba<u8>,
-) {
-    let thickness = 4u32;
-    let inset = 6u32;
-    let inner = tile.saturating_sub(inset * 2);
-    match shape {
-        rpu_core::TerrainShape::Top => {
-            fill_rect(image, x + inset, y + inset, inner, thickness, color)
-        }
-        rpu_core::TerrainShape::Bottom => fill_rect(
-            image,
-            x + inset,
-            y + tile - inset - thickness,
-            inner,
-            thickness,
-            color,
-        ),
-        rpu_core::TerrainShape::Left => {
-            fill_rect(image, x + inset, y + inset, thickness, inner, color)
-        }
-        rpu_core::TerrainShape::Right => fill_rect(
-            image,
-            x + tile - inset - thickness,
-            y + inset,
-            thickness,
-            inner,
-            color,
-        ),
-        rpu_core::TerrainShape::TopLeftOuter => {
-            fill_rect(image, x + inset, y + inset, inner / 2, thickness, color);
-            fill_rect(image, x + inset, y + inset, thickness, inner / 2, color);
-        }
-        rpu_core::TerrainShape::TopRightOuter => {
-            fill_rect(image, x + tile / 2, y + inset, inner / 2, thickness, color);
-            fill_rect(
-                image,
-                x + tile - inset - thickness,
-                y + inset,
-                thickness,
-                inner / 2,
-                color,
-            );
-        }
-        rpu_core::TerrainShape::BottomLeftOuter => {
-            fill_rect(
-                image,
-                x + inset,
-                y + tile - inset - thickness,
-                inner / 2,
-                thickness,
-                color,
-            );
-            fill_rect(image, x + inset, y + tile / 2, thickness, inner / 2, color);
-        }
-        rpu_core::TerrainShape::BottomRightOuter => {
-            fill_rect(
-                image,
-                x + tile / 2,
-                y + tile - inset - thickness,
-                inner / 2,
-                thickness,
-                color,
-            );
-            fill_rect(
-                image,
-                x + tile - inset - thickness,
-                y + tile / 2,
-                thickness,
-                inner / 2,
-                color,
-            );
-        }
-        rpu_core::TerrainShape::TopLeftInner
-        | rpu_core::TerrainShape::TopRightInner
-        | rpu_core::TerrainShape::BottomLeftInner
-        | rpu_core::TerrainShape::BottomRightInner
-        | rpu_core::TerrainShape::Interior => {
-            fill_rect(image, x + inset, y + inset, inner, inner, color);
-        }
-        rpu_core::TerrainShape::Isolated => {
-            fill_rect(image, x + tile / 2 - 4, y + tile / 2 - 4, 8, 8, color);
-        }
-        rpu_core::TerrainShape::Empty => {}
-    }
-}
-
-fn draw_normal_marker(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    normal: rpu_core::TerrainNormal,
-) {
-    let color = rgba([250, 250, 250, 235]);
-    let shaft = (tile / 3).max(6) as i32;
-    let tip = (tile / 10).max(2) as i32;
-    let cx = x as i32 + tile as i32 / 2;
-    let cy = y as i32 + tile as i32 / 2;
-
-    let (dx, dy) = match normal {
-        rpu_core::TerrainNormal::None => return,
-        rpu_core::TerrainNormal::Up => (0, -1),
-        rpu_core::TerrainNormal::Down => (0, 1),
-        rpu_core::TerrainNormal::Left => (-1, 0),
-        rpu_core::TerrainNormal::Right => (1, 0),
-        rpu_core::TerrainNormal::UpLeft => (-1, -1),
-        rpu_core::TerrainNormal::UpRight => (1, -1),
-        rpu_core::TerrainNormal::DownLeft => (-1, 1),
-        rpu_core::TerrainNormal::DownRight => (1, 1),
-    };
-
-    let ex = cx + dx * shaft;
-    let ey = cy + dy * shaft;
-    draw_line(image, cx, cy, ex, ey, color);
-
-    if dx == 0 {
-        draw_line(image, ex, ey, ex - tip, ey - dy * tip, color);
-        draw_line(image, ex, ey, ex + tip, ey - dy * tip, color);
-    } else if dy == 0 {
-        draw_line(image, ex, ey, ex - dx * tip, ey - tip, color);
-        draw_line(image, ex, ey, ex - dx * tip, ey + tip, color);
-    } else {
-        draw_line(image, ex, ey, ex - dx * tip, ey, color);
-        draw_line(image, ex, ey, ex, ey - dy * tip, color);
-    }
-}
-
-fn draw_tangent_marker(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    tangent: rpu_core::TerrainTangent,
-) {
-    let color = rgba([118, 231, 255, 235]);
-    let shaft = (tile / 3).max(6) as i32;
-    let tip = (tile / 10).max(2) as i32;
-    let cx = x as i32 + tile as i32 / 2;
-    let cy = y as i32 + tile as i32 / 2;
-
-    let (dx, dy) = match tangent {
-        rpu_core::TerrainTangent::None => return,
-        rpu_core::TerrainTangent::Up => (0, -1),
-        rpu_core::TerrainTangent::Down => (0, 1),
-        rpu_core::TerrainTangent::Left => (-1, 0),
-        rpu_core::TerrainTangent::Right => (1, 0),
-        rpu_core::TerrainTangent::UpLeft => (-1, -1),
-        rpu_core::TerrainTangent::UpRight => (1, -1),
-        rpu_core::TerrainTangent::DownLeft => (-1, 1),
-        rpu_core::TerrainTangent::DownRight => (1, 1),
-    };
-
-    let ex = cx + dx * shaft;
-    let ey = cy + dy * shaft;
-    draw_line(image, cx, cy, ex, ey, color);
-
-    if dx == 0 {
-        draw_line(image, ex, ey, ex - tip, ey - dy * tip, color);
-        draw_line(image, ex, ey, ex + tip, ey - dy * tip, color);
-    } else if dy == 0 {
-        draw_line(image, ex, ey, ex - dx * tip, ey - tip, color);
-        draw_line(image, ex, ey, ex - dx * tip, ey + tip, color);
-    } else {
-        draw_line(image, ex, ey, ex - dx * tip, ey, color);
-        draw_line(image, ex, ey, ex, ey - dy * tip, color);
-    }
-}
-
-fn draw_terrain_contour(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    contour: rpu_core::TerrainContour,
-    color: Rgba<u8>,
-) {
-    let inset = (tile / 10).max(2) as i32;
-    let x0 = x as i32 + inset;
-    let x1 = x as i32 + tile as i32 - inset - 1;
-    let y0 = y as i32 + inset;
-    let y1 = y as i32 + tile as i32 - inset - 1;
-    let cx = x as i32 + tile as i32 / 2;
-    let cy = y as i32 + tile as i32 / 2;
-
-    match contour {
-        rpu_core::TerrainContour::None => {}
-        rpu_core::TerrainContour::FlatTop => {
-            draw_line(image, x0, y0, x1, y0, color);
-        }
-        rpu_core::TerrainContour::RampUpRight => {
-            draw_line(image, x0, y1, x1, y0, color);
-        }
-        rpu_core::TerrainContour::RampUpLeft => {
-            draw_line(image, x0, y0, x1, y1, color);
-        }
-        rpu_core::TerrainContour::CapLeft => {
-            draw_line(image, x0, cy, x0 + (cx - x0) / 2, y0 + (cy - y0) / 2, color);
-            draw_line(image, x0 + (cx - x0) / 2, y0 + (cy - y0) / 2, cx, y0, color);
-        }
-        rpu_core::TerrainContour::CapRight => {
-            draw_line(image, cx, y0, x1 - (x1 - cx) / 2, y0 + (cy - y0) / 2, color);
-            draw_line(image, x1 - (x1 - cx) / 2, y0 + (cy - y0) / 2, x1, cy, color);
-        }
-    }
-}
-
-fn draw_surface_profile(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    cell: &rpu_core::ClassifiedMapCell,
-    color: Rgba<u8>,
-) {
-    if tile <= 1 {
-        return;
-    }
-    for px in 0..tile.saturating_sub(1) {
-        let y0 = y as i32 + surface_height_for_cell(cell, px, tile) as i32;
-        let y1 = y as i32 + surface_height_for_cell(cell, px + 1, tile) as i32;
-        draw_line(
-            image,
-            x as i32 + px as i32,
-            y0,
-            x as i32 + px as i32 + 1,
-            y1,
-            color,
-        );
-    }
-}
-
-fn draw_line(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    mut x0: i32,
-    mut y0: i32,
-    x1: i32,
-    y1: i32,
-    color: Rgba<u8>,
-) {
-    let dx = (x1 - x0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let dy = -(y1 - y0).abs();
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx + dy;
-
-    loop {
-        if x0 >= 0 && y0 >= 0 && (x0 as u32) < image.width() && (y0 as u32) < image.height() {
-            image.put_pixel(x0 as u32, y0 as u32, color);
-        }
-        if x0 == x1 && y0 == y1 {
-            break;
-        }
-        let e2 = err * 2;
-        if e2 >= dy {
-            err += dy;
-            x0 += sx;
-        }
-        if e2 <= dx {
-            err += dx;
-            y0 += sy;
-        }
-    }
-}
-
-fn draw_region_outline(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    color: Rgba<u8>,
-) {
-    let thickness = 3u32;
-    fill_rect(image, x, y, tile, thickness, color);
-    fill_rect(
-        image,
-        x,
-        y + tile.saturating_sub(thickness),
-        tile,
-        thickness,
-        color,
-    );
-    fill_rect(image, x, y, thickness, tile, color);
-    fill_rect(
-        image,
-        x + tile.saturating_sub(thickness),
-        y,
-        thickness,
-        tile,
-        color,
-    );
-}
-
-fn draw_exposed_sides(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    exposed: rpu_core::TerrainExposedSides,
-) {
-    let thickness = 5u32;
-    let color = rgba([250, 244, 214, 255]);
-    if exposed.top {
-        fill_rect(image, x, y, tile, thickness, color);
-    }
-    if exposed.bottom {
-        fill_rect(
-            image,
-            x,
-            y + tile.saturating_sub(thickness),
-            tile,
-            thickness,
-            color,
-        );
-    }
-    if exposed.left {
-        fill_rect(image, x, y, thickness, tile, color);
-    }
-    if exposed.right {
-        fill_rect(
-            image,
-            x + tile.saturating_sub(thickness),
-            y,
-            thickness,
-            tile,
-            color,
-        );
-    }
-}
-
-fn draw_style_marker(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    style: rpu_core::TerrainEdgeStyle,
-) {
-    let color = rgba([16, 18, 22, 255]);
-    match style {
-        rpu_core::TerrainEdgeStyle::Square => {
-            fill_rect(image, x + tile / 2 - 4, y + tile / 2 - 4, 8, 8, color);
-        }
-        rpu_core::TerrainEdgeStyle::Round => {
-            fill_rect(image, x + tile / 2 - 5, y + tile / 2 - 2, 10, 4, color);
-            fill_rect(image, x + tile / 2 - 2, y + tile / 2 - 5, 4, 10, color);
-        }
-        rpu_core::TerrainEdgeStyle::Diagonal => {
-            for step in 0..10 {
-                let px = x + tile / 2 - 5 + step;
-                let py = y + tile / 2 + 4 - step;
-                fill_rect(image, px, py, 2, 2, color);
-            }
-        }
-    }
-}
-
-fn draw_region_label_bar(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    width: u32,
-    color: Rgba<u8>,
-) {
-    fill_rect(image, x, y, width.max(1), 3, color);
-}
-
-fn terrain_shape_rgba(shape: rpu_core::TerrainShape) -> Rgba<u8> {
-    let [r, g, b, a] = match shape {
-        rpu_core::TerrainShape::Empty => [0, 0, 0, 0],
-        rpu_core::TerrainShape::Isolated => [242, 82, 82, 255],
-        rpu_core::TerrainShape::Interior => [36, 66, 189, 255],
-        rpu_core::TerrainShape::Top => [89, 224, 107, 255],
-        rpu_core::TerrainShape::Bottom => [184, 84, 214, 255],
-        rpu_core::TerrainShape::Left => [250, 184, 66, 255],
-        rpu_core::TerrainShape::Right => [250, 143, 46, 255],
-        rpu_core::TerrainShape::TopLeftOuter => [66, 235, 235, 255],
-        rpu_core::TerrainShape::TopRightOuter => [48, 209, 250, 255],
-        rpu_core::TerrainShape::BottomLeftOuter => [224, 105, 207, 255],
-        rpu_core::TerrainShape::BottomRightOuter => [191, 84, 242, 255],
-        rpu_core::TerrainShape::TopLeftInner => [158, 240, 158, 255],
-        rpu_core::TerrainShape::TopRightInner => [140, 224, 140, 255],
-        rpu_core::TerrainShape::BottomLeftInner => [237, 148, 148, 255],
-        rpu_core::TerrainShape::BottomRightInner => [219, 125, 125, 255],
-    };
-    rgba([r, g, b, a])
-}
-
-fn terrain_band_rgba(band: rpu_core::TerrainDepthBand) -> Rgba<u8> {
-    match band {
-        rpu_core::TerrainDepthBand::Edge => rgba([245, 122, 122, 255]),
-        rpu_core::TerrainDepthBand::NearSurface => rgba([245, 196, 110, 255]),
-        rpu_core::TerrainDepthBand::Interior => rgba([100, 188, 255, 255]),
-        rpu_core::TerrainDepthBand::DeepInterior => rgba([74, 88, 214, 255]),
-    }
-}
-
-fn contour_fill_rgba(contour: rpu_core::TerrainContour) -> Rgba<u8> {
-    match contour {
-        rpu_core::TerrainContour::None => rgba([34, 40, 50, 255]),
-        rpu_core::TerrainContour::FlatTop => rgba([70, 120, 86, 255]),
-        rpu_core::TerrainContour::RampUpRight | rpu_core::TerrainContour::RampUpLeft => {
-            rgba([92, 92, 128, 255])
-        }
-        rpu_core::TerrainContour::CapLeft | rpu_core::TerrainContour::CapRight => {
-            rgba([90, 112, 132, 255])
-        }
-    }
-}
-
-fn transition_role_rgba(role: rpu_core::TerrainTransitionRole, strength: u8) -> Rgba<u8> {
-    let base = match role {
-        rpu_core::TerrainTransitionRole::None => rgba([34, 40, 50, 255]),
-        rpu_core::TerrainTransitionRole::RampUpRight => rgba([92, 92, 128, 255]),
-        rpu_core::TerrainTransitionRole::RampUpLeft => rgba([92, 92, 128, 255]),
-        rpu_core::TerrainTransitionRole::JoinFromLeft => rgba([98, 132, 86, 255]),
-        rpu_core::TerrainTransitionRole::JoinFromRight => rgba([98, 132, 86, 255]),
-        rpu_core::TerrainTransitionRole::JoinBoth => rgba([128, 142, 88, 255]),
-    };
-    if strength == 0 {
-        base
-    } else {
-        let amount = (strength / 6).max(8);
-        lighten_rgba(base, amount)
-    }
-}
-
-fn draw_band_distance_label(
-    image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    x: u32,
-    y: u32,
-    tile: u32,
-    distance: u32,
-) {
-    let color = rgba([20, 24, 30, 255]);
-    let bar_width = (distance.min(6) + 1) * 4;
-    let width = bar_width.min(tile.saturating_sub(8));
-    fill_rect(image, x + 4, y + tile.saturating_sub(8), width, 4, color);
-}
-
-fn material_accent_rgba(material: &str) -> Rgba<u8> {
-    let mut hash = 0u32;
-    for byte in material.bytes() {
-        hash = hash.wrapping_mul(16777619) ^ byte as u32;
-    }
-    let r = 80 + (hash & 0x7f) as u8;
-    let g = 80 + ((hash >> 7) & 0x7f) as u8;
-    let b = 80 + ((hash >> 14) & 0x7f) as u8;
-    rgba([r, g, b, 255])
-}
-
-fn material_fill_rgba(material: &str) -> Rgba<u8> {
-    match material {
-        "grass" => rgba([106, 214, 116, 255]),
-        "dirt" => rgba([176, 122, 78, 255]),
-        "rock" => rgba([114, 124, 144, 255]),
-        _ => material_accent_rgba(material),
-    }
-}
-
-#[allow(dead_code)]
-fn synthesize_terrain_pixel(
-    material_fields: &std::collections::HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
-    strip_fields: &std::collections::HashMap<usize, RegionSurfaceStrips>,
-    cell: &rpu_core::ClassifiedMapCell,
-    region: &rpu_core::TerrainRegion,
-    px: u32,
-    py: u32,
-    tile: u32,
-    use_synth_variation: bool,
-) -> Rgba<u8> {
-    let (u, v) = region_space_projection_for_cell(cell, region, px, py, tile);
-    let surface_y = surface_height_for_cell(cell, px, tile);
-    if py < surface_y {
-        return rgba([0, 0, 0, 0]);
-    }
-    let local_inward = py - surface_y;
-    let cap_depth = cap_depth_for_cell(cell, tile);
-    let top_material = top_material_for_stack(&cell.material_key);
-    let is_surface_cap_cell = cell.material == top_material
-        && matches!(
-            cell.normal,
-            rpu_core::TerrainNormal::Up
-                | rpu_core::TerrainNormal::UpLeft
-                | rpu_core::TerrainNormal::UpRight
-        );
-    let body_material = body_material_for_cell(cell);
-    let body = sample_material_field(material_fields, body_material, u, v);
-    if is_surface_cap_cell && local_inward < cap_depth {
-        if let Some(strips) = strip_fields.get(&cell.region_id) {
-            let top = sample_surface_strip_pixel(
-                strips,
-                cell,
-                px,
-                local_inward,
-                cap_depth,
-                tile,
-                use_synth_variation,
-            );
-            return alpha_over(top, body);
-        } else {
-            let source_h = material_fields
-                .get(top_material)
-                .map(|image| image.height().max(1))
-                .unwrap_or(16);
-            let sampled_h = if top_material == "grass" {
-                (source_h / 2).max(1)
-            } else {
-                source_h
-            };
-            let sampled_offset = if top_material == "grass" && source_h > sampled_h {
-                source_h - sampled_h
-            } else {
-                0
-            };
-            let cap_v = if cap_depth <= 1 {
-                0
-            } else {
-                sampled_offset
-                    + (local_inward.saturating_mul(sampled_h.saturating_sub(1)))
-                        / cap_depth.saturating_sub(1)
-            };
-            let top = sample_material_field(material_fields, top_material, u, cap_v);
-            return alpha_over(top, body);
-        }
-    }
-    body
-}
-
-#[allow(dead_code)]
-fn cap_depth_for_cell(cell: &rpu_core::ClassifiedMapCell, tile: u32) -> u32 {
-    let (base, min_depth) = match (cell.contour, cell.transition_role) {
-        (rpu_core::TerrainContour::RampUpLeft, _) | (rpu_core::TerrainContour::RampUpRight, _) => {
-            ((tile / 3).max(8), 6)
-        }
-        (_, rpu_core::TerrainTransitionRole::JoinFromLeft)
-        | (_, rpu_core::TerrainTransitionRole::JoinFromRight)
-        | (_, rpu_core::TerrainTransitionRole::JoinBoth) => ((tile * 2 / 5).max(10), 8),
-        _ => ((tile / 2).max(12), 10),
-    };
-    let cap_variation = (cell.surface_u % 5) as i32 - 2;
-    (base as i32 + cap_variation).max(min_depth) as u32
-}
-
-#[allow(dead_code)]
-fn sample_surface_strip_pixel(
-    strips: &RegionSurfaceStrips,
-    cell: &rpu_core::ClassifiedMapCell,
-    px: u32,
-    local_inward: u32,
-    cap_depth: u32,
-    tile: u32,
-    use_synth_variation: bool,
-) -> Rgba<u8> {
-    let solved_u = surface_strip_u_for_cell(cell, px, local_inward, tile);
-    let solved_v = if cap_depth <= 1 {
-        0
-    } else {
-        (local_inward.saturating_mul(strips.solved.height().saturating_sub(1)))
-            / cap_depth.saturating_sub(1)
-    };
-    let solved = sample_stack_field(&strips.solved, solved_u, solved_v);
-    let flat = sample_stack_field(&strips.flat, solved_u, solved_v);
-    let join = sample_stack_field(&strips.join, solved_u, solved_v);
-    let ramp_left = sample_stack_field(&strips.ramp_left, solved_u, solved_v);
-    let ramp_right = sample_stack_field(&strips.ramp_right, solved_u, solved_v);
-    let anchored = match (cell.contour, cell.transition_role) {
-        (rpu_core::TerrainContour::RampUpLeft, _) => ramp_left,
-        (rpu_core::TerrainContour::RampUpRight, _) => ramp_right,
-        (_, rpu_core::TerrainTransitionRole::JoinFromLeft) => {
-            let t = ((tile.saturating_sub(1).saturating_sub(px)).saturating_mul(255)
-                / tile.saturating_sub(1).max(1)) as u8;
-            lerp_rgba(flat, lerp_rgba(ramp_left, join, 96), t)
-        }
-        (_, rpu_core::TerrainTransitionRole::JoinFromRight) => {
-            let t = (px.saturating_mul(255) / tile.saturating_sub(1).max(1)) as u8;
-            lerp_rgba(flat, lerp_rgba(ramp_right, join, 96), t)
-        }
-        (_, rpu_core::TerrainTransitionRole::JoinBoth) => {
-            let center = tile.saturating_sub(1) as f32 * 0.5;
-            let distance = ((px as f32 - center).abs() / center.max(1.0)).clamp(0.0, 1.0);
-            let t = ((1.0 - distance) * 255.0).round() as u8;
-            let ramp = lerp_rgba(ramp_left, ramp_right, 128);
-            lerp_rgba(flat, lerp_rgba(ramp, join, 96), t)
-        }
-        _ => flat,
-    };
-
-    let blend = match (cell.contour, cell.transition_role) {
-        (rpu_core::TerrainContour::RampUpLeft, _) | (rpu_core::TerrainContour::RampUpRight, _) => {
-            56
-        }
-        (_, rpu_core::TerrainTransitionRole::JoinFromLeft)
-        | (_, rpu_core::TerrainTransitionRole::JoinFromRight)
-        | (_, rpu_core::TerrainTransitionRole::JoinBoth) => 96,
-        _ => 168,
-    };
-    if use_synth_variation {
-        lerp_rgba(anchored, solved, blend)
-    } else {
-        anchored
-    }
-}
-
-#[allow(dead_code)]
-fn surface_strip_u_for_cell(
-    cell: &rpu_core::ClassifiedMapCell,
-    px: u32,
-    local_inward: u32,
-    tile: u32,
-) -> u32 {
-    let along = along_surface_projection(cell.tangent, px, local_inward, tile);
-    let base = cell.surface_u.saturating_mul(tile).saturating_add(along);
-    let skew = match cell.contour {
-        rpu_core::TerrainContour::RampUpRight => local_inward,
-        rpu_core::TerrainContour::RampUpLeft => tile.saturating_sub(1).saturating_sub(local_inward),
-        rpu_core::TerrainContour::FlatTop => match cell.transition_role {
-            rpu_core::TerrainTransitionRole::JoinFromLeft => local_inward.saturating_mul(3) / 4,
-            rpu_core::TerrainTransitionRole::JoinFromRight => tile
-                .saturating_sub(1)
-                .saturating_sub(local_inward.saturating_mul(3) / 4),
-            rpu_core::TerrainTransitionRole::JoinBoth => tile / 2,
-            _ => 0,
-        },
-        _ => 0,
-    };
-    match (cell.contour, cell.transition_role) {
-        (rpu_core::TerrainContour::RampUpLeft, _)
-        | (rpu_core::TerrainContour::FlatTop, rpu_core::TerrainTransitionRole::JoinFromRight) => {
-            base.saturating_sub(tile.saturating_sub(1).saturating_sub(skew))
-        }
-        _ => base.saturating_add(skew),
-    }
-}
-
-fn synthesize_terrain_pixel_layers<'a>(
-    material_fields: &'a std::collections::HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
-    cell: &'a rpu_core::ClassifiedMapCell,
-    region: &rpu_core::TerrainRegion,
-    px: u32,
-    py: u32,
-    tile: u32,
-) -> (&'a str, bool) {
-    let (u, v) = region_space_projection_for_cell(cell, region, px, py, tile);
-    sample_material_stack_layers(material_fields, cell, u, v)
-}
-
-fn build_material_fields(
-    project_root: &Path,
-    classified: &rpu_core::ClassifiedAsciiMap,
-) -> std::collections::HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let mut fields = std::collections::HashMap::new();
-    let materials: std::collections::HashSet<_> = classified
-        .cells
-        .iter()
-        .flat_map(|cell| {
-            cell.material_key
-                .split('>')
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    for material in materials {
-        let image = load_material_source(project_root, material)
-            .unwrap_or_else(|| builtin_material_image(material));
-        fields.insert(material.to_string(), image);
-    }
-
-    fields
-}
-
-fn build_surface_strip_fields(
-    project_root: &Path,
-    classified: &rpu_core::ClassifiedAsciiMap,
-    tile: u32,
-    use_synth_solve: bool,
-) -> std::collections::HashMap<usize, RegionSurfaceStrips> {
-    let mut fields = std::collections::HashMap::new();
-    let cells_by_region: std::collections::HashMap<usize, &rpu_core::ClassifiedMapCell> =
-        classified
-            .cells
-            .iter()
-            .map(|cell| (cell.region_id, cell))
-            .collect();
-
-    for region in &classified.regions {
-        let Some(cell) = cells_by_region.get(&region.id).copied() else {
-            continue;
-        };
-        let source = build_surface_strip_source(project_root, &cell.material_key);
-        let ramp_left_source = build_ramp_strip_source(&source, -1);
-        let ramp_right_source = build_ramp_strip_source(&source, 1);
-        let width = (region.boundary_loop.len().max(1) as u32)
-            .saturating_mul(tile)
-            .max(source.width());
-        let flat = solve_surface_strip_1d(&format!("{}:flat", &cell.material_key), &source, width)
-            .unwrap_or_else(|| {
-                quilt_surface_strip_horizontally(
-                    &format!("{}:flat", &cell.material_key),
-                    &source,
-                    width,
-                )
-            });
-        let join_source = build_join_strip_source(&source, &ramp_left_source, &ramp_right_source);
-        let join =
-            solve_surface_strip_1d(&format!("{}:join", &cell.material_key), &join_source, width)
-                .unwrap_or_else(|| {
-                    quilt_surface_strip_horizontally(
-                        &format!("{}:join", &cell.material_key),
-                        &join_source,
-                        width,
-                    )
-                });
-        let ramp_left = tile_surface_strip_horizontally(&ramp_left_source, width);
-        let ramp_right = tile_surface_strip_horizontally(&ramp_right_source, width);
-        let solved = if use_synth_solve {
-            solve_state_constrained_surface_strip_2d(
-                &format!("{}:surface", &cell.material_key),
-                region,
-                classified,
-                tile,
-                &flat,
-                &join,
-                &ramp_right,
-            )
-            .unwrap_or_else(|| flat.clone())
-        } else {
-            flat.clone()
-        };
-        fields.insert(
-            region.id,
-            RegionSurfaceStrips {
-                flat,
-                join,
-                ramp_left,
-                ramp_right,
-                solved,
-            },
-        );
-    }
-
-    fields
-}
-
-#[allow(dead_code)]
-fn build_stack_fields(
-    project_root: &Path,
-    classified: &rpu_core::ClassifiedAsciiMap,
-) -> std::collections::HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let mut fields = std::collections::HashMap::new();
-    let stacks: std::collections::HashSet<_> = classified
-        .cells
-        .iter()
-        .map(|cell| cell.material_key.clone())
-        .collect();
-
-    for stack in stacks {
-        let source = build_stack_source(project_root, &stack);
-        let field = wfc_material_field(&stack, &source)
-            .unwrap_or_else(|| quilt_material_field(&stack, &source));
-        fields.insert(stack, field);
-    }
-
-    fields
-}
-
-#[allow(dead_code)]
-fn build_stack_source(project_root: &Path, stack_key: &str) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let materials = stack_key
-        .split('>')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if materials.is_empty() {
-        return builtin_material_image("rock");
-    }
-
-    let sources = materials
-        .iter()
-        .map(|material| {
-            load_material_source(project_root, material)
-                .unwrap_or_else(|| builtin_material_image(material))
-        })
-        .collect::<Vec<_>>();
-
-    let width = sources
-        .iter()
-        .map(|img| img.width())
-        .max()
-        .unwrap_or(16)
-        .max(1);
-    let band_height = sources
-        .iter()
-        .map(|img| img.height())
-        .max()
-        .unwrap_or(16)
-        .max(1);
-    let height = band_height * materials.len() as u32;
-    let mut image = ImageBuffer::from_pixel(width, height.max(1), rgba([0, 0, 0, 0]));
-
-    for (index, source) in sources.iter().enumerate() {
-        let y_offset = index as u32 * band_height;
-        for y in 0..band_height {
-            for x in 0..width {
-                let sample =
-                    *source.get_pixel(x % source.width().max(1), y % source.height().max(1));
-                image.put_pixel(x, y_offset + y, sample);
-            }
-        }
-    }
-
-    image
-}
-
-fn build_surface_strip_source(
-    project_root: &Path,
-    stack_key: &str,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let materials = stack_key
-        .split('>')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    let top = materials.first().copied().unwrap_or("rock");
-    let body = materials.get(1).copied().unwrap_or(top);
-
-    let top_source =
-        load_material_source(project_root, top).unwrap_or_else(|| builtin_material_image(top));
-    let body_source =
-        load_material_source(project_root, body).unwrap_or_else(|| builtin_material_image(body));
-
-    let width = top_source.width().max(body_source.width()).max(1);
-    let top_h = if top == "grass" {
-        (top_source.height().max(1) / 2).max(1)
-    } else {
-        top_source.height().max(1)
-    };
-    let body_h = body_source.height().max(1);
-    let body_sample_h = (body_h / 2).max(1);
-    let height = top_h + body_sample_h;
-    let mut image = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
-
-    for y in 0..top_h {
-        for x in 0..width {
-            let sy = if top == "grass" && top_source.height() > top_h {
-                top_source.height() - top_h + y
-            } else {
-                y % top_source.height().max(1)
-            };
-            let p = *top_source.get_pixel(x % top_source.width().max(1), sy);
-            image.put_pixel(x, y, p);
-        }
-    }
-    for y in 0..body_sample_h {
-        for x in 0..width {
-            let sy = (body_source.height().saturating_sub(body_sample_h) + y)
-                % body_source.height().max(1);
-            let p = *body_source.get_pixel(x % body_source.width().max(1), sy);
-            image.put_pixel(x, top_h + y, p);
-        }
-    }
-
-    image
-}
-
-fn build_join_strip_source(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ramp_left_source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ramp_right_source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let mut image = ImageBuffer::from_pixel(
-        source.width().max(1),
-        source.height().max(1),
-        rgba([0, 0, 0, 0]),
-    );
-    for y in 0..image.height() {
-        for x in 0..image.width() {
-            let width = source.width().max(1);
-            let height = source.height().max(1);
-            let flat = *source.get_pixel(x % width, y % height);
-            let x_t = x as f32 / width.saturating_sub(1).max(1) as f32;
-            let y_t = y as f32 / height.saturating_sub(1).max(1) as f32;
-            let left_depth_shift = ((1.0 - x_t) * y_t * height as f32 * 0.55).round() as u32;
-            let right_depth_shift = (x_t * y_t * height as f32 * 0.55).round() as u32;
-            let left_ramp = *ramp_left_source.get_pixel(
-                x % width,
-                (y + left_depth_shift).min(height.saturating_sub(1)),
-            );
-            let right_ramp = *ramp_right_source.get_pixel(
-                x % width,
-                (y + right_depth_shift).min(height.saturating_sub(1)),
-            );
-            let left_px = lerp_rgba(flat, left_ramp, ((1.0 - x_t).powf(1.35) * 255.0) as u8);
-            let right_px = lerp_rgba(flat, right_ramp, (x_t.powf(1.35) * 255.0) as u8);
-            image.put_pixel(x, y, lerp_rgba(left_px, right_px, 128));
-        }
-    }
-    image
-}
-
-fn build_ramp_strip_source(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    direction: i32,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let width = source.width().max(1);
-    let height = source.height().max(1);
-    let mut image = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
-    for y in 0..height {
-        let t = y as f32 / height.saturating_sub(1).max(1) as f32;
-        let shift = (t * (width as f32 * 0.35)).round() as u32;
-        for x in 0..width {
-            let src_x = if direction < 0 {
-                x.wrapping_add(width).wrapping_sub(shift % width) % width
-            } else {
-                (x + shift) % width
-            };
-            let next_x = if direction < 0 {
-                src_x.wrapping_add(width).wrapping_sub(1) % width
-            } else {
-                (src_x + 1) % width
-            };
-            let base = *source.get_pixel(src_x, y);
-            let next = *source.get_pixel(next_x, y);
-            image.put_pixel(x, y, lerp_rgba(base, next, (t * 160.0).round() as u8));
-        }
-    }
-    image
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct StripPattern {
-    pixels: Vec<[u8; 4]>,
-    width: usize,
-    height: usize,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StripState {
-    Flat,
-    Join,
-    Ramp,
-}
-
-#[derive(Clone)]
-struct StateStripPattern {
-    pixels: Vec<[u8; 4]>,
-    width: usize,
-    height: usize,
-    state: StripState,
-}
-
-#[allow(dead_code)]
-fn solve_state_constrained_surface_strip(
-    material: &str,
-    region: &rpu_core::TerrainRegion,
-    classified: &rpu_core::ClassifiedAsciiMap,
-    tile: u32,
-    flat: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    join: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ramp: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let width = flat.width().max(join.width()).max(ramp.width()).max(1);
-    let target_columns = width as usize;
-    let pattern_width = 6usize.min(flat.width().max(1) as usize);
-    if pattern_width < 2 {
-        return None;
-    }
-
-    let states = build_region_surface_states(region, classified, tile, target_columns as u32);
-    let patterns = extract_state_strip_patterns(flat, join, ramp, pattern_width);
-    if patterns.is_empty() {
-        return None;
-    }
-
-    let cells = target_columns
-        .saturating_sub(pattern_width)
-        .saturating_add(1);
-    let mut chosen = Vec::with_capacity(cells);
-
-    for i in 0..cells {
-        let required = required_strip_state(&states, i, pattern_width);
-        let allowed = allowed_state_patterns(&patterns, required, chosen.last().copied());
-        if allowed.is_empty() {
-            return None;
-        }
-        let choice =
-            allowed[hash_material_seed(material, i as u32, width) as usize % allowed.len()];
-        chosen.push(choice);
-    }
-
-    Some(reconstruct_state_strip_image(
-        &patterns,
-        &chosen,
-        target_columns,
-    ))
-}
-
-#[derive(Clone)]
-struct StateWfcPattern {
-    pixels: Vec<[u8; 4]>,
-    state: StripState,
-}
-
-fn solve_state_constrained_surface_strip_2d(
-    material: &str,
-    region: &rpu_core::TerrainRegion,
-    classified: &rpu_core::ClassifiedAsciiMap,
-    tile: u32,
-    flat: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    join: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ramp: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let width = flat.width().max(join.width()).max(ramp.width()).max(1) as usize;
-    let height = flat.height().max(join.height()).max(ramp.height()).max(1) as usize;
-    let n = 4usize.min(width).min(height);
-    if n < 2 {
-        return None;
-    }
-
-    let states = build_region_surface_states(region, classified, tile, width as u32);
-    let patterns = extract_state_wfc_patterns(flat, join, ramp, n);
-    if patterns.is_empty() {
-        return None;
-    }
-    let compat = build_state_wfc_compatibility(&patterns, n);
-    solve_state_wfc_field(material, &states, &patterns, &compat, width, height, n)
-}
-
-fn build_region_surface_states(
-    region: &rpu_core::TerrainRegion,
-    classified: &rpu_core::ClassifiedAsciiMap,
-    tile: u32,
-    width: u32,
-) -> Vec<StripState> {
-    let mut states = vec![StripState::Flat; width.max(1) as usize];
-    for cell in classified
-        .cells
-        .iter()
-        .filter(|cell| cell.region_id == region.id)
-    {
-        let state = match (cell.contour, cell.transition_role) {
-            (rpu_core::TerrainContour::RampUpLeft, _)
-            | (rpu_core::TerrainContour::RampUpRight, _) => StripState::Ramp,
-            (_, rpu_core::TerrainTransitionRole::JoinFromLeft)
-            | (_, rpu_core::TerrainTransitionRole::JoinFromRight)
-            | (_, rpu_core::TerrainTransitionRole::JoinBoth) => StripState::Join,
-            _ => StripState::Flat,
-        };
-        let start = cell
-            .surface_u
-            .saturating_mul(tile)
-            .min(width.saturating_sub(1));
-        let end = (start + tile).min(width);
-        for u in start..end {
-            let idx = u as usize;
-            states[idx] = match (states[idx], state) {
-                (StripState::Ramp, _) | (_, StripState::Ramp) => StripState::Ramp,
-                (StripState::Join, _) | (_, StripState::Join) => StripState::Join,
-                _ => StripState::Flat,
-            };
-        }
-    }
-    states
-}
-
-fn required_strip_state(states: &[StripState], start: usize, width: usize) -> StripState {
-    let center = start + width / 2;
-    states
-        .get(center.min(states.len().saturating_sub(1)))
-        .copied()
-        .unwrap_or(StripState::Flat)
-}
-
-fn extract_state_strip_patterns(
-    flat: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    join: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ramp: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    pattern_width: usize,
-) -> Vec<StateStripPattern> {
-    let mut patterns = Vec::new();
-    patterns.extend(extract_family_patterns(
-        flat,
-        pattern_width,
-        StripState::Flat,
-    ));
-    patterns.extend(extract_family_patterns(
-        join,
-        pattern_width,
-        StripState::Join,
-    ));
-    patterns.extend(extract_family_patterns(
-        ramp,
-        pattern_width,
-        StripState::Ramp,
-    ));
-    patterns
-}
-
-fn extract_family_patterns(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    pattern_width: usize,
-    state: StripState,
-) -> Vec<StateStripPattern> {
-    use std::collections::HashSet;
-    let sw = source.width().max(1) as usize;
-    let sh = source.height().max(1) as usize;
-    let mut seen: HashSet<Vec<[u8; 4]>> = HashSet::new();
-    let mut patterns = Vec::new();
-    for sx in 0..sw {
-        let mut variants = Vec::new();
-        let mut forward = Vec::with_capacity(pattern_width * sh);
-        for y in 0..sh {
-            for x in 0..pattern_width {
-                forward.push(source.get_pixel(((sx + x) % sw) as u32, y as u32).0);
-            }
-        }
-        variants.push(forward);
-
-        let mut mirrored = Vec::with_capacity(pattern_width * sh);
-        for y in 0..sh {
-            for x in 0..pattern_width {
-                mirrored.push(
-                    source
-                        .get_pixel(((sx + (pattern_width - 1 - x)) % sw) as u32, y as u32)
-                        .0,
-                );
-            }
-        }
-        variants.push(mirrored);
-
-        for pixels in variants {
-            if seen.insert(pixels.clone()) {
-                patterns.push(StateStripPattern {
-                    pixels,
-                    width: pattern_width,
-                    height: sh,
-                    state,
-                });
-            }
-        }
-    }
-    patterns
-}
-
-fn allowed_state_patterns(
-    patterns: &[StateStripPattern],
-    required: StripState,
-    previous: Option<usize>,
-) -> Vec<usize> {
-    let mut allowed = Vec::new();
-    for (idx, pattern) in patterns.iter().enumerate() {
-        if pattern.state != required {
-            continue;
-        }
-        if let Some(prev) = previous {
-            if !state_strip_patterns_compatible(&patterns[prev], pattern) {
-                continue;
-            }
-        }
-        allowed.push(idx);
-    }
-    if !allowed.is_empty() {
-        return allowed;
-    }
-    for (idx, pattern) in patterns.iter().enumerate() {
-        let compatible = previous
-            .map(|prev| state_strip_patterns_compatible(&patterns[prev], pattern))
-            .unwrap_or(true);
-        if compatible {
-            allowed.push(idx);
-        }
-    }
-    allowed
-}
-
-fn state_strip_patterns_compatible(left: &StateStripPattern, right: &StateStripPattern) -> bool {
-    for y in 0..left.height {
-        for x in 1..left.width {
-            let li = y * left.width + x;
-            let ri = y * right.width + (x - 1);
-            if left.pixels[li] != right.pixels[ri] {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn reconstruct_state_strip_image(
-    patterns: &[StateStripPattern],
-    chosen: &[usize],
-    target_columns: usize,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let height = patterns[0].height;
-    let mut image =
-        ImageBuffer::from_pixel(target_columns as u32, height as u32, rgba([0, 0, 0, 0]));
-    for y in 0..height {
-        for (i, pattern_idx) in chosen.iter().enumerate() {
-            let pattern = &patterns[*pattern_idx];
-            let x = i;
-            let p = pattern.pixels[y * pattern.width];
-            image.put_pixel(x as u32, y as u32, rgba(p));
-        }
-        let last = &patterns[*chosen.last().unwrap_or(&0)];
-        for extra in 1..last.width {
-            let x = chosen.len().saturating_sub(1) + extra;
-            if x >= target_columns {
-                break;
-            }
-            let p = last.pixels[y * last.width + extra];
-            image.put_pixel(x as u32, y as u32, rgba(p));
-        }
-    }
-    image
-}
-
-fn extract_state_wfc_patterns(
-    flat: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    join: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ramp: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    n: usize,
-) -> Vec<StateWfcPattern> {
-    let mut patterns = Vec::new();
-    patterns.extend(extract_family_wfc_patterns(flat, n, StripState::Flat));
-    patterns.extend(extract_family_wfc_patterns(join, n, StripState::Join));
-    patterns.extend(extract_family_wfc_patterns(ramp, n, StripState::Ramp));
-    patterns
-}
-
-fn extract_family_wfc_patterns(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    n: usize,
-    state: StripState,
-) -> Vec<StateWfcPattern> {
-    use std::collections::HashSet;
-    let sw = source.width().max(1) as usize;
-    let sh = source.height().max(1) as usize;
-    let mut seen: HashSet<Vec<[u8; 4]>> = HashSet::new();
-    let mut patterns = Vec::new();
-    for sy in 0..sh {
-        for sx in 0..sw {
-            let mut variants = Vec::new();
-
-            let mut forward = Vec::with_capacity(n * n);
-            for py in 0..n {
-                for px in 0..n {
-                    forward.push(
-                        source
-                            .get_pixel(((sx + px) % sw) as u32, ((sy + py) % sh) as u32)
-                            .0,
-                    );
-                }
-            }
-            variants.push(forward);
-
-            let mut mirrored = Vec::with_capacity(n * n);
-            for py in 0..n {
-                for px in 0..n {
-                    mirrored.push(
-                        source
-                            .get_pixel(((sx + (n - 1 - px)) % sw) as u32, ((sy + py) % sh) as u32)
-                            .0,
-                    );
-                }
-            }
-            variants.push(mirrored);
-
-            for pixels in variants {
-                if seen.insert(pixels.clone()) {
-                    patterns.push(StateWfcPattern { pixels, state });
-                }
-            }
-        }
-    }
-    patterns
-}
-
-fn build_state_wfc_compatibility(patterns: &[StateWfcPattern], n: usize) -> [Vec<Vec<usize>>; 4] {
-    let mut right = vec![Vec::new(); patterns.len()];
-    let mut left = vec![Vec::new(); patterns.len()];
-    let mut down = vec![Vec::new(); patterns.len()];
-    let mut up = vec![Vec::new(); patterns.len()];
-    for (i, a) in patterns.iter().enumerate() {
-        for (j, b) in patterns.iter().enumerate() {
-            if state_wfc_patterns_compatible_right(a, b, n) {
-                right[i].push(j);
-                left[j].push(i);
-            }
-            if state_wfc_patterns_compatible_down(a, b, n) {
-                down[i].push(j);
-                up[j].push(i);
-            }
-        }
-    }
-    [right, left, down, up]
-}
-
-fn state_wfc_patterns_compatible_right(a: &StateWfcPattern, b: &StateWfcPattern, n: usize) -> bool {
-    for y in 0..n {
-        for x in 1..n {
-            if a.pixels[y * n + x] != b.pixels[y * n + (x - 1)] {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn state_wfc_patterns_compatible_down(a: &StateWfcPattern, b: &StateWfcPattern, n: usize) -> bool {
-    for y in 1..n {
-        for x in 0..n {
-            if a.pixels[y * n + x] != b.pixels[(y - 1) * n + x] {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn solve_state_wfc_field(
-    material: &str,
-    states: &[StripState],
-    patterns: &[StateWfcPattern],
-    compat: &[Vec<Vec<usize>>; 4],
-    width: usize,
-    height: usize,
-    n: usize,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let cells_w = width.saturating_sub(n).saturating_add(1);
-    let cells_h = height.saturating_sub(n).saturating_add(1);
-    let cells = cells_w * cells_h;
-    let pcount = patterns.len();
-    let mut wave = vec![true; cells * pcount];
-    let mut counts = vec![0usize; cells];
-
-    for y in 0..cells_h {
-        for x in 0..cells_w {
-            let idx = y * cells_w + x;
-            let required = required_strip_state(states, x, n);
-            let mut count = 0usize;
-            for p in 0..pcount {
-                let allowed = patterns[p].state == required;
-                wave[idx * pcount + p] = allowed;
-                if allowed {
-                    count += 1;
-                }
-            }
-            if count == 0 {
-                for p in 0..pcount {
-                    wave[idx * pcount + p] = true;
-                }
-                count = pcount;
-            }
-            counts[idx] = count;
-        }
-    }
-
-    loop {
-        let mut best = None;
-        let mut best_count = usize::MAX;
-        for idx in 0..cells {
-            let c = counts[idx];
-            if c > 1 && c < best_count {
-                best_count = c;
-                best = Some(idx);
-            }
-        }
-        let Some(cell_idx) = best else { break };
-        let allowed: Vec<usize> = (0..pcount)
-            .filter(|&p| wave[cell_idx * pcount + p])
-            .collect();
-        if allowed.is_empty() {
-            return None;
-        }
-        let choice = allowed
-            [hash_material_seed(material, cell_idx as u32, width as u32) as usize % allowed.len()];
-        for p in 0..pcount {
-            wave[cell_idx * pcount + p] = p == choice;
-        }
-        counts[cell_idx] = 1;
-        if !propagate_state_wfc(
-            &mut wave,
-            &mut counts,
-            compat,
-            cells_w,
-            cells_h,
-            pcount,
-            cell_idx,
-        ) {
-            return None;
-        }
-    }
-
-    reconstruct_state_wfc_image(patterns, &wave, cells_w, cells_h, n, pcount)
-}
-
-fn propagate_state_wfc(
-    wave: &mut [bool],
-    counts: &mut [usize],
-    compat: &[Vec<Vec<usize>>; 4],
-    width: usize,
-    height: usize,
-    pcount: usize,
-    start_idx: usize,
-) -> bool {
-    use std::collections::VecDeque;
-    let mut queue = VecDeque::new();
-    queue.push_back(start_idx);
-    while let Some(idx) = queue.pop_front() {
-        let x = idx % width;
-        let y = idx / width;
-        let neighbors = [
-            if x + 1 < width {
-                Some((idx + 1, 0usize))
-            } else {
-                None
-            },
-            if x > 0 { Some((idx - 1, 1usize)) } else { None },
-            if y + 1 < height {
-                Some((idx + width, 2usize))
-            } else {
-                None
-            },
-            if y > 0 {
-                Some((idx - width, 3usize))
-            } else {
-                None
-            },
-        ];
-        for neighbor in neighbors.into_iter().flatten() {
-            let (nidx, dir) = neighbor;
-            let mut changed = false;
-            for np in 0..pcount {
-                if !wave[nidx * pcount + np] {
-                    continue;
-                }
-                let mut supported = false;
-                for p in 0..pcount {
-                    if wave[idx * pcount + p] && compat[dir][p].contains(&np) {
-                        supported = true;
-                        break;
-                    }
-                }
-                if !supported {
-                    wave[nidx * pcount + np] = false;
-                    counts[nidx] = counts[nidx].saturating_sub(1);
-                    changed = true;
-                }
-            }
-            if counts[nidx] == 0 {
-                return false;
-            }
-            if changed {
-                queue.push_back(nidx);
-            }
-        }
-    }
-    true
-}
-
-fn reconstruct_state_wfc_image(
-    patterns: &[StateWfcPattern],
-    wave: &[bool],
-    cells_w: usize,
-    cells_h: usize,
-    n: usize,
-    pcount: usize,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let mut chosen = vec![0usize; cells_w * cells_h];
-    for idx in 0..chosen.len() {
-        let Some(pattern_idx) = (0..pcount).find(|&p| wave[idx * pcount + p]) else {
-            return None;
-        };
-        chosen[idx] = pattern_idx;
-    }
-
-    let out_w = cells_w + n.saturating_sub(1);
-    let out_h = cells_h + n.saturating_sub(1);
-    let mut sums = vec![[0u32; 4]; out_w * out_h];
-    let mut counts = vec![0u32; out_w * out_h];
-
-    for y in 0..cells_h {
-        for x in 0..cells_w {
-            let pattern = &patterns[chosen[y * cells_w + x]];
-            for py in 0..n {
-                for px in 0..n {
-                    let ox = x + px;
-                    let oy = y + py;
-                    let idx = oy * out_w + ox;
-                    let pixel = pattern.pixels[py * n + px];
-                    for c in 0..4 {
-                        sums[idx][c] += pixel[c] as u32;
-                    }
-                    counts[idx] += 1;
-                }
-            }
-        }
-    }
-
-    let mut image = ImageBuffer::from_pixel(out_w as u32, out_h as u32, rgba([0, 0, 0, 0]));
-    for y in 0..out_h {
-        for x in 0..out_w {
-            let idx = y * out_w + x;
-            let count = counts[idx].max(1);
-            image.put_pixel(
-                x as u32,
-                y as u32,
-                rgba([
-                    (sums[idx][0] / count) as u8,
-                    (sums[idx][1] / count) as u8,
-                    (sums[idx][2] / count) as u8,
-                    (sums[idx][3] / count) as u8,
-                ]),
-            );
-        }
-    }
-    Some(image)
-}
-
-fn solve_surface_strip_1d(
-    material: &str,
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    width: u32,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let pattern_width = 6usize.min(source.width().max(1) as usize);
-    if pattern_width < 2 {
-        return None;
-    }
-    let patterns = extract_strip_patterns(source, pattern_width);
-    if patterns.is_empty() {
-        return None;
-    }
-    let target_columns = width.max(pattern_width as u32) as usize;
-    let cells = target_columns
-        .saturating_sub(pattern_width)
-        .saturating_add(1);
-    let mut chosen = Vec::with_capacity(cells);
-
-    let start = hash_material_seed(material, width, source.height()) as usize % patterns.len();
-    chosen.push(start);
-    for i in 1..cells {
-        let prev = chosen[i - 1];
-        let compatible = compatible_strip_patterns(&patterns, prev);
-        let pick_from = if compatible.is_empty() {
-            (0..patterns.len()).collect()
-        } else {
-            compatible
-        };
-        let choice =
-            pick_from[hash_material_seed(material, i as u32, width) as usize % pick_from.len()];
-        chosen.push(choice);
-    }
-
-    Some(reconstruct_strip_image(&patterns, &chosen, target_columns))
-}
-
-fn extract_strip_patterns(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    pattern_width: usize,
-) -> Vec<StripPattern> {
-    use std::collections::HashSet;
-    let sw = source.width().max(1) as usize;
-    let sh = source.height().max(1) as usize;
-    let mut seen: HashSet<Vec<[u8; 4]>> = HashSet::new();
-    let mut patterns = Vec::new();
-    for sx in 0..sw {
-        let mut pixels = Vec::with_capacity(pattern_width * sh);
-        for y in 0..sh {
-            for x in 0..pattern_width {
-                pixels.push(source.get_pixel(((sx + x) % sw) as u32, y as u32).0);
-            }
-        }
-        if seen.insert(pixels.clone()) {
-            patterns.push(StripPattern {
-                pixels,
-                width: pattern_width,
-                height: sh,
-            });
-        }
-    }
-    patterns
-}
-
-fn compatible_strip_patterns(patterns: &[StripPattern], left_idx: usize) -> Vec<usize> {
-    let mut out = Vec::new();
-    for (right_idx, right) in patterns.iter().enumerate() {
-        if strip_patterns_compatible(&patterns[left_idx], right) {
-            out.push(right_idx);
-        }
-    }
-    out
-}
-
-fn strip_patterns_compatible(left: &StripPattern, right: &StripPattern) -> bool {
-    for y in 0..left.height {
-        for x in 1..left.width {
-            let li = y * left.width + x;
-            let ri = y * right.width + (x - 1);
-            if left.pixels[li] != right.pixels[ri] {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn reconstruct_strip_image(
-    patterns: &[StripPattern],
-    chosen: &[usize],
-    target_columns: usize,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let height = patterns[0].height;
-    let mut image =
-        ImageBuffer::from_pixel(target_columns as u32, height as u32, rgba([0, 0, 0, 0]));
-    for y in 0..height {
-        for (i, pattern_idx) in chosen.iter().enumerate() {
-            let pattern = &patterns[*pattern_idx];
-            let x = i;
-            let p = pattern.pixels[y * pattern.width];
-            image.put_pixel(x as u32, y as u32, rgba(p));
-        }
-        let last = &patterns[*chosen.last().unwrap_or(&0)];
-        for extra in 1..last.width {
-            let x = chosen.len().saturating_sub(1) + extra;
-            if x >= target_columns {
-                break;
-            }
-            let p = last.pixels[y * last.width + extra];
-            image.put_pixel(x as u32, y as u32, rgba(p));
-        }
-    }
-    image
-}
-
-fn quilt_surface_strip_horizontally(
-    material: &str,
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    width: u32,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let height = source.height().max(1);
-    let patch = 8u32.min(source.width().max(1));
-    let overlap = 3u32.min(patch.saturating_sub(1));
-    let step = patch.saturating_sub(overlap).max(1);
-    let mut field = ImageBuffer::from_pixel(width.max(1), height, rgba([0, 0, 0, 0]));
-    let mut filled = vec![false; (field.width() * field.height()) as usize];
-
-    let max_x = if width > patch { width - patch } else { 0 };
-    let mut bx = 0;
-    while bx <= max_x {
-        let sx = choose_strip_patch_origin(material, source, &field, &filled, bx, patch, overlap);
-        blit_strip_patch(source, &mut field, &mut filled, sx, bx, patch);
-        if bx == max_x {
-            break;
-        }
-        bx = (bx + step).min(max_x);
-    }
-
-    field
-}
-
-fn tile_surface_strip_horizontally(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    width: u32,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let mut field =
-        ImageBuffer::from_pixel(width.max(1), source.height().max(1), rgba([0, 0, 0, 0]));
-    for y in 0..field.height() {
-        for x in 0..field.width() {
-            let p = *source.get_pixel(x % source.width().max(1), y % source.height().max(1));
-            field.put_pixel(x, y, p);
-        }
-    }
-    field
-}
-
-fn choose_strip_patch_origin(
-    material: &str,
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    field: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    filled: &[bool],
-    bx: u32,
-    patch: u32,
-    overlap: u32,
-) -> u32 {
-    let mut best = Vec::new();
-    let mut best_score = u64::MAX;
-    for sx in 0..source.width().max(1) {
-        let score = strip_overlap_score(source, field, filled, sx, bx, patch, overlap);
-        if score < best_score {
-            best_score = score;
-            best.clear();
-            best.push(sx);
-        } else if score == best_score {
-            best.push(sx);
-        }
-    }
-    let choice = hash_material_seed(material, bx, 0) as usize % best.len().max(1);
-    best.get(choice).copied().unwrap_or(0)
-}
-
-fn strip_overlap_score(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    field: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    filled: &[bool],
-    sx: u32,
-    bx: u32,
-    patch: u32,
-    overlap: u32,
-) -> u64 {
-    let mut score = 0u64;
-    if bx == 0 {
-        return score;
-    }
-    for px in 0..patch.min(overlap) {
-        let fx = bx + px;
-        for y in 0..field.height() {
-            let idx = (y * field.width() + fx) as usize;
-            if !filled.get(idx).copied().unwrap_or(false) {
-                continue;
-            }
-            let src = *source.get_pixel(
-                (sx + px) % source.width().max(1),
-                y % source.height().max(1),
-            );
-            let dst = *field.get_pixel(fx, y);
-            score += pixel_distance(src, dst);
-        }
-    }
-    score
-}
-
-fn blit_strip_patch(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    field: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    filled: &mut [bool],
-    sx: u32,
-    bx: u32,
-    patch: u32,
-) {
-    for px in 0..patch {
-        let fx = bx + px;
-        if fx >= field.width() {
-            break;
-        }
-        for y in 0..field.height() {
-            let p = *source.get_pixel(
-                (sx + px) % source.width().max(1),
-                y % source.height().max(1),
-            );
-            field.put_pixel(fx, y, p);
-            let idx = (y * field.width() + fx) as usize;
-            if let Some(slot) = filled.get_mut(idx) {
-                *slot = true;
-            }
-        }
-    }
-}
-
-fn load_material_source(
-    project_root: &Path,
-    material: &str,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let candidates = [
-        project_root.join("assets").join(format!("{material}.png")),
-        project_root
-            .join("assets")
-            .join("terrain")
-            .join(format!("{material}.png")),
-        project_root
-            .join("assets")
-            .join(format!("terrain_{material}.png")),
-    ];
-
-    for candidate in candidates {
-        if !candidate.exists() {
-            continue;
-        }
-        if let Ok(image) = image::open(&candidate) {
-            return Some(image.to_rgba8());
-        }
-    }
-
-    None
-}
-
-#[allow(dead_code)]
-fn sample_material_stack(
-    material_fields: &std::collections::HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
-    cell: &rpu_core::ClassifiedMapCell,
-    u: u32,
-    v: u32,
-) -> Rgba<u8> {
-    let stack = cell
-        .material_key
-        .split('>')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if stack.is_empty() {
-        return rgba([0, 0, 0, 255]);
-    }
-    let start_index = stack
-        .iter()
-        .position(|material| *material == cell.material)
-        .unwrap_or(0);
-    let mut out = rgba([0, 0, 0, 0]);
-    for material in stack[start_index..].iter().rev() {
-        let sample = sample_material_field(material_fields, material, u, v);
-        out = alpha_over(sample, out);
-    }
-    out
-}
-
-fn sample_material_stack_layers<'a>(
-    material_fields: &'a std::collections::HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
-    cell: &'a rpu_core::ClassifiedMapCell,
-    u: u32,
-    v: u32,
-) -> (&'a str, bool) {
-    let stack = cell
-        .material_key
-        .split('>')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if stack.is_empty() {
-        return ("", false);
-    }
-    let start_index = stack
-        .iter()
-        .position(|material| *material == cell.material)
-        .unwrap_or(0);
-    let mut winner = cell.material.as_str();
-    for material in stack[start_index..].iter() {
-        let sample = sample_material_field(material_fields, material, u, v);
-        if sample[3] > 0 {
-            winner = material;
-            break;
-        }
-    }
-    (winner, winner != cell.material)
-}
-
-fn sample_material_field(
-    material_fields: &std::collections::HashMap<String, ImageBuffer<Rgba<u8>, Vec<u8>>>,
-    material: &str,
-    u: u32,
-    v: u32,
-) -> Rgba<u8> {
-    if let Some(image) = material_fields.get(material) {
-        let x = u % image.width().max(1);
-        let y = v % image.height().max(1);
-        return *image.get_pixel(x, y);
-    }
-    sample_material_exemplar(material, u, v)
-}
-
-#[allow(dead_code)]
-fn sample_stack_field(field: &ImageBuffer<Rgba<u8>, Vec<u8>>, u: u32, v: u32) -> Rgba<u8> {
-    let x = u % field.width().max(1);
-    let y = v % field.height().max(1);
-    *field.get_pixel(x, y)
-}
-
-#[allow(dead_code)]
-fn top_material_for_stack(stack_key: &str) -> &str {
-    stack_key
-        .split('>')
-        .map(str::trim)
-        .find(|part| !part.is_empty())
-        .unwrap_or("rock")
-}
-
-#[allow(dead_code)]
-fn body_material_for_cell<'a>(cell: &'a rpu_core::ClassifiedMapCell) -> &'a str {
-    let stack = cell
-        .material_key
-        .split('>')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if stack.is_empty() {
-        return "rock";
-    }
-    if stack.len() == 1 {
-        return stack[0];
-    }
-    let top = stack[0];
-    if cell.material == top {
-        stack.get(1).copied().unwrap_or(top)
-    } else {
-        cell.material.as_str()
-    }
-}
-
-#[allow(dead_code)]
-fn alpha_over(top: Rgba<u8>, bottom: Rgba<u8>) -> Rgba<u8> {
-    let ta = top[3] as f32 / 255.0;
-    let ba = bottom[3] as f32 / 255.0;
-    let out_a = ta + ba * (1.0 - ta);
-    if out_a <= f32::EPSILON {
-        return rgba([0, 0, 0, 0]);
-    }
-    let blend = |tc: u8, bc: u8| -> u8 {
-        (((tc as f32 / 255.0) * ta + (bc as f32 / 255.0) * ba * (1.0 - ta)) / out_a * 255.0)
-            .round()
-            .clamp(0.0, 255.0) as u8
-    };
-    rgba([
-        blend(top[0], bottom[0]),
-        blend(top[1], bottom[1]),
-        blend(top[2], bottom[2]),
-        (out_a * 255.0).round().clamp(0.0, 255.0) as u8,
-    ])
-}
-
-fn lighten_rgba(color: Rgba<u8>, amount: u8) -> Rgba<u8> {
-    rgba([
-        color[0].saturating_add(amount),
-        color[1].saturating_add(amount),
-        color[2].saturating_add(amount),
-        color[3],
-    ])
-}
-
-#[allow(dead_code)]
-fn lerp_rgba(a: Rgba<u8>, b: Rgba<u8>, t: u8) -> Rgba<u8> {
-    let tf = t as f32 / 255.0;
-    let blend = |av: u8, bv: u8| -> u8 {
-        ((av as f32) * (1.0 - tf) + (bv as f32) * tf)
-            .round()
-            .clamp(0.0, 255.0) as u8
-    };
-    rgba([
-        blend(a[0], b[0]),
-        blend(a[1], b[1]),
-        blend(a[2], b[2]),
-        blend(a[3], b[3]),
-    ])
-}
-
-fn surface_height_for_cell(cell: &rpu_core::ClassifiedMapCell, px: u32, tile: u32) -> u32 {
-    let max = tile.saturating_sub(1).max(1);
-    let x = px.min(max);
-    let flat = 0u32;
-    let ramp = match cell.contour {
-        rpu_core::TerrainContour::RampUpRight => max.saturating_sub(x),
-        rpu_core::TerrainContour::RampUpLeft => x,
-        rpu_core::TerrainContour::CapLeft => x / 2,
-        rpu_core::TerrainContour::CapRight => max.saturating_sub(x) / 2,
-        rpu_core::TerrainContour::FlatTop | rpu_core::TerrainContour::None => 0,
-    };
-
-    match cell.transition_role {
-        rpu_core::TerrainTransitionRole::RampUpRight
-        | rpu_core::TerrainTransitionRole::RampUpLeft => ramp,
-        rpu_core::TerrainTransitionRole::JoinFromLeft => max.saturating_sub(x) / 2,
-        rpu_core::TerrainTransitionRole::JoinFromRight => x / 2,
-        rpu_core::TerrainTransitionRole::JoinBoth => x.min(max.saturating_sub(x)) / 2,
-        rpu_core::TerrainTransitionRole::None => flat,
-    }
-}
-
-#[allow(dead_code)]
-fn inward_from_heightfield(cell: &rpu_core::ClassifiedMapCell, px: u32, py: u32, tile: u32) -> u32 {
-    let surface_y = surface_height_for_cell(cell, px, tile);
-    py.saturating_sub(surface_y)
-}
-
-#[allow(dead_code)]
-fn along_surface_projection(tangent: rpu_core::TerrainTangent, px: u32, py: u32, tile: u32) -> u32 {
-    match tangent {
-        rpu_core::TerrainTangent::None => px,
-        rpu_core::TerrainTangent::Right => px,
-        rpu_core::TerrainTangent::Left => tile.saturating_sub(1).saturating_sub(px),
-        rpu_core::TerrainTangent::Down => py,
-        rpu_core::TerrainTangent::Up => tile.saturating_sub(1).saturating_sub(py),
-        rpu_core::TerrainTangent::UpLeft => {
-            (tile.saturating_sub(1).saturating_sub(px) + tile.saturating_sub(1).saturating_sub(py))
-                / 2
-        }
-        rpu_core::TerrainTangent::UpRight => (px + tile.saturating_sub(1).saturating_sub(py)) / 2,
-        rpu_core::TerrainTangent::DownLeft => (tile.saturating_sub(1).saturating_sub(px) + py) / 2,
-        rpu_core::TerrainTangent::DownRight => (px + py) / 2,
-    }
-}
-
-fn region_space_projection_for_cell(
-    cell: &rpu_core::ClassifiedMapCell,
-    region: &rpu_core::TerrainRegion,
-    px: u32,
-    py: u32,
-    tile: u32,
-) -> (u32, u32) {
-    let region_x = (cell.col.saturating_sub(region.min_col) as u32) * tile + px;
-    let local_inward = py.saturating_sub(surface_height_for_cell(cell, px, tile));
-    let inward = cell.boundary_distance * tile + local_inward;
-    (region_x, inward)
-}
-
-fn sample_material_exemplar(material: &str, u: u32, v: u32) -> Rgba<u8> {
-    let (pattern, palette) = material_exemplar(material);
-    let w = pattern[0].len() as u32;
-    let h = pattern.len() as u32;
-    let ix = (u % w) as usize;
-    let iy = (v % h) as usize;
-    rgba(palette[pattern[iy][ix] as usize])
-}
-
-fn builtin_material_image(material: &str) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let (pattern, palette) = material_exemplar(material);
-    let width = pattern[0].len() as u32;
-    let height = pattern.len() as u32;
-    let mut image = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
-    for y in 0..height {
-        for x in 0..width {
-            image.put_pixel(
-                x,
-                y,
-                rgba(palette[pattern[y as usize][x as usize] as usize]),
-            );
-        }
-    }
-    image
-}
-
-#[allow(dead_code)]
-fn quilt_material_field(
-    material: &str,
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    quilt_image_to_size(material, source, 256, 256)
-}
-
-fn quilt_image_to_size(
-    material: &str,
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    width: u32,
-    height: u32,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let patch = 8u32.min(source.width().max(1)).min(source.height().max(1));
-    let overlap = 3u32.min(patch.saturating_sub(1));
-    let step = patch.saturating_sub(overlap).max(1);
-    let mut field = ImageBuffer::from_pixel(width, height, rgba([0, 0, 0, 0]));
-    let mut filled = vec![false; (width * height) as usize];
-
-    let max_x = if width > patch { width - patch } else { 0 };
-    let max_y = if height > patch { height - patch } else { 0 };
-    let mut by = 0;
-    while by <= max_y {
-        let mut bx = 0;
-        while bx <= max_x {
-            let (sx, sy) =
-                choose_patch_origin(material, source, &field, &filled, bx, by, patch, overlap);
-            blit_patch(source, &mut field, &mut filled, sx, sy, bx, by, patch);
-            if bx == max_x {
-                break;
-            }
-            bx = (bx + step).min(max_x);
-        }
-        if by == max_y {
-            break;
-        }
-        by = (by + step).min(max_y);
-    }
-
-    field
-}
-
-#[derive(Clone)]
-#[allow(dead_code)]
-struct WfcPattern {
-    pixels: Vec<[u8; 4]>,
-    band: usize,
-}
-
-#[allow(dead_code)]
-fn wfc_material_field(
-    material: &str,
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let n = 3usize
-        .min(source.width().max(1) as usize)
-        .min(source.height().max(1) as usize);
-    if n == 0 {
-        return None;
-    }
-    let band_count = material
-        .split('>')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .count()
-        .max(1);
-    let band_height = (source.height().max(1) as usize / band_count.max(1)).max(1);
-    let patterns = extract_wfc_patterns(source, n, band_height, band_count);
-    if patterns.is_empty() {
-        return None;
-    }
-    let compat = build_wfc_compatibility(&patterns, n);
-    for salt in 0..2u32 {
-        if let Some(field) =
-            solve_wfc_field(material, &patterns, &compat, n, 48, 48, band_count, salt)
-        {
-            return Some(field);
-        }
-    }
-    None
-}
-
-#[allow(dead_code)]
-fn extract_wfc_patterns(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    n: usize,
-    band_height: usize,
-    band_count: usize,
-) -> Vec<WfcPattern> {
-    use std::collections::HashSet;
-    let mut seen: HashSet<(usize, Vec<[u8; 4]>)> = HashSet::new();
-    let mut patterns = Vec::new();
-    let sw = source.width().max(1) as usize;
-    let sh = source.height().max(1) as usize;
-    for sy in 0..sh {
-        for sx in 0..sw {
-            let band = (sy / band_height).min(band_count.saturating_sub(1));
-            let mut pixels = Vec::with_capacity(n * n);
-            for py in 0..n {
-                for px in 0..n {
-                    let p = source.get_pixel(((sx + px) % sw) as u32, ((sy + py) % sh) as u32);
-                    pixels.push(p.0);
-                }
-            }
-            if seen.insert((band, pixels.clone())) {
-                patterns.push(WfcPattern { pixels, band });
-            }
-        }
-    }
-    patterns
-}
-
-#[allow(dead_code)]
-fn build_wfc_compatibility(patterns: &[WfcPattern], n: usize) -> [Vec<Vec<usize>>; 4] {
-    let mut right = vec![Vec::new(); patterns.len()];
-    let mut left = vec![Vec::new(); patterns.len()];
-    let mut down = vec![Vec::new(); patterns.len()];
-    let mut up = vec![Vec::new(); patterns.len()];
-    for (i, a) in patterns.iter().enumerate() {
-        for (j, b) in patterns.iter().enumerate() {
-            if patterns_compatible_right(a, b, n) {
-                right[i].push(j);
-                left[j].push(i);
-            }
-            if patterns_compatible_down(a, b, n) {
-                down[i].push(j);
-                up[j].push(i);
-            }
-        }
-    }
-    [right, left, down, up]
-}
-
-#[allow(dead_code)]
-fn patterns_compatible_right(a: &WfcPattern, b: &WfcPattern, n: usize) -> bool {
-    for y in 0..n {
-        for x in 1..n {
-            if a.pixels[y * n + x] != b.pixels[y * n + (x - 1)] {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-#[allow(dead_code)]
-fn patterns_compatible_down(a: &WfcPattern, b: &WfcPattern, n: usize) -> bool {
-    for y in 1..n {
-        for x in 0..n {
-            if a.pixels[y * n + x] != b.pixels[(y - 1) * n + x] {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-#[allow(dead_code)]
-fn solve_wfc_field(
-    material: &str,
-    patterns: &[WfcPattern],
-    compat: &[Vec<Vec<usize>>; 4],
-    n: usize,
-    width: usize,
-    height: usize,
-    band_count: usize,
-    salt: u32,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let cells = width * height;
-    let pcount = patterns.len();
-    let mut wave = vec![true; cells * pcount];
-    let mut counts = vec![0usize; cells];
-
-    let band_rows = (height / band_count.max(1)).max(1);
-    for y in 0..height {
-        let target_band = (y / band_rows).min(band_count.saturating_sub(1));
-        for x in 0..width {
-            let idx = y * width + x;
-            let mut count = 0usize;
-            for p in 0..pcount {
-                let allowed = patterns[p].band.abs_diff(target_band) <= 1;
-                wave[idx * pcount + p] = allowed;
-                if allowed {
-                    count += 1;
-                }
-            }
-            if count == 0 {
-                for p in 0..pcount {
-                    let allowed = patterns[p].band == target_band;
-                    wave[idx * pcount + p] = allowed;
-                    if allowed {
-                        count += 1;
-                    }
-                }
-            }
-            if count == 0 {
-                return None;
-            }
-            counts[idx] = count;
-        }
-    }
-
-    loop {
-        let mut best = None;
-        let mut best_count = usize::MAX;
-        for idx in 0..cells {
-            let c = counts[idx];
-            if c > 1 && c < best_count {
-                best_count = c;
-                best = Some(idx);
-            }
-        }
-        let Some(cell_idx) = best else { break };
-        let allowed: Vec<usize> = (0..pcount)
-            .filter(|&p| wave[cell_idx * pcount + p])
-            .collect();
-        if allowed.is_empty() {
-            return None;
-        }
-        let choice =
-            allowed[hash_material_seed(material, cell_idx as u32, salt) as usize % allowed.len()];
-        for p in 0..pcount {
-            wave[cell_idx * pcount + p] = p == choice;
-        }
-        counts[cell_idx] = 1;
-        if !propagate_wfc(
-            &mut wave,
-            &mut counts,
-            compat,
-            width,
-            height,
-            pcount,
-            cell_idx,
-        ) {
-            return None;
-        }
-    }
-
-    reconstruct_wfc_image(patterns, &wave, width, height, n, pcount)
-}
-
-#[allow(dead_code)]
-fn propagate_wfc(
-    wave: &mut [bool],
-    counts: &mut [usize],
-    compat: &[Vec<Vec<usize>>; 4],
-    width: usize,
-    height: usize,
-    pcount: usize,
-    start_idx: usize,
-) -> bool {
-    use std::collections::VecDeque;
-    let mut queue = VecDeque::new();
-    queue.push_back(start_idx);
-    while let Some(idx) = queue.pop_front() {
-        let x = idx % width;
-        let y = idx / width;
-        let neighbors = [
-            if x + 1 < width {
-                Some((idx + 1, 0usize))
-            } else {
-                None
-            },
-            if x > 0 { Some((idx - 1, 1usize)) } else { None },
-            if y + 1 < height {
-                Some((idx + width, 2usize))
-            } else {
-                None
-            },
-            if y > 0 {
-                Some((idx - width, 3usize))
-            } else {
-                None
-            },
-        ];
-        for neighbor in neighbors.into_iter().flatten() {
-            let (nidx, dir) = neighbor;
-            let mut changed = false;
-            for np in 0..pcount {
-                if !wave[nidx * pcount + np] {
-                    continue;
-                }
-                let mut supported = false;
-                for p in 0..pcount {
-                    if wave[idx * pcount + p] && compat[dir][p].contains(&np) {
-                        supported = true;
-                        break;
-                    }
-                }
-                if !supported {
-                    wave[nidx * pcount + np] = false;
-                    counts[nidx] = counts[nidx].saturating_sub(1);
-                    changed = true;
-                }
-            }
-            if counts[nidx] == 0 {
-                return false;
-            }
-            if changed {
-                queue.push_back(nidx);
-            }
-        }
-    }
-    true
-}
-
-#[allow(dead_code)]
-fn reconstruct_wfc_image(
-    patterns: &[WfcPattern],
-    wave: &[bool],
-    width: usize,
-    height: usize,
-    n: usize,
-    pcount: usize,
-) -> Option<ImageBuffer<Rgba<u8>, Vec<u8>>> {
-    let mut chosen = vec![0usize; width * height];
-    for idx in 0..chosen.len() {
-        let Some(pattern_idx) = (0..pcount).find(|&p| wave[idx * pcount + p]) else {
-            return None;
-        };
-        chosen[idx] = pattern_idx;
-    }
-
-    let out_w = width + n.saturating_sub(1);
-    let out_h = height + n.saturating_sub(1);
-    let mut sums = vec![[0u32; 4]; out_w * out_h];
-    let mut counts = vec![0u32; out_w * out_h];
-
-    for y in 0..height {
-        for x in 0..width {
-            let pattern = &patterns[chosen[y * width + x]];
-            for py in 0..n {
-                for px in 0..n {
-                    let ox = x + px;
-                    let oy = y + py;
-                    let idx = oy * out_w + ox;
-                    let pixel = pattern.pixels[py * n + px];
-                    for c in 0..4 {
-                        sums[idx][c] += pixel[c] as u32;
-                    }
-                    counts[idx] += 1;
-                }
-            }
-        }
-    }
-
-    let mut image = ImageBuffer::from_pixel(out_w as u32, out_h as u32, rgba([0, 0, 0, 0]));
-    for y in 0..out_h {
-        for x in 0..out_w {
-            let idx = y * out_w + x;
-            let count = counts[idx].max(1);
-            image.put_pixel(
-                x as u32,
-                y as u32,
-                rgba([
-                    (sums[idx][0] / count) as u8,
-                    (sums[idx][1] / count) as u8,
-                    (sums[idx][2] / count) as u8,
-                    (sums[idx][3] / count) as u8,
-                ]),
-            );
-        }
-    }
-    Some(image)
-}
-
-#[allow(dead_code)]
-fn choose_patch_origin(
-    material: &str,
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    field: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    filled: &[bool],
-    bx: u32,
-    by: u32,
-    patch: u32,
-    overlap: u32,
-) -> (u32, u32) {
-    let mut best = Vec::new();
-    let mut best_score = u64::MAX;
-    for sy in 0..source.height().max(1) {
-        for sx in 0..source.width().max(1) {
-            let score = patch_overlap_score(source, field, filled, sx, sy, bx, by, patch, overlap);
-            if score < best_score {
-                best_score = score;
-                best.clear();
-                best.push((sx, sy));
-            } else if score == best_score {
-                best.push((sx, sy));
-            }
-        }
-    }
-    let choice = hash_material_seed(material, bx, by) as usize % best.len().max(1);
-    best.get(choice).copied().unwrap_or((0, 0))
-}
-
-#[allow(dead_code)]
-fn patch_overlap_score(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    field: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    filled: &[bool],
-    sx: u32,
-    sy: u32,
-    bx: u32,
-    by: u32,
-    patch: u32,
-    overlap: u32,
-) -> u64 {
-    let mut score = 0u64;
-    for py in 0..patch {
-        for px in 0..patch {
-            let in_overlap = (px < overlap && bx > 0) || (py < overlap && by > 0);
-            if !in_overlap {
-                continue;
-            }
-            let fx = bx + px;
-            let fy = by + py;
-            let idx = (fy * field.width() + fx) as usize;
-            if !filled.get(idx).copied().unwrap_or(false) {
-                continue;
-            }
-            let src = *source.get_pixel(
-                sx.wrapping_add(px) % source.width().max(1),
-                sy.wrapping_add(py) % source.height().max(1),
-            );
-            let dst = *field.get_pixel(fx, fy);
-            score += pixel_distance(src, dst);
-        }
-    }
-    score
-}
-
-#[allow(dead_code)]
-fn blit_patch(
-    source: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    field: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-    filled: &mut [bool],
-    sx: u32,
-    sy: u32,
-    bx: u32,
-    by: u32,
-    patch: u32,
-) {
-    for py in 0..patch {
-        for px in 0..patch {
-            let fx = bx + px;
-            let fy = by + py;
-            if fx >= field.width() || fy >= field.height() {
-                continue;
-            }
-            let src = *source.get_pixel(
-                sx.wrapping_add(px) % source.width().max(1),
-                sy.wrapping_add(py) % source.height().max(1),
-            );
-            field.put_pixel(fx, fy, src);
-            let idx = (fy * field.width() + fx) as usize;
-            if let Some(slot) = filled.get_mut(idx) {
-                *slot = true;
-            }
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn pixel_distance(a: Rgba<u8>, b: Rgba<u8>) -> u64 {
-    let dr = a[0] as i32 - b[0] as i32;
-    let dg = a[1] as i32 - b[1] as i32;
-    let db = a[2] as i32 - b[2] as i32;
-    let da = a[3] as i32 - b[3] as i32;
-    (dr * dr + dg * dg + db * db + da * da) as u64
-}
-
-#[allow(dead_code)]
-fn hash_material_seed(material: &str, x: u32, y: u32) -> u32 {
-    let mut hash = 2166136261u32;
-    for byte in material.bytes() {
-        hash = hash.wrapping_mul(16777619) ^ byte as u32;
-    }
-    hash ^ x.wrapping_mul(0x9e3779b1) ^ y.wrapping_mul(0x85ebca6b)
-}
-
-fn material_exemplar(material: &str) -> (&'static [[u8; 8]; 8], &'static [[u8; 4]; 4]) {
-    match material {
-        "grass" => (&GRASS_PATTERN, &GRASS_PALETTE),
-        "dirt" => (&DIRT_PATTERN, &DIRT_PALETTE),
-        "rock" => (&ROCK_PATTERN, &ROCK_PALETTE),
-        _ => (&ROCK_PATTERN, &ROCK_PALETTE),
-    }
-}
-
-const GRASS_PATTERN: [[u8; 8]; 8] = [
-    [0, 1, 0, 2, 0, 1, 0, 2],
-    [1, 2, 1, 3, 1, 2, 1, 3],
-    [0, 1, 0, 2, 0, 1, 0, 2],
-    [1, 3, 1, 2, 1, 3, 1, 2],
-    [0, 1, 0, 2, 0, 1, 0, 2],
-    [1, 2, 1, 3, 1, 2, 1, 3],
-    [0, 1, 0, 2, 0, 1, 0, 2],
-    [1, 3, 1, 2, 1, 3, 1, 2],
-];
-
-const DIRT_PATTERN: [[u8; 8]; 8] = [
-    [0, 1, 1, 0, 2, 1, 0, 1],
-    [1, 2, 0, 1, 1, 0, 2, 1],
-    [0, 1, 3, 1, 0, 1, 1, 0],
-    [1, 0, 1, 2, 1, 3, 0, 1],
-    [2, 1, 0, 1, 0, 1, 2, 0],
-    [1, 0, 1, 3, 1, 0, 1, 2],
-    [0, 2, 1, 0, 1, 2, 0, 1],
-    [1, 1, 0, 2, 0, 1, 3, 0],
-];
-
-const ROCK_PATTERN: [[u8; 8]; 8] = [
-    [1, 0, 1, 0, 2, 0, 1, 0],
-    [0, 2, 0, 1, 0, 1, 0, 2],
-    [1, 0, 3, 0, 1, 0, 2, 0],
-    [0, 1, 0, 2, 0, 3, 0, 1],
-    [2, 0, 1, 0, 2, 0, 1, 0],
-    [0, 1, 0, 3, 0, 2, 0, 1],
-    [1, 0, 2, 0, 1, 0, 3, 0],
-    [0, 2, 0, 1, 0, 1, 0, 2],
-];
-
-const GRASS_PALETTE: [[u8; 4]; 4] = [
-    [66, 134, 58, 255],
-    [88, 178, 82, 255],
-    [118, 212, 103, 255],
-    [174, 238, 144, 255],
-];
-
-const DIRT_PALETTE: [[u8; 4]; 4] = [
-    [88, 54, 32, 255],
-    [122, 78, 48, 255],
-    [158, 106, 64, 255],
-    [194, 142, 86, 255],
-];
-
-const ROCK_PALETTE: [[u8; 4]; 4] = [
-    [62, 68, 86, 255],
-    [92, 102, 120, 255],
-    [124, 134, 152, 255],
-    [168, 176, 188, 255],
-];
-
-fn surface_u_rgba(surface_u: u32, loop_len: usize) -> Rgba<u8> {
-    if loop_len <= 1 {
-        return rgba([245, 245, 245, 255]);
-    }
-    let t = surface_u as f32 / (loop_len.saturating_sub(1) as f32).max(1.0);
-    let r = (100.0 + 155.0 * (t * std::f32::consts::TAU).cos().abs()) as u8;
-    let g = (80.0 + 175.0 * ((t + 0.33) * std::f32::consts::TAU).sin().abs()) as u8;
-    let b = (80.0 + 175.0 * ((t + 0.66) * std::f32::consts::TAU).sin().abs()) as u8;
-    rgba([r, g, b, 255])
-}
-
-fn region_color_rgba(region_id: usize) -> Rgba<u8> {
-    let hash = (region_id as u32).wrapping_mul(0x9e3779b1);
-    let r = 60 + (hash & 0x9f) as u8;
-    let g = 60 + ((hash >> 8) & 0x9f) as u8;
-    let b = 60 + ((hash >> 16) & 0x9f) as u8;
-    rgba([r, g, b, 255])
-}
-
-fn region_outline_rgba(region_id: usize) -> Rgba<u8> {
-    let hash = (region_id as u32).wrapping_mul(0x85ebca6b);
-    let r = 140 + (hash & 0x5f) as u8;
-    let g = 140 + ((hash >> 8) & 0x5f) as u8;
-    let b = 140 + ((hash >> 16) & 0x5f) as u8;
-    rgba([r, g, b, 255])
-}
-
-fn rgba(bytes: [u8; 4]) -> Rgba<u8> {
-    Rgba(bytes)
-}
-
-fn sanitize_debug_name(name: &str) -> String {
-    let mut output = String::with_capacity(name.len());
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            output.push(ch.to_ascii_lowercase());
-        } else if !output.ends_with('_') {
-            output.push('_');
-        }
-    }
-    output.trim_matches('_').to_string()
-}
-
-fn terrain_debug_readme() -> String {
-    r#"RPU Terrain Debug Output
-
-Files:
-
-- direct texture or color maps always get *__layout.png
-- shape maps always get *__shape_layout.png
-- terrain maps additionally get terrain analysis files
-- synth files are only written for `render = synth`
-
-- *__layout.png
-  Camera-space map layout preview with direct tiles, inferred top collision edges, and visible sprite/rect spawn boxes.
-- *__shape_layout.png
-  Camera-space shape-map preview with scene rects, walls, bumpers, point markers, and point labels.
-- *_terrain.png
-  Per-cell shape classification debug image.
-- *__tangents.png
-  Per-cell tangent debug image.
-- *__materials.png
-  Resolved material-layer debug image.
-- *__synth.png
-  First build-time synthesized terrain preview. Only written for maps with `render = synth`.
-- *__synth_layers.png
-  Per-pixel winning material layer in the synth preview. Only written for maps with `render = synth`.
-- *__transitions.png
-  Surface-coordinate transition debug image.
-- *__bands.png
-  Boundary-distance and depth-band debug image.
-- *__regions.png
-  Connected terrain-region debug image.
-- *__loops.png
-  Ordered region-boundary loop debug image.
-- *__contours.png
-  Per-cell interpreted surface contour debug image.
-- *__influences.png
-  Ramp and plateau-join influence debug image.
-- *__heightfield.png
-  Per-cell local contour heightfield debug image.
-- *__fragments.png
-  Per-pixel terrain fragment mask debug image.
-
-In *__layout.png:
-
-- background = scene camera background color
-- direct texture map cells are drawn with their tile textures
-- direct color map cells are drawn with their legend colors
-- yellow horizontal lines = solid top collision surfaces
-- orange horizontal lines = one-way top collision surfaces
-- magenta outlines = visible sprite spawn/collision boxes
-- green outlines = custom sprite collider boxes
-- red outlines = visible rect boxes
-
-In *__shape_layout.png:
-
-- background = scene camera background color
-- solid filled rects = visible scene rects
-- thick colored lines = declared shape-map walls
-- filled circles = declared shape-map bumpers
-- dark squares = declared shape-map points
-- yellow letters = source map point labels
-
-In *_terrain.png:
-
-- fill color = derived terrain shape
-- small inner accent = material identity
-- center marker = edge style
-- bright edge strokes = exposed sides
-- white arrow = coarse surface normal
-
-Shape colors:
-
-- bright cyan = TopLeftOuter
-- blue-cyan = TopRightOuter
-- green = Top
-- orange = Left
-- darker orange = Right
-- magenta = Bottom
-- pink-purple = BottomLeftOuter
-- violet = BottomRightOuter
-- dark blue = Interior
-- red = Isolated
-- pale green / pale red shades = inner-corner classes
-
-Exposed side strokes:
-
-- bright top edge = exposed top
-- bright bottom edge = exposed bottom
-- bright left edge = exposed left
-- bright right edge = exposed right
-
-Center style markers:
-
-- square dot = Square
-- rounded cross = Round
-- diagonal slash = Diagonal
-
-Normal arrows:
-
-- up / down / left / right = single exposed side
-- diagonal arrows = exposed corner direction
-- normals are coarse, discrete debug directions for now
-
-In *__regions.png:
-
-- each connected terrain region gets its own color
-- outline color distinguishes region borders
-- grouping is currently based on:
-  - same material
-  - 4-neighbor connectivity
-
-In *__tangents.png:
-
-- fill color = derived terrain shape
-- cyan arrow = coarse tangent direction
-
-In *__materials.png:
-
-- fill color = resolved effective material layer
-- dark inner accent = shape
-- bottom bar length = boundary distance
-- top-facing and diagonal outer surfaces keep the top material
-- side and bottom outer surfaces fall back to the next material
-
-In *__synth.png:
-
-- coherent preview generated from source textures when available
-- sampling follows:
-  - `surface_u` along the region boundary loop
-  - `boundary_distance` inward from the surface
-- source texture lookup order:
-  - `assets/<material>.png`
-  - `assets/terrain/<material>.png`
-  - `assets/terrain_<material>.png`
-- if no source texture is found, built-in material exemplars are used
-- this is the first synthesis prototype, not final WFC
-
-In *__synth_layers.png:
-
-- fill color = material layer that actually wins the per-pixel composite
-- top stripe = resolved material for that cell
-- brightened pixels = winner differs from the cell's resolved material
-- use this to inspect where a cap texture is transparent and deeper layers show through
-
-In *__transitions.png:
-
-- fill color = resolved effective material layer
-- top stripe color = `surface_u` position along the region boundary loop
-- bottom bar length = `boundary_distance`
-
-In *__bands.png:
-
-- red = Edge
-- amber = NearSurface
-- blue = Interior
-- deep blue = DeepInterior
-- bottom bar length = boundary distance
-
-In *__loops.png:
-
-- region fill colors match *__regions.png
-- white lines connect each region's ordered boundary loop
-- this is the current deterministic perimeter traversal order
-
-In *__contours.png:
-
-- fill color = derived terrain shape
-- bright edge strokes = exposed sides
-- white contour line = interpreted local surface profile
-- use this to check whether flats and diagonals form a coherent top contour
-
-In *__influences.png:
-
-- dark fill = no special transition influence
-- purple fill = ramp body
-- green fill = plateau cell influenced by a neighboring ramp
-- olive fill = influenced from both sides
-- white contour line = local contour
-- use this to inspect which plateau cells participate in a ramp connection
-
-In *__heightfield.png:
-
-- grayscale fill = local surface height inside the tile
-- white profile line = sampled contour height across the tile width
-- this is the current field used to derive inward depth for synthesis
-
-In *__fragments.png:
-
-- dark = empty/air
-- brown = body fill
-- green = flat cap fragment
-- cyan = ramp cap fragment
-- yellow = plateau join cap fragment
-- use this to inspect whether one tile needs multiple visual roles
-"#
-    .to_string()
 }

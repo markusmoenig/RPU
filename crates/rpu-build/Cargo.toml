@@ -2,10 +2,13 @@
 name = "rpu-build"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 image.workspace = true
 rpu-core = { path = "../rpu-core" }
 rpu-runtime = { path = "../rpu-runtime" }
+rpu-wasm = { path = "../rpu-wasm" }
 tiny_http = "0.12"
+toml.workspace = true

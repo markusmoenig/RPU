@@ -1,0 +1,19 @@
+[project]
+name = "hello_with_module"
+version = "0.1.0"
+kind = "cli"
+
+[build]
+language = "c"
+backend = "wasm"
+
+[requires]
+system = true
+graphics = false
+audio = false
+network = false
+
+[[modules]]
+name = "hello_module"
+backend = "wasm"
+path = "modules/hello_module.wasm"

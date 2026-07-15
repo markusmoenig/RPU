@@ -1,0 +1,24 @@
+[package]
+name = "rpu-graphics"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+
+[features]
+wasm-host = ["dep:wasmer"]
+
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+fontdue.workspace = true
+image.workspace = true
+pollster.workspace = true
+rpu-core = { path = "../rpu-core" }
+wgpu.workspace = true
+wasmer = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { workspace = true, features = ["HtmlCanvasElement"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "tvos"), not(target_os = "ios")))'.dependencies]
+winit.workspace = true

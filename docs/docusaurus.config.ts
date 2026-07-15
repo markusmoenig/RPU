@@ -5,7 +5,7 @@ import rehypeTreeSitterRpu from './src/rehype/rehypeTreeSitterRpu';
 
 const config: Config = {
   title: 'RPU',
-  tagline: 'The Game Language. Build. Run. Everywhere.',
+  tagline: 'A tiny creative computer for portable cartridges.',
   favicon: 'img/favicon.png',
   future: {
     v4: true,
@@ -64,6 +64,7 @@ const config: Config = {
       },
       items: [
         {to: '/getting-started', label: 'Docs', position: 'left'},
+        {to: '/concept', label: 'Concept', position: 'left'},
         {to: '/examples', label: 'Examples', position: 'left'},
         {
           type: 'html',
@@ -97,8 +98,9 @@ const config: Config = {
           title: 'Docs',
           items: [
             {label: 'Getting Started', to: '/getting-started'},
-            {label: 'Scenes', to: '/scenes'},
-            {label: 'Scripts', to: '/scripts'},
+            {label: 'Concept', to: '/concept'},
+            {label: 'Cartridges', to: '/cartridges'},
+            {label: 'System API', to: '/system-api'},
           ],
         },
       ],

@@ -1,0 +1,14 @@
+[project]
+name = "hello_module"
+version = "0.1.0"
+kind = "module"
+
+[build]
+language = "c"
+backend = "wasm"
+
+[requires]
+system = true
+graphics = false
+audio = false
+network = false

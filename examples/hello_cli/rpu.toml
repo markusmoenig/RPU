@@ -1,0 +1,14 @@
+[project]
+name = "hello_cli"
+version = "0.1.0"
+kind = "cli"
+
+[build]
+language = "rpu"
+backend = "bytecode"
+
+[requires]
+system = true
+graphics = false
+audio = false
+network = false
